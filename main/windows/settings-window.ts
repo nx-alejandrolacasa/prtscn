@@ -1,25 +1,28 @@
-import { BrowserWindow, logger } from "@glaze/core/backend";
+import { app, BrowserWindow, logger } from "@glaze/core/backend";
 import { getPreloadPath, getWindowUrl } from "./window-paths.js";
 
 let settingsWindow: BrowserWindow | null = null;
 
 export async function openSettingsWindow(): Promise<void> {
-  // If window exists and is not destroyed, just show it
   if (settingsWindow && !settingsWindow.isDestroyed()) {
     logger.debug("settings", "Settings window already exists, showing it");
     settingsWindow.show();
+    settingsWindow.focus();
     return;
   }
 
   logger.info("settings", "Creating settings window");
 
+  // Show dock icon while the settings window is open (accessory app pattern)
+  app.dock.show();
+
   settingsWindow = new BrowserWindow({
     windowKey: "settings",
-    width: 520,
-    height: 300,
-    minWidth: 400,
-    minHeight: 200,
-    title: "Settings",
+    width: 560,
+    height: 640,
+    minWidth: 460,
+    minHeight: 520,
+    title: "PrtScn Settings",
     show: false,
     center: true,
     webPreferences: {
@@ -33,6 +36,8 @@ export async function openSettingsWindow(): Promise<void> {
 
   settingsWindow.on("closed", () => {
     settingsWindow = null;
+    // Hide dock icon once settings is closed
+    app.dock.hide();
   });
 
   const url = await getWindowUrl("settings-window.html");
@@ -42,5 +47,5 @@ export async function openSettingsWindow(): Promise<void> {
 }
 
 export function getSettingsWindow(): BrowserWindow | null {
-  return settingsWindow;
+  return settingsWindow && !settingsWindow.isDestroyed() ? settingsWindow : null;
 }

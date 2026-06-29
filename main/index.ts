@@ -1,33 +1,27 @@
-// Main process entry point - Node.js backend for Glaze app
+// Main process entry point - Node.js backend for PrtScn menu-bar app
 //
 // The glaze CLI runtime automatically handles all framework wiring (IPC server,
 // native bridge, lifecycle, signal handlers) before this file runs.
-// This entry point uses only APIs.
+// This entry point uses only public @glaze/core/backend APIs.
 
-import * as fs from "fs";
-import * as path from "path";
-import { fileURLToPath } from "url";
-
-import { app, BrowserWindow, Menu, logger, initDevToolsButtonState } from "@glaze/core/backend";
+import {
+  app,
+  Menu,
+  Tray,
+  globalShortcut,
+  screen,
+  logger,
+  initDevToolsButtonState,
+} from "@glaze/core/backend";
 
 import { registerHandlers } from "./handlers/index.js";
-import { getPreloadPath, getWindowUrl } from "./windows/window-paths.js";
+import { setTrayRebuildCallback, setShortcutRegisterCallback } from "./handlers/settings.js";
 import { openSettingsWindow } from "./windows/settings-window.js";
-
-// Get directory paths
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// ── IPC Handlers ──────────────────────────────────────────────────────
-// ipcMain is already wired to the IPC server by the runtime bootstrap.
-registerHandlers();
+import { showPreview } from "./windows/preview-window.js";
+import { settingsStore, type CaptureMode, type Shortcuts } from "./services/settings-store.js";
+import { captureScreenshot } from "./services/screenshot-service.js";
 
 // ── Dev-only parity harness ───────────────────────────────────────────
-// The parity autotest lives in main/dev/, which is excluded from scaffolded
-// apps. The build (build-backend) defines GLAZE_DEV_HARNESS="1" only when that
-// directory is present, so esbuild dead-code-eliminates this block — and never
-// resolves the missing module — for user apps. A no-op unless a scenario env var
-// is set even in the template.
 type DevHarness = {
   applyParityScenarioStartup(): void;
   runParityAutotestIfRequested(): Promise<void>;
@@ -40,101 +34,112 @@ if (process.env.GLAZE_DEV_HARNESS === "1") {
 }
 
 // ── State ─────────────────────────────────────────────────────────────
-let mainWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
 
-// ── Window creation ───────────────────────────────────────────────────
-async function createMainWindow() {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    logger.debug("main", "Main window already exists, skipping creation");
+// ── IPC Handlers ──────────────────────────────────────────────────────
+registerHandlers();
+
+// ── Capture trigger ───────────────────────────────────────────────────
+async function triggerCapture(mode: CaptureMode): Promise<void> {
+  logger.info("main", `[screenshot:capture] triggered`, { mode });
+
+  const payload = await captureScreenshot(mode);
+  if (!payload) {
+    // User cancelled — do nothing
     return;
   }
 
-  // Read display name from package.json
-  // In production: __dirname = build/main, package.json is at ../../package.json
-  const packageJsonPath = path.join(__dirname, "..", "..", "package.json");
+  // Read cursor AFTER capture so the preview anchors to where the selection
+  // finished (region/window are interactive and move the cursor).
+  const cursor = screen.getCursorScreenPoint();
+  await showPreview(payload, cursor.x, cursor.y);
+}
 
-  const minWindowWidth = 390;
-  const minWindowHeight = 456;
-  const windowWidth = 1000;
-  const windowHeight = 700;
-  let windowTitle = "Glaze App";
+// ── Global Shortcuts ──────────────────────────────────────────────────
+/**
+ * Unregister any shortcuts for the given accelerators and re-register them.
+ * Returns the list of modes whose registration failed.
+ */
+async function applyShortcuts(shortcuts: Shortcuts): Promise<CaptureMode[]> {
+  const modes: CaptureMode[] = ["region", "window", "fullScreen"];
+  const failures: CaptureMode[] = [];
 
-  try {
-    if (fs.existsSync(packageJsonPath)) {
-      const packageJson = JSON.parse(await fs.promises.readFile(packageJsonPath, "utf-8"));
-      windowTitle = packageJson.productName || packageJson.appConfig?.displayName || windowTitle;
+  // Unregister all existing shortcuts first
+  globalShortcut.unregisterAll();
+
+  for (const mode of modes) {
+    const accelerator = shortcuts[mode];
+    const ok = await globalShortcut.register(accelerator, () => {
+      triggerCapture(mode).catch((err) => {
+        logger.error("main", `Error during capture (${mode})`, err);
+      });
+    });
+    if (!ok) {
+      logger.warn("main", `[settings:setShortcuts] failed to register shortcut`, {
+        mode,
+        accelerator,
+      });
+      failures.push(mode);
+    } else {
+      logger.info("main", "Registered global shortcut", { mode, accelerator });
     }
-  } catch {
-    // Use defaults
   }
 
-  // Create main window
-  const browserWindowStartTime = Date.now();
-  logger.info("main", "⏱️ [COLD_START] Creating BrowserWindow", {
-    timestamp: new Date().toISOString(),
-  });
+  return failures;
+}
 
-  mainWindow = new BrowserWindow({
-    windowKey: "main", // Stable key for frame persistence
-    width: windowWidth,
-    height: windowHeight,
-    minWidth: minWindowWidth,
-    minHeight: minWindowHeight,
-    title: windowTitle,
-    show: false, // Don't show until WebView is ready (prevents flickering)
-    webPreferences: {
-      preload: getPreloadPath(),
+// ── Tray ──────────────────────────────────────────────────────────────
+function buildTrayMenu(): void {
+  if (!tray) return;
+  const settings = settingsStore.get();
+  const { shortcuts } = settings;
+
+  const menu = Menu.buildFromTemplate([
+    {
+      label: "Capture Region",
+      icon: "viewfinder",
+      accelerator: shortcuts.region,
+      click: () => triggerCapture("region").catch((err) => logger.error("main", "Capture error", err)),
     },
-  });
+    {
+      label: "Capture Window",
+      icon: "macwindow",
+      accelerator: shortcuts.window,
+      click: () => triggerCapture("window").catch((err) => logger.error("main", "Capture error", err)),
+    },
+    {
+      label: "Capture Full Screen",
+      icon: "display",
+      accelerator: shortcuts.fullScreen,
+      click: () => triggerCapture("fullScreen").catch((err) => logger.error("main", "Capture error", err)),
+    },
+    { type: "separator" },
+    {
+      label: "Settings…",
+      icon: "gearshape",
+      accelerator: "Command+,",
+      click: () => openSettingsWindow().catch((err) => logger.error("main", "Settings open error", err)),
+    },
+    { type: "separator" },
+    { label: "Quit PrtScn", role: "quit", icon: "power" },
+  ]);
 
-  const browserWindowEndTime = Date.now();
-  logger.info("main", "⏱️ [COLD_START] BrowserWindow constructor completed", {
-    timestamp: new Date().toISOString(),
-    duration_ms: browserWindowEndTime - browserWindowStartTime,
-  });
+  tray.setContextMenu(menu);
+}
 
-  // Wait for ready-to-show event before showing window (prevents flickering)
-  mainWindow.once("ready-to-show", () => {
-    const showStartTime = Date.now();
-    logger.info("main", "⏱️ [COLD_START] ready-to-show event received, showing window", {
-      timestamp: new Date().toISOString(),
-    });
-
-    mainWindow?.show();
-
-    const showEndTime = Date.now();
-    logger.info("main", "⏱️ [COLD_START] Window shown", {
-      timestamp: new Date().toISOString(),
-      duration_ms: showEndTime - showStartTime,
-    });
-  });
-
-  // Determine URL to load (dev server preferred, fallback to build files)
-  const url = await getWindowUrl("main-window.html");
-  logger.info("main", "Resolved main window URL", { url });
-
-  // Load URL - window will be shown automatically when ready-to-show fires
-  const loadURLStartTime = Date.now();
-  logger.info("main", "⏱️ [COLD_START] Loading URL in window", {
-    timestamp: new Date().toISOString(),
-    url,
-  });
-
-  await mainWindow.loadURL(url);
-
-  const loadURLEndTime = Date.now();
-  logger.info("main", "⏱️ [COLD_START] URL loaded in window (waiting for ready-to-show)", {
-    timestamp: new Date().toISOString(),
-    duration_ms: loadURLEndTime - loadURLStartTime,
-  });
+function createTray(): void {
+  tray = new Tray("camera.viewfinder");
+  tray.setToolTip("PrtScn");
+  buildTrayMenu();
+  logger.info("main", "Tray created");
 }
 
 // ── Application menu ──────────────────────────────────────────────────
-async function setupApplicationMenu() {
+async function setupApplicationMenu(): Promise<void> {
   await initDevToolsButtonState();
   const menu = Menu.buildFromTemplate([
     {
-      label: "App",
+      label: "PrtScn",
       submenu: [
         { role: "about" },
         { type: "separator" },
@@ -154,45 +159,29 @@ async function setupApplicationMenu() {
         { role: "quit" },
       ],
     },
-    { role: "fileMenu" },
     { role: "editMenu" },
     { role: "viewMenu" },
     { role: "windowMenu" },
   ]);
   Menu.setApplicationMenu(menu);
-  logger.info("main", "Application menu configured with Settings");
+  logger.info("main", "Application menu configured");
 }
 
 // ── Lifecycle events ──────────────────────────────────────────────────
 app.on("window-all-closed", () => {
-  // On macOS, apps typically don't quit when all windows are closed
-  // Uncomment to quit on all windows closed:
-  // app.quit();
+  // Menu-bar app — do not quit when all windows are closed
 });
 
-app.on("activate", (hasVisibleWindows) => {
-  logger.info("main", "App activate event received", {
-    hasVisibleWindows,
-    mainWindowExists: !!mainWindow,
-    mainWindowDestroyed: mainWindow?.isDestroyed() ?? true,
-  });
-
-  // On macOS, re-create window when dock icon clicked if no windows
-  if (!hasVisibleWindows) {
-    if (!mainWindow || mainWindow.isDestroyed()) {
-      logger.info("main", "Creating main window due to activate event");
-      createMainWindow();
-    } else {
-      logger.info("main", "Showing existing main window");
-      mainWindow.show();
-    }
-  } else {
-    logger.info("main", "Has visible windows, no action needed");
-  }
+app.on("activate", () => {
+  // Menu-bar app — keep dock hidden on re-activate
+  app.dock.hide();
 });
 
-app.on("before-quit", () => {
-  logger.info("main", "App before-quit, cleaning up...");
+app.on("will-quit", () => {
+  logger.info("main", "App will-quit: unregistering shortcuts and destroying tray");
+  globalShortcut.unregisterAll();
+  tray?.destroy();
+  tray = null;
 });
 
 // ── App ready ─────────────────────────────────────────────────────────
@@ -201,26 +190,38 @@ logger.info("main", "⏱️ [COLD_START] Waiting for app ready...", {
   timestamp: new Date().toISOString(),
 });
 
+// Wire callbacks before app ready so settings handlers can call them
+setTrayRebuildCallback(() => buildTrayMenu());
+setShortcutRegisterCallback((shortcuts) => applyShortcuts(shortcuts));
+
 app.whenReady().then(async () => {
-  const windowCreateStartTime = Date.now();
-  logger.info("main", "⏱️ [COLD_START] App ready, creating main window", {
+  logger.info("main", "⏱️ [COLD_START] App ready", {
     timestamp: new Date().toISOString(),
-    wait_duration_ms: windowCreateStartTime - startTime,
+    wait_duration_ms: Date.now() - startTime,
   });
 
   await devHarness?.runParityAutotestIfRequested();
 
+  // Load settings first (needed before tray labels and shortcut registration)
+  const isFirstLaunch = !(await settingsStore.load());
+  const settings = settingsStore.get();
+
+  // Apply launch-at-login from persisted setting
+  app.setLoginItemSettings({ openAtLogin: settings.launchAtLogin });
+
   await setupApplicationMenu();
 
-  createMainWindow()
-    .then(() => {
-      const windowCreateEndTime = Date.now();
-      logger.info("main", "⏱️ [COLD_START] Main window created successfully", {
-        timestamp: new Date().toISOString(),
-        duration_ms: windowCreateEndTime - windowCreateStartTime,
-      });
-    })
-    .catch((error) => {
-      logger.error("main", "Failed to create main window", error);
-    });
+  // Register global shortcuts
+  await applyShortcuts(settings.shortcuts);
+
+  // Create tray
+  createTray();
+
+  // On first launch open settings so the user can configure
+  if (isFirstLaunch) {
+    logger.info("main", "First launch detected — opening settings window");
+    await openSettingsWindow();
+  }
+
+  logger.info("main", "PrtScn ready");
 });

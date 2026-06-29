@@ -7,6 +7,11 @@
   "iconDescription": "A macOS screenshot utility that captures portions of the screen, windows, or entire displays and instantly shows a preview popup next to the cursor with options to save, copy, or edit. The app features customizable keyboard shortcuts and launch-on-login settings. Think of a vintage beige keyboard key with 'PrtScn' embossed on it, or a classic computer key from retro computing era. Aesthetic: vintage, retro, nostalgic.",
   "private": true,
   "type": "module",
+  "appConfig": {
+    "macOS": {
+      "activationPolicy": "accessory"
+    }
+  },
   "scripts": {
     "build": "node glaze.ts build",
     "dev": "node glaze.ts dev",
@@ -60,6 +65,7 @@
     "lastMigration": "cli-js-entry",
     "host": {
       "minVersion": "0.7.0.0"
-    }
+    },
+    "updatedAt": 1782722019080
   }
 }
