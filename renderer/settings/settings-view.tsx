@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import { X } from "lucide-react";
 import {
   Label,
   RadioGroup,
@@ -6,7 +7,6 @@ import {
   ScrollArea,
   Toolbar,
   ToolbarContent,
-  ToolbarTitle,
   Field,
   FieldContent,
   FieldGroup,
@@ -20,8 +20,14 @@ import {
   SelectContent,
   SelectItem,
   Text,
+  TabsRoot,
+  Tabs,
+  TabsTrigger,
+  TabsSeparator,
+  TabsContent,
   toast,
 } from "@glaze/core/components";
+import { cn } from "@glaze/core/utils";
 import type { NativeThemeInfo } from "@glaze/core/ipc";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -40,6 +46,14 @@ interface AppSettings {
   launchAtLogin: boolean;
   previewTimeout: number;
 }
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const DEFAULT_SHORTCUTS: AppShortcuts = {
+  region: "Command+Alt+1",
+  window: "Command+Alt+2",
+  fullScreen: "Command+Alt+3",
+};
 
 // ─── Keyboard helpers ─────────────────────────────────────────────────────────
 
@@ -138,9 +152,10 @@ interface ShortcutRecorderProps {
 
 function ShortcutRecorder({ value, onChange, disabled }: ShortcutRecorderProps) {
   const [recording, setRecording] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
       if (!recording) return;
       e.preventDefault();
       e.stopPropagation();
@@ -153,14 +168,25 @@ function ShortcutRecorder({ value, onChange, disabled }: ShortcutRecorderProps) 
     [recording, onChange],
   );
 
-  const handleBlur = useCallback(() => {
-    setRecording(false);
+  const handleBlur = useCallback((e: React.FocusEvent<HTMLDivElement>) => {
+    if (!containerRef.current?.contains(e.relatedTarget as Node)) {
+      setRecording(false);
+    }
   }, []);
 
-  const handleClick = useCallback(() => {
+  const handleContainerClick = useCallback(() => {
     if (disabled) return;
     setRecording((r) => !r);
   }, [disabled]);
+
+  const handleClear = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      onChange("");
+      setRecording(false);
+    },
+    [onChange],
+  );
 
   const displayText = recording
     ? "Press shortcut…"
@@ -169,43 +195,53 @@ function ShortcutRecorder({ value, onChange, disabled }: ShortcutRecorderProps) 
       : "None";
 
   return (
-    <button
-      type="button"
-      onClick={handleClick}
+    <div
+      ref={containerRef}
+      tabIndex={disabled ? -1 : 0}
+      role="button"
+      onClick={handleContainerClick}
       onKeyDown={handleKeyDown}
       onBlur={handleBlur}
-      disabled={disabled}
-      aria-label={recording ? "Recording shortcut — press a key combo" : `Current shortcut: ${value || "None"}`}
-      className={[
-        "inline-flex items-center justify-center min-w-[96px] h-7 px-3 rounded-control",
+      aria-label={
+        recording
+          ? "Recording shortcut — press a key combo"
+          : `Current shortcut: ${value || "None"}`
+      }
+      className={cn(
+        "inline-flex items-center min-w-[96px] h-7 px-2 rounded-control",
         "border border-field bg-control text-primary text-small tabular-nums",
         "transition-colors select-none outline-none",
         recording
           ? "border-accent bg-control-active ring-2 ring-accent/30 text-accent"
           : "hover:bg-control-active focus-visible:ring-2 focus-visible:ring-accent/30",
         disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer",
-      ].join(" ")}
+      )}
     >
-      {displayText}
-    </button>
+      <span className="flex-1 text-center">{displayText}</span>
+      {value && !recording && !disabled && (
+        <button
+          type="button"
+          tabIndex={-1}
+          onClick={handleClear}
+          aria-label="Clear shortcut"
+          className="ml-1 shrink-0 inline-flex items-center justify-center size-3.5 rounded-full bg-control hover:bg-control-active text-secondary"
+        >
+          <X size={8} strokeWidth={2.5} />
+        </button>
+      )}
+    </div>
   );
 }
 
 // ─── App Icon ──────────────────────────────────────────────────────────────────
 
 function PrtScnIcon() {
-  // Close-up of a keyboard: a 5×5 field of raised 3D chiclet keys (outer ring
-  // clipped at the tile edges so it reads as "more keys all around"), with the
-  // central PrtScn key rendered larger, raised higher, and tinted the system
-  // accent. Light keys + dark frame keep it native in both light and dark mode.
   const COLS = [-11, 6, 23, 40, 57];
   const ROWS = [-11, 5, 21, 37, 53];
   const KW = 14;
   const KH = 13;
-  const D = 2.2; // neighbour-key front-wall height → the 3D pop
+  const D = 2.2;
 
-  // Hero (PrtScn) key — larger and raised more than the neighbours.
-  // Centred in the 60-wide viewBox with a 1px gap to the side neighbours.
   const HX = 21;
   const HY = 18;
   const HW = 18;
@@ -229,7 +265,6 @@ function PrtScnIcon() {
           <stop offset="0" stopColor="#ffffff" />
           <stop offset="1" stopColor="#e6e6ec" />
         </linearGradient>
-        {/* Subtle warm grain → vintage beige texture (clean, no grime) */}
         <filter id="kc-grain" x="0" y="0" width="100%" height="100%">
           <feTurbulence
             type="fractalNoise"
@@ -250,7 +285,6 @@ function PrtScnIcon() {
       </defs>
 
       <g clipPath="url(#kc-clip)">
-        {/* Vintage beige keyboard surface + subtle warm grain texture */}
         <rect x="0" y="0" width="60" height="56" fill="url(#kc-frame)" />
         <rect x="0" y="0" width="60" height="56" filter="url(#kc-grain)" />
         <rect
@@ -264,15 +298,12 @@ function PrtScnIcon() {
           strokeWidth="1"
         />
 
-        {/* Neighbour keys (skip the centre cell — the hero replaces it) */}
         {ROWS.map((y) =>
           COLS.map((x) => {
             if (x === 23 && y === 21) return null;
             return (
               <g key={`${x}-${y}`}>
-                {/* front wall (depth) */}
                 <rect x={x} y={y + D} width={KW} height={KH} rx="3" fill="#c5c6cb" />
-                {/* top face */}
                 <rect
                   x={x}
                   y={y}
@@ -288,11 +319,8 @@ function PrtScnIcon() {
           }),
         )}
 
-        {/* Hero PrtScn key — system accent (--accent is the var-safe seed) */}
-        {/* darker front wall = accent over a black scrim */}
         <rect x={HX} y={HY + HD} width={HW} height={HH} rx="3.5" fill="var(--accent)" />
         <rect x={HX} y={HY + HD} width={HW} height={HH} rx="3.5" fill="rgba(0,0,0,0.30)" />
-        {/* top face */}
         <rect
           x={HX}
           y={HY}
@@ -303,7 +331,6 @@ function PrtScnIcon() {
           stroke="rgba(255,255,255,0.35)"
           strokeWidth="0.6"
         />
-        {/* sheen */}
         <rect
           x={HX + 0.8}
           y={HY + 0.8}
@@ -335,16 +362,14 @@ export function SettingsView() {
   const [themeInfo, setThemeInfo] = useState<NativeThemeInfo | null>(null);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [shortcutFailures, setShortcutFailures] = useState<CaptureMode[]>([]);
-  const [savingShortcuts, setSavingShortcuts] = useState(false);
 
-  // Local shortcut state (editable before save)
   const [shortcuts, setShortcuts] = useState<AppShortcuts>({
     region: "",
     window: "",
     fullScreen: "",
   });
 
-  // Close settings window on Escape, unless an interactive element is focused or a popover is open
+  // Close settings window on Escape, unless an interactive element is focused
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
@@ -372,7 +397,6 @@ export function SettingsView() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  // Load all settings on mount
   useEffect(() => {
     const load = async () => {
       try {
@@ -409,49 +433,57 @@ export function SettingsView() {
     }
   };
 
-  // ── Shortcuts ────────────────────────────────────────────────────────────
+  // ── Shortcuts (autosave on change) ───────────────────────────────────────
 
-  const handleShortcutChange = (mode: CaptureMode, value: string) => {
-    setShortcuts((prev) => ({ ...prev, [mode]: value }));
-    // Clear any existing failure for this mode
-    setShortcutFailures((prev) => prev.filter((m) => m !== mode));
-  };
+  const handleShortcutChange = useCallback(
+    async (mode: CaptureMode, value: string) => {
+      const newShortcuts = { ...shortcuts, [mode]: value };
+      setShortcuts(newShortcuts);
+      setShortcutFailures((prev) => prev.filter((m) => m !== mode));
+      try {
+        const result = await window.glazeAPI.glaze.ipc.invoke<{
+          settings: AppSettings;
+          failures: CaptureMode[];
+        }>("settings:setShortcuts", { shortcuts: newShortcuts });
+        setSettings(result.settings);
+        setShortcuts(result.settings.shortcuts);
+        if (result.failures.length > 0) {
+          setShortcutFailures(result.failures);
+          toast.error("Shortcut already in use");
+        }
+      } catch (error) {
+        toast.error(`Failed to save shortcut: ${error}`);
+        setShortcuts((prev) => ({ ...prev }));
+      }
+    },
+    [shortcuts],
+  );
 
-  const handleSaveShortcuts = async () => {
-    if (savingShortcuts) return;
-    setSavingShortcuts(true);
-    console.log("[Settings:saveShortcuts] Saving", shortcuts);
+  const handleRestoreDefaults = async () => {
+    setShortcuts(DEFAULT_SHORTCUTS);
+    setShortcutFailures([]);
     try {
       const result = await window.glazeAPI.glaze.ipc.invoke<{
         settings: AppSettings;
         failures: CaptureMode[];
-      }>("settings:setShortcuts", { shortcuts });
-
+      }>("settings:setShortcuts", { shortcuts: DEFAULT_SHORTCUTS });
       setSettings(result.settings);
-      setShortcutFailures(result.failures);
-
+      setShortcuts(result.settings.shortcuts);
       if (result.failures.length === 0) {
-        toast.success("Shortcuts saved");
-        setShortcuts(result.settings.shortcuts);
+        toast.success("Shortcuts restored to defaults");
       } else {
-        // Revert failed shortcuts to what the backend returned
-        setShortcuts(result.settings.shortcuts);
-        toast.error(
-          `Some shortcuts could not be registered: ${result.failures.join(", ")}`,
-        );
+        setShortcutFailures(result.failures);
+        toast.error("Some default shortcuts could not be registered");
       }
     } catch (error) {
-      console.error("[Settings:saveShortcuts] Error", error);
-      toast.error(`Failed to save shortcuts: ${error}`);
-    } finally {
-      setSavingShortcuts(false);
+      toast.error(`Failed to restore defaults: ${error}`);
+      if (settings) setShortcuts(settings.shortcuts);
     }
   };
 
   // ── Save folder ──────────────────────────────────────────────────────────
 
   const handlePickFolder = async () => {
-    console.log("[Settings:pickSaveFolder] Opening picker");
     try {
       const result = await window.glazeAPI.glaze.ipc.invoke<{
         settings: AppSettings;
@@ -462,7 +494,6 @@ export function SettingsView() {
         toast.success("Save location updated");
       }
     } catch (error) {
-      console.error("[Settings:pickSaveFolder] Error", error);
       toast.error(`Failed to pick folder: ${error}`);
     }
   };
@@ -471,7 +502,6 @@ export function SettingsView() {
 
   const handleTimeoutChange = async (value: string) => {
     const seconds = parseInt(value, 10);
-    console.log("[Settings:setPreviewTimeout]", { seconds });
     try {
       const updated =
         await window.glazeAPI.glaze.ipc.invoke<AppSettings>(
@@ -480,7 +510,6 @@ export function SettingsView() {
         );
       setSettings(updated);
     } catch (error) {
-      console.error("[Settings:setPreviewTimeout] Error", error);
       toast.error(`Failed to update preview duration: ${error}`);
     }
   };
@@ -488,7 +517,6 @@ export function SettingsView() {
   // ── Launch at login ──────────────────────────────────────────────────────
 
   const handleLaunchAtLoginChange = async (enabled: boolean) => {
-    console.log("[Settings:setLaunchAtLogin]", { enabled });
     try {
       const updated =
         await window.glazeAPI.glaze.ipc.invoke<AppSettings>(
@@ -497,7 +525,6 @@ export function SettingsView() {
         );
       setSettings(updated);
     } catch (error) {
-      console.error("[Settings:setLaunchAtLogin] Error", error);
       toast.error(`Failed to update launch at login: ${error}`);
     }
   };
@@ -507,186 +534,200 @@ export function SettingsView() {
   const isLoaded = settings !== null;
 
   return (
-    <ScrollArea
-      toolbar={
-        <Toolbar>
-          <ToolbarContent>
-            <ToolbarTitle>Settings</ToolbarTitle>
-          </ToolbarContent>
-        </Toolbar>
-      }
-    >
-      <div className="px-4 flex flex-col gap-6 pt-2 pb-8">
-        {/* ── Header: keycap logo + app name ─────────────────────────────── */}
-        <div className="flex items-center gap-3 pt-2 pb-1">
-          <PrtScnIcon />
-          <div className="flex flex-col min-w-0">
-            <Text variant="large-strong" color="primary">
-              PrtScn
-            </Text>
-            <Text variant="small" color="secondary">
-              Screenshot Utility
-            </Text>
+    <TabsRoot defaultValue="general">
+      <ScrollArea
+        toolbar={
+          <Toolbar>
+            <ToolbarContent>
+              <div className="w-full flex justify-center">
+                <Tabs variant="filled" size="medium">
+                  <TabsTrigger value="general">General</TabsTrigger>
+                  <TabsSeparator />
+                  <TabsTrigger value="capture">Capture</TabsTrigger>
+                  <TabsSeparator />
+                  <TabsTrigger value="hotkeys">Hotkeys</TabsTrigger>
+                </Tabs>
+              </div>
+            </ToolbarContent>
+          </Toolbar>
+        }
+      >
+        <div className="px-4 flex flex-col pt-2 pb-8">
+          {/* ── Header: keycap logo + app name ─────────────────────────────── */}
+          <div className="flex items-center gap-3 pt-2 pb-5">
+            <PrtScnIcon />
+            <div className="flex flex-col min-w-0">
+              <Text variant="large-strong" color="primary">
+                PrtScn
+              </Text>
+              <Text variant="small" color="secondary">
+                Screenshot Utility
+              </Text>
+            </div>
           </div>
+
+          {/* ── General tab ───────────────────────────────────────────────── */}
+          <TabsContent value="general" className="flex flex-col gap-6">
+            <FieldSet title="General">
+              <FieldGroup>
+                <Field
+                  label="Launch at login"
+                  description="Start PrtScn automatically when you log in"
+                  orientation="horizontal"
+                >
+                  <Switch
+                    checked={settings?.launchAtLogin ?? false}
+                    onCheckedChange={handleLaunchAtLoginChange}
+                    disabled={!isLoaded}
+                  />
+                </Field>
+              </FieldGroup>
+            </FieldSet>
+
+            <FieldSet title="Appearance">
+              <FieldGroup>
+                <Field orientation="horizontal">
+                  <FieldContent>
+                    <FieldLabel htmlFor="theme">Theme</FieldLabel>
+                  </FieldContent>
+                  <RadioGroup
+                    value={themeInfo?.themeSource ?? "system"}
+                    onValueChange={handleThemeChange}
+                    orientation="horizontal"
+                  >
+                    <Label>
+                      <RadioGroupItem value="system" />
+                      Auto
+                    </Label>
+                    <Label>
+                      <RadioGroupItem value="light" />
+                      Light
+                    </Label>
+                    <Label>
+                      <RadioGroupItem value="dark" />
+                      Dark
+                    </Label>
+                  </RadioGroup>
+                </Field>
+              </FieldGroup>
+            </FieldSet>
+          </TabsContent>
+
+          {/* ── Capture tab ───────────────────────────────────────────────── */}
+          <TabsContent value="capture" className="flex flex-col gap-6">
+            <FieldSet title="Preview">
+              <FieldGroup>
+                <Field
+                  label="Preview duration"
+                  description="How long the preview overlay stays visible"
+                  orientation="horizontal"
+                >
+                  <Select
+                    value={String(settings?.previewTimeout ?? "5")}
+                    onValueChange={handleTimeoutChange}
+                    disabled={!isLoaded}
+                  >
+                    <SelectTrigger size="small">
+                      <SelectValue placeholder="Select…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {TIMEOUT_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              </FieldGroup>
+            </FieldSet>
+
+            <FieldSet title="Save Location">
+              <FieldGroup>
+                <Field
+                  label="Folder"
+                  description={
+                    settings?.saveFolder ? (
+                      <Text variant="small" color="secondary" className="truncate max-w-[220px]">
+                        {settings.saveFolder}
+                      </Text>
+                    ) : (
+                      "Where screenshots are saved"
+                    )
+                  }
+                  orientation="horizontal"
+                >
+                  <Button
+                    variant="filled"
+                    size="small"
+                    onClick={handlePickFolder}
+                    disabled={!isLoaded}
+                  >
+                    Choose…
+                  </Button>
+                </Field>
+              </FieldGroup>
+            </FieldSet>
+          </TabsContent>
+
+          {/* ── Hotkeys tab ───────────────────────────────────────────────── */}
+          <TabsContent value="hotkeys" className="flex flex-col gap-6">
+            <FieldSet title="Keyboard Shortcuts">
+              <FieldGroup>
+                <Field
+                  label="Region"
+                  description="Capture a selected screen region"
+                  orientation="horizontal"
+                  error={shortcutFailures.includes("region") ? "Shortcut already in use" : undefined}
+                >
+                  <ShortcutRecorder
+                    value={shortcuts.region}
+                    onChange={(v) => handleShortcutChange("region", v)}
+                    disabled={!isLoaded}
+                  />
+                </Field>
+
+                <Field
+                  label="Window"
+                  description="Capture a specific window"
+                  orientation="horizontal"
+                  error={shortcutFailures.includes("window") ? "Shortcut already in use" : undefined}
+                >
+                  <ShortcutRecorder
+                    value={shortcuts.window}
+                    onChange={(v) => handleShortcutChange("window", v)}
+                    disabled={!isLoaded}
+                  />
+                </Field>
+
+                <Field
+                  label="Full Screen"
+                  description="Capture the entire screen"
+                  orientation="horizontal"
+                  error={shortcutFailures.includes("fullScreen") ? "Shortcut already in use" : undefined}
+                >
+                  <ShortcutRecorder
+                    value={shortcuts.fullScreen}
+                    onChange={(v) => handleShortcutChange("fullScreen", v)}
+                    disabled={!isLoaded}
+                  />
+                </Field>
+
+                <Field orientation="horizontal">
+                  <Button
+                    variant="filled"
+                    size="small"
+                    onClick={handleRestoreDefaults}
+                    disabled={!isLoaded}
+                  >
+                    Restore Defaults
+                  </Button>
+                </Field>
+              </FieldGroup>
+            </FieldSet>
+          </TabsContent>
         </div>
-
-        {/* ── Shortcuts ─────────────────────────────────────────────────── */}
-        <FieldSet title="Keyboard Shortcuts">
-          <FieldGroup>
-            <Field
-              label="Region"
-              description="Capture a selected screen region"
-              orientation="horizontal"
-              error={shortcutFailures.includes("region") ? "Shortcut already in use" : undefined}
-            >
-              <ShortcutRecorder
-                value={shortcuts.region}
-                onChange={(v) => handleShortcutChange("region", v)}
-                disabled={!isLoaded}
-              />
-            </Field>
-
-            <Field
-              label="Window"
-              description="Capture a specific window"
-              orientation="horizontal"
-              error={shortcutFailures.includes("window") ? "Shortcut already in use" : undefined}
-            >
-              <ShortcutRecorder
-                value={shortcuts.window}
-                onChange={(v) => handleShortcutChange("window", v)}
-                disabled={!isLoaded}
-              />
-            </Field>
-
-            <Field
-              label="Full Screen"
-              description="Capture the entire screen"
-              orientation="horizontal"
-              error={shortcutFailures.includes("fullScreen") ? "Shortcut already in use" : undefined}
-            >
-              <ShortcutRecorder
-                value={shortcuts.fullScreen}
-                onChange={(v) => handleShortcutChange("fullScreen", v)}
-                disabled={!isLoaded}
-              />
-            </Field>
-
-            <Field orientation="horizontal">
-              <Button
-                variant="filled"
-                size="small"
-                onClick={handleSaveShortcuts}
-                disabled={!isLoaded || savingShortcuts}
-              >
-                {savingShortcuts ? "Saving…" : "Apply Shortcuts"}
-              </Button>
-            </Field>
-          </FieldGroup>
-        </FieldSet>
-
-        {/* ── Save location ──────────────────────────────────────────────── */}
-        <FieldSet title="Save Location">
-          <FieldGroup>
-            <Field
-              label="Folder"
-              description={
-                settings?.saveFolder ? (
-                  <Text variant="small" color="secondary" className="truncate max-w-[220px]">
-                    {settings.saveFolder}
-                  </Text>
-                ) : (
-                  "Where screenshots are saved"
-                )
-              }
-              orientation="horizontal"
-            >
-              <Button
-                variant="filled"
-                size="small"
-                onClick={handlePickFolder}
-                disabled={!isLoaded}
-              >
-                Choose…
-              </Button>
-            </Field>
-          </FieldGroup>
-        </FieldSet>
-
-        {/* ── Preview duration ───────────────────────────────────────────── */}
-        <FieldSet title="Preview">
-          <FieldGroup>
-            <Field
-              label="Preview duration"
-              description="How long the preview overlay stays visible"
-              orientation="horizontal"
-            >
-              <Select
-                value={String(settings?.previewTimeout ?? "5")}
-                onValueChange={handleTimeoutChange}
-                disabled={!isLoaded}
-              >
-                <SelectTrigger size="small">
-                  <SelectValue placeholder="Select…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {TIMEOUT_OPTIONS.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-          </FieldGroup>
-        </FieldSet>
-
-        {/* ── General ───────────────────────────────────────────────────── */}
-        <FieldSet title="General">
-          <FieldGroup>
-            <Field
-              label="Launch at login"
-              description="Start PrtScn automatically when you log in"
-              orientation="horizontal"
-            >
-              <Switch
-                checked={settings?.launchAtLogin ?? false}
-                onCheckedChange={handleLaunchAtLoginChange}
-                disabled={!isLoaded}
-              />
-            </Field>
-          </FieldGroup>
-        </FieldSet>
-
-        {/* ── Appearance ────────────────────────────────────────────────── */}
-        <FieldSet title="Appearance">
-          <FieldGroup>
-            <Field orientation="horizontal">
-              <FieldContent>
-                <FieldLabel htmlFor="theme">Theme</FieldLabel>
-              </FieldContent>
-              <RadioGroup
-                value={themeInfo?.themeSource ?? "system"}
-                onValueChange={handleThemeChange}
-                orientation="horizontal"
-              >
-                <Label>
-                  <RadioGroupItem value="system" />
-                  Auto
-                </Label>
-                <Label>
-                  <RadioGroupItem value="light" />
-                  Light
-                </Label>
-                <Label>
-                  <RadioGroupItem value="dark" />
-                  Dark
-                </Label>
-              </RadioGroup>
-            </Field>
-          </FieldGroup>
-        </FieldSet>
-      </div>
-    </ScrollArea>
+      </ScrollArea>
+    </TabsRoot>
   );
 }
