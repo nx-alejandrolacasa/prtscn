@@ -235,6 +235,55 @@ function ShortcutRecorder({ value, onChange, disabled }: ShortcutRecorderProps) 
 }
 
 
+// ─── App Icon (background removed) ───────────────────────────────────────────
+
+function AppIconNoBackground() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      ctx.drawImage(img, 0, 0);
+      const idata = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const { data, width, height } = idata;
+      const bgR = data[0], bgG = data[1], bgB = data[2];
+      const tol = 40;
+      const visited = new Uint8Array(width * height);
+      const stack = [0, width - 1, (height - 1) * width, width * height - 1];
+      while (stack.length) {
+        const i = stack.pop()!;
+        if (visited[i]) continue;
+        visited[i] = 1;
+        const p = i * 4;
+        const dr = data[p] - bgR, dg = data[p + 1] - bgG, db = data[p + 2] - bgB;
+        if (dr * dr + dg * dg + db * db > tol * tol) continue;
+        data[p + 3] = 0;
+        const x = i % width, y = (i / width) | 0;
+        if (x > 0) stack.push(i - 1);
+        if (x < width - 1) stack.push(i + 1);
+        if (y > 0) stack.push(i - width);
+        if (y < height - 1) stack.push(i + width);
+      }
+      ctx.putImageData(new ImageData(data, width, height), 0, 0);
+    };
+    img.src = appIconSrc;
+  }, []);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      aria-hidden
+      style={{ width: 52, height: 52, flexShrink: 0, display: "block" }}
+    />
+  );
+}
+
 // ─── Main Settings View ───────────────────────────────────────────────────────
 
 export function SettingsView() {
@@ -434,14 +483,7 @@ export function SettingsView() {
         <div className="px-4 flex flex-col pt-2 pb-8">
           {/* ── Header: keycap logo + app name ─────────────────────────────── */}
           <div className="flex items-center gap-3 pt-2 pb-5">
-            <img
-              src={appIconSrc}
-              width={52}
-              height={52}
-              alt=""
-              aria-hidden="true"
-              style={{ flexShrink: 0, display: "block" }}
-            />
+            <AppIconNoBackground />
             <div className="flex flex-col min-w-0">
               <Text variant="large-strong" color="primary">
                 PrtScn
