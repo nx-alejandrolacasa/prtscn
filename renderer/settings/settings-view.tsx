@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { Camera } from "lucide-react";
 import {
   Label,
   RadioGroup,
@@ -195,14 +194,122 @@ function ShortcutRecorder({ value, onChange, disabled }: ShortcutRecorderProps) 
 // ─── App Icon ──────────────────────────────────────────────────────────────────
 
 function PrtScnIcon() {
-  // Native-style rounded app-icon tile with the system accent.
+  // Close-up of a keyboard: a 5×5 field of raised 3D chiclet keys (outer ring
+  // clipped at the tile edges so it reads as "more keys all around"), with the
+  // central PrtScn key rendered larger, raised higher, and tinted the system
+  // accent. Light keys + dark frame keep it native in both light and dark mode.
+  const COLS = [-11, 6, 23, 40, 57];
+  const ROWS = [-11, 5, 21, 37, 53];
+  const KW = 14;
+  const KH = 13;
+  const D = 2.2; // neighbour-key front-wall height → the 3D pop
+
+  // Hero (PrtScn) key — larger and raised more than the neighbours.
+  // Centred in the 60-wide viewBox with a 1px gap to the side neighbours.
+  const HX = 21;
+  const HY = 18;
+  const HW = 18;
+  const HH = 18;
+  const HD = 3.4;
+
   return (
-    <div
+    <svg
       aria-hidden="true"
-      className="flex items-center justify-center size-11 rounded-[12px] bg-accent shrink-0 shadow-sm"
+      width="52"
+      height="49"
+      viewBox="0 0 60 56"
+      style={{ flexShrink: 0, display: "block" }}
     >
-      <Camera className="size-6 text-white" strokeWidth={2} />
-    </div>
+      <defs>
+        <linearGradient id="kc-frame" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#5a5a5f" />
+          <stop offset="1" stopColor="#2f2f33" />
+        </linearGradient>
+        <linearGradient id="kc-cap" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#ffffff" />
+          <stop offset="1" stopColor="#e6e6ec" />
+        </linearGradient>
+        <clipPath id="kc-clip">
+          <rect x="0" y="0" width="60" height="56" rx="13" />
+        </clipPath>
+      </defs>
+
+      <g clipPath="url(#kc-clip)">
+        {/* Keyboard frame — dark gaps between keys give the depth */}
+        <rect x="0" y="0" width="60" height="56" fill="url(#kc-frame)" />
+        <rect
+          x="0.6"
+          y="0.6"
+          width="58.8"
+          height="54.8"
+          rx="12.4"
+          fill="none"
+          stroke="rgba(255,255,255,0.10)"
+          strokeWidth="1"
+        />
+
+        {/* Neighbour keys (skip the centre cell — the hero replaces it) */}
+        {ROWS.map((y) =>
+          COLS.map((x) => {
+            if (x === 23 && y === 21) return null;
+            return (
+              <g key={`${x}-${y}`}>
+                {/* front wall (depth) */}
+                <rect x={x} y={y + D} width={KW} height={KH} rx="3" fill="#c5c6cb" />
+                {/* top face */}
+                <rect
+                  x={x}
+                  y={y}
+                  width={KW}
+                  height={KH}
+                  rx="3"
+                  fill="url(#kc-cap)"
+                  stroke="rgba(255,255,255,0.55)"
+                  strokeWidth="0.5"
+                />
+              </g>
+            );
+          }),
+        )}
+
+        {/* Hero PrtScn key — system accent (--accent is the var-safe seed) */}
+        {/* darker front wall = accent over a black scrim */}
+        <rect x={HX} y={HY + HD} width={HW} height={HH} rx="3.5" fill="var(--accent)" />
+        <rect x={HX} y={HY + HD} width={HW} height={HH} rx="3.5" fill="rgba(0,0,0,0.30)" />
+        {/* top face */}
+        <rect
+          x={HX}
+          y={HY}
+          width={HW}
+          height={HH}
+          rx="3.5"
+          fill="var(--accent)"
+          stroke="rgba(255,255,255,0.35)"
+          strokeWidth="0.6"
+        />
+        {/* sheen */}
+        <rect
+          x={HX + 0.8}
+          y={HY + 0.8}
+          width={HW - 1.6}
+          height={(HH - 1.6) / 2}
+          rx="2.6"
+          fill="rgba(255,255,255,0.20)"
+        />
+        <text
+          x={HX + HW / 2}
+          y={HY + HH / 2 + 1.9}
+          textAnchor="middle"
+          fontSize="5"
+          fontWeight="700"
+          letterSpacing="-0.02em"
+          fill="#ffffff"
+          style={{ userSelect: "none" }}
+        >
+          PrtScn
+        </text>
+      </g>
+    </svg>
   );
 }
 

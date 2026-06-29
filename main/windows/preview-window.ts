@@ -15,19 +15,23 @@ let previewWindow: BrowserWindow | null = null;
 // Current payload waiting for preview:ready
 let currentPayload: PreviewPayload | null = null;
 
-const CARD_WIDTH = 288;
-const TOOLBAR_HEIGHT = 56;
-const CARD_PADDING = 24;
+// Transparent margin around the card so its CSS drop shadow has room to render
+// (must match the `padding` in preview-view.tsx).
+const SHADOW_MARGIN = 22;
+const CARD_WIDTH = 248;
+const TOOLBAR_HEIGHT = 48;
 
 function computeImageHeight(width: number, height: number): number {
-  const rawHeight = Math.round(280 * (height / width));
-  return Math.max(130, Math.min(200, rawHeight));
+  const rawHeight = Math.round(CARD_WIDTH * (height / width));
+  return Math.max(104, Math.min(168, rawHeight));
 }
 
 function computeWindowSize(imageHeight: number): { w: number; h: number } {
-  const winW = CARD_WIDTH;
-  const winH = imageHeight + TOOLBAR_HEIGHT + CARD_PADDING;
-  return { w: winW, h: winH };
+  const cardH = imageHeight + TOOLBAR_HEIGHT;
+  return {
+    w: CARD_WIDTH + SHADOW_MARGIN * 2,
+    h: cardH + SHADOW_MARGIN * 2,
+  };
 }
 
 function computePosition(
@@ -67,12 +71,12 @@ async function ensurePreviewWindow(): Promise<BrowserWindow> {
 
   previewWindow = new BrowserWindow({
     windowKey: "preview",
-    width: CARD_WIDTH,
+    width: CARD_WIDTH + SHADOW_MARGIN * 2,
     height: 210, // initial placeholder; resized before show
     frame: false,
     transparent: true,
     backgroundColor: "#00000000",
-    hasShadow: true,
+    hasShadow: false, // the card draws its own CSS shadow inside the margin
     alwaysOnTop: true,
     skipTaskbar: true,
     focusable: true,

@@ -1,7 +1,12 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import {
+  type ReactNode,
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+} from "react";
 import { PencilIcon, CopyIcon, SaveIcon } from "lucide-react";
 import {
-  Button,
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -14,6 +19,45 @@ interface PreviewPayload {
   width: number;
   height: number;
   timeoutSeconds: number;
+}
+
+// ─── Toolbar button ────────────────────────────────────────────────────────
+// A flat icon button: uniform across all three actions, subtle hover/active,
+// and no focus ring (this overlay never takes keyboard focus).
+function ToolbarButton({
+  label,
+  onClick,
+  disabled,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          onClick={onClick}
+          disabled={disabled}
+          aria-label={label}
+          className={[
+            "inline-flex items-center justify-center size-9 rounded-lg",
+            "text-secondary transition-colors duration-100",
+            "outline-none focus:outline-none focus-visible:outline-none",
+            "hover:bg-control hover:text-primary active:bg-control-active",
+            "disabled:opacity-40 disabled:pointer-events-none",
+            "[&>svg]:size-[18px] [&>svg]:shrink-0",
+          ].join(" ")}
+        >
+          {children}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="top">{label}</TooltipContent>
+    </Tooltip>
+  );
 }
 
 export function PreviewView() {
@@ -201,16 +245,20 @@ export function PreviewView() {
   const showCountdownBar = durationRef.current > 0;
 
   return (
+    // Transparent padding leaves room for the card's drop shadow to render.
     <div
       className="w-screen h-screen overflow-hidden"
-      style={{ background: "transparent" }}
+      style={{ background: "transparent", padding: 22 }}
     >
-      {/* Native popover-style card filling the entire viewport */}
+      {/* Native popover-style card */}
       <div
-        className="w-full h-full flex flex-col rounded-xl overflow-hidden border border-separator bg-surface-primary"
+        className="w-full h-full flex flex-col rounded-[12px] overflow-hidden bg-surface-primary isolate"
         style={{
           boxShadow:
-            "0 10px 30px rgba(0,0,0,0.18), 0 1px 3px rgba(0,0,0,0.10)",
+            "0 6px 18px rgba(0,0,0,0.16), 0 1px 3px rgba(0,0,0,0.10)",
+          // Crisp hairline that adapts to light/dark.
+          outline: "0.5px solid var(--color-border-separator)",
+          outlineOffset: "-0.5px",
         }}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
@@ -222,10 +270,10 @@ export function PreviewView() {
             style={{ background: "var(--color-border-separator)" }}
           >
             <div
-              className="absolute inset-y-0 left-0 transition-none"
+              className="absolute inset-y-0 left-0"
               style={{
                 width: `${progress * 100}%`,
-                background: "var(--color-text-accent)",
+                background: "var(--accent)",
                 opacity: isPaused ? 0.4 : 1,
                 transition: isPaused ? "opacity 0.2s" : "none",
               }}
@@ -245,64 +293,37 @@ export function PreviewView() {
           ) : (
             /* Skeleton placeholder — exact dimensions to prevent layout shift */
             <div
-              className="w-full h-full bg-control animate-pulse"
+              className="w-full h-full bg-control-active animate-pulse"
               aria-label="Loading screenshot…"
             />
           )}
         </div>
 
-        {/* Bottom toolbar — fixed ~52px height */}
-        <div
-          className="shrink-0 flex items-center justify-around px-4 border-t border-separator bg-surface-secondary"
-          style={{ height: 52 }}
-        >
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="transparent"
-                size="medium"
-                iconOnly
-                onClick={handleEdit}
-                disabled={!payload}
-                aria-label="Edit in Preview"
-              >
-                <PencilIcon className="size-4 text-secondary" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="top">Edit in Preview</TooltipContent>
-          </Tooltip>
+        {/* Bottom toolbar */}
+        <div className="shrink-0 flex items-center justify-around px-3 h-12 border-t border-separator bg-surface-secondary">
+          <ToolbarButton
+            label="Edit in Preview"
+            onClick={handleEdit}
+            disabled={!payload}
+          >
+            <PencilIcon strokeWidth={1.75} />
+          </ToolbarButton>
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="transparent"
-                size="medium"
-                iconOnly
-                onClick={handleCopy}
-                disabled={!payload}
-                aria-label="Copy to clipboard"
-              >
-                <CopyIcon className="size-4 text-secondary" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="top">Copy to Clipboard</TooltipContent>
-          </Tooltip>
+          <ToolbarButton
+            label="Copy to Clipboard"
+            onClick={handleCopy}
+            disabled={!payload}
+          >
+            <CopyIcon strokeWidth={1.75} />
+          </ToolbarButton>
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="accent"
-                size="medium"
-                iconOnly
-                onClick={handleSave}
-                disabled={!payload}
-                aria-label="Save screenshot"
-              >
-                <SaveIcon className="size-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="top">Save Screenshot</TooltipContent>
-          </Tooltip>
+          <ToolbarButton
+            label="Save Screenshot"
+            onClick={handleSave}
+            disabled={!payload}
+          >
+            <SaveIcon strokeWidth={1.75} />
+          </ToolbarButton>
         </div>
       </div>
     </div>
