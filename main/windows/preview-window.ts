@@ -80,6 +80,10 @@ async function ensurePreviewWindow(): Promise<BrowserWindow> {
     alwaysOnTop: true,
     skipTaskbar: true,
     focusable: true,
+    // Become key on show so CSS :hover and keyboard shortcuts work immediately
+    // (macOS only delivers mouse-moved/hover events to the key window), and
+    // register the very first click instead of just activating the window.
+    acceptFirstMouse: true,
     visibleOnAllWorkspaces: true,
     hiddenInMissionControl: true,
     show: false,
@@ -127,8 +131,11 @@ export async function showPreview(
   // Send payload to renderer (broadcast pairs with renderer onNotification)
   ipcMain.broadcast("screenshot:new", payload);
 
-  // Show without stealing focus
-  win.showInactive();
+  // Show AND focus: the preview must be the key window so hover highlights and
+  // keyboard shortcuts (Enter/⌘C/⌘S) work without an extra click. Focus returns
+  // to the previous app once the preview is dismissed.
+  win.show();
+  win.focus();
 }
 
 /** Hide (close) the preview window */
