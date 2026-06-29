@@ -271,10 +271,12 @@ export function PreviewView() {
       className="w-screen h-screen overflow-hidden"
       style={{ background: "transparent", padding: 22 }}
     >
-      {/* Native popover-style card */}
+      {/* Native popover-style card — opaque (surface tokens are transparent in
+          this plain overlay window, so paint the solid --bg seed directly) */}
       <div
-        className="w-full h-full flex flex-col rounded-[12px] overflow-hidden bg-surface-primary isolate"
+        className="w-full h-full flex flex-col rounded-[12px] overflow-hidden isolate"
         style={{
+          background: "var(--bg)",
           boxShadow:
             "0 6px 18px rgba(0,0,0,0.16), 0 1px 3px rgba(0,0,0,0.10)",
           // Crisp hairline that adapts to light/dark.
@@ -302,8 +304,11 @@ export function PreviewView() {
           </div>
         )}
 
-        {/* Thumbnail area — flex-1, neutral control backing */}
-        <div className="relative flex-1 flex items-center justify-center overflow-hidden min-h-0 bg-control">
+        {/* Thumbnail area — flex-1, clean opaque backing */}
+        <div
+          className="relative flex-1 flex items-center justify-center overflow-hidden min-h-0"
+          style={{ background: "var(--bg)" }}
+        >
           {payload ? (
             <img
               src={payload.thumbnailDataUrl}
@@ -321,7 +326,10 @@ export function PreviewView() {
 
           {/* Hover hint pill — shows the hovered action's name + shortcut */}
           {hint && (
-            <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full bg-control px-3.5 py-1.5 border border-separator shadow-sm">
+            <div
+              className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full px-3.5 py-1.5 border border-separator shadow-sm"
+              style={{ background: "color-mix(in srgb, var(--fg) 8%, var(--bg))" }}
+            >
               <span className="text-small font-semibold text-primary leading-none">
                 {hint.label}
               </span>
@@ -333,7 +341,7 @@ export function PreviewView() {
         </div>
 
         {/* Bottom toolbar — left-aligned flat icons */}
-        <div className="shrink-0 flex items-center gap-1 px-2 h-12 border-t border-separator bg-surface-secondary">
+        <div className="shrink-0 flex items-center gap-1 px-2 h-12 border-t border-separator bg-control">
           {actions.map(({ id, label, Icon, onClick }) => (
             <ToolbarButton
               key={id}
