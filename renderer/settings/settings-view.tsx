@@ -222,21 +222,37 @@ function PrtScnIcon() {
     >
       <defs>
         <linearGradient id="kc-frame" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#5a5a5f" />
-          <stop offset="1" stopColor="#2f2f33" />
+          <stop offset="0" stopColor="#ecdfbf" />
+          <stop offset="1" stopColor="#d4bf8e" />
         </linearGradient>
         <linearGradient id="kc-cap" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stopColor="#ffffff" />
           <stop offset="1" stopColor="#e6e6ec" />
         </linearGradient>
+        {/* Subtle warm grain → vintage beige texture (clean, no grime) */}
+        <filter id="kc-grain" x="0" y="0" width="100%" height="100%">
+          <feTurbulence
+            type="fractalNoise"
+            baseFrequency="0.9"
+            numOctaves="2"
+            stitchTiles="stitch"
+            result="n"
+          />
+          <feColorMatrix
+            in="n"
+            type="matrix"
+            values="0 0 0 0 0.42  0 0 0 0 0.32  0 0 0 0 0.17  0 0 0 0.07 0"
+          />
+        </filter>
         <clipPath id="kc-clip">
           <rect x="0" y="0" width="60" height="56" rx="13" />
         </clipPath>
       </defs>
 
       <g clipPath="url(#kc-clip)">
-        {/* Keyboard frame — dark gaps between keys give the depth */}
+        {/* Vintage beige keyboard surface + subtle warm grain texture */}
         <rect x="0" y="0" width="60" height="56" fill="url(#kc-frame)" />
+        <rect x="0" y="0" width="60" height="56" filter="url(#kc-grain)" />
         <rect
           x="0.6"
           y="0.6"
@@ -244,7 +260,7 @@ function PrtScnIcon() {
           height="54.8"
           rx="12.4"
           fill="none"
-          stroke="rgba(255,255,255,0.10)"
+          stroke="rgba(90,64,24,0.22)"
           strokeWidth="1"
         />
 
