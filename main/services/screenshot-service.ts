@@ -45,7 +45,8 @@ export async function captureScreenshot(mode: CaptureMode): Promise<PreviewPaylo
   if (mode === "region") {
     args = ["-i", tmpPath];
   } else if (mode === "window") {
-    args = ["-i", "-W", "-o", tmpPath];
+    // No "-o": keep the window's drop shadow + transparent padding around it.
+    args = ["-i", "-W", tmpPath];
   } else {
     // fullScreen
     args = [tmpPath];

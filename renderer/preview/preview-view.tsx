@@ -340,8 +340,8 @@ export function PreviewView() {
           )}
         </div>
 
-        {/* Bottom toolbar — left-aligned flat icons */}
-        <div className="shrink-0 flex items-center gap-1 px-2 h-12 border-t border-separator bg-control">
+        {/* Bottom toolbar — centered flat icons (white footer; hover = light grey) */}
+        <div className="shrink-0 flex items-center justify-center gap-2 px-2 h-12 border-t border-separator">
           {actions.map(({ id, label, Icon, onClick }) => (
             <ToolbarButton
               key={id}
