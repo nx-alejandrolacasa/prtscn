@@ -205,12 +205,12 @@ export function PreviewView() {
       className="w-screen h-screen overflow-hidden"
       style={{ background: "transparent" }}
     >
-      {/* Vintage card filling the entire viewport */}
+      {/* Native popover-style card filling the entire viewport */}
       <div
-        className="w-full h-full flex flex-col rounded-2xl overflow-hidden border border-separator"
+        className="w-full h-full flex flex-col rounded-xl overflow-hidden border border-separator bg-surface-primary"
         style={{
-          background: "var(--color-surface-primary, hsl(40 30% 92%))",
-          boxShadow: "0 8px 32px rgba(0,0,0,0.22), 0 2px 8px rgba(0,0,0,0.12)",
+          boxShadow:
+            "0 10px 30px rgba(0,0,0,0.18), 0 1px 3px rgba(0,0,0,0.10)",
         }}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
@@ -233,11 +233,8 @@ export function PreviewView() {
           </div>
         )}
 
-        {/* Thumbnail area — flex-1, cream/neutral backing */}
-        <div
-          className="flex-1 flex items-center justify-center overflow-hidden min-h-0"
-          style={{ background: "oklch(from var(--bg, hsl(40 20% 94%)) l c h / 0.5)" }}
-        >
+        {/* Thumbnail area — flex-1, neutral control backing */}
+        <div className="flex-1 flex items-center justify-center overflow-hidden min-h-0 bg-control">
           {payload ? (
             <img
               src={payload.thumbnailDataUrl}
@@ -256,12 +253,8 @@ export function PreviewView() {
 
         {/* Bottom toolbar — fixed ~52px height */}
         <div
-          className="shrink-0 flex items-center justify-around px-4 border-t border-separator"
-          style={{
-            height: 52,
-            background:
-              "color-mix(in oklab, var(--color-surface-primary, transparent) 80%, transparent)",
-          }}
+          className="shrink-0 flex items-center justify-around px-4 border-t border-separator bg-surface-secondary"
+          style={{ height: 52 }}
         >
           <Tooltip>
             <TooltipTrigger asChild>

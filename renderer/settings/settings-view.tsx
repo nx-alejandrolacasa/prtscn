@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { Camera } from "lucide-react";
 import {
   Label,
   RadioGroup,
@@ -191,90 +192,17 @@ function ShortcutRecorder({ value, onChange, disabled }: ShortcutRecorderProps) 
   );
 }
 
-// ─── Keycap Logo ─────────────────────────────────────────────────────────────
+// ─── App Icon ──────────────────────────────────────────────────────────────────
 
-function PrtScnKeycap() {
-  // Blank neighbour keys, partially clipped by the SVG viewport so the mark
-  // reads like a close-up of a real keyboard. All 18×16, top-left coords.
-  const neighbours: Array<[number, number]> = [
-    [-4, -3],
-    [18, -3],
-    [40, -3], // top row
-    [-4, 18],
-    [40, 18], // sides of the centre key
-    [-4, 39],
-    [18, 39],
-    [40, 39], // bottom row
-  ];
-
-  const lip = "#b59a62";
-
+function PrtScnIcon() {
+  // Native-style rounded app-icon tile with the system accent.
   return (
-    <svg
+    <div
       aria-hidden="true"
-      width="50"
-      height="44"
-      viewBox="0 0 56 50"
-      style={{ flexShrink: 0, display: "block" }}
+      className="flex items-center justify-center size-11 rounded-[12px] bg-accent shrink-0 shadow-sm"
     >
-      <defs>
-        <linearGradient id="prtscn-cap" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#f3e6c4" />
-          <stop offset="0.5" stopColor="#e2d09a" />
-          <stop offset="1" stopColor="#ceb87e" />
-        </linearGradient>
-        <clipPath id="prtscn-round">
-          <rect x="0" y="0" width="56" height="50" rx="9" />
-        </clipPath>
-      </defs>
-
-      <g clipPath="url(#prtscn-round)">
-        {/* Keyboard surface between the keys */}
-        <rect x="0" y="0" width="56" height="50" fill="#d8c38c" />
-
-        {/* Blank neighbouring keycaps */}
-        {neighbours.map(([x, y], i) => (
-          <g key={i}>
-            <rect x={x} y={y + 2} width="18" height="16" rx="3.5" fill={lip} />
-            <rect
-              x={x}
-              y={y}
-              width="18"
-              height="16"
-              rx="3.5"
-              fill="url(#prtscn-cap)"
-              stroke="#c2a868"
-              strokeWidth="0.6"
-            />
-          </g>
-        ))}
-
-        {/* Centre PrtScn key */}
-        <rect x="19" y="19" width="18" height="16" rx="3.5" fill="#a98a4e" />
-        <rect
-          x="19"
-          y="17"
-          width="18"
-          height="16"
-          rx="3.5"
-          fill="url(#prtscn-cap)"
-          stroke="#b89a5e"
-          strokeWidth="0.8"
-        />
-        <text
-          x="28"
-          y="26.2"
-          textAnchor="middle"
-          fontSize="5.4"
-          fontWeight="700"
-          letterSpacing="0.02em"
-          fill="#5a3e18"
-          style={{ userSelect: "none" }}
-        >
-          PrtScn
-        </text>
-      </g>
-    </svg>
+      <Camera className="size-6 text-white" strokeWidth={2} />
+    </div>
   );
 }
 
@@ -468,13 +396,13 @@ export function SettingsView() {
       <div className="px-4 flex flex-col gap-6 pt-2 pb-8">
         {/* ── Header: keycap logo + app name ─────────────────────────────── */}
         <div className="flex items-center gap-3 pt-2 pb-1">
-          <PrtScnKeycap />
+          <PrtScnIcon />
           <div className="flex flex-col min-w-0">
             <Text variant="large-strong" color="primary">
               PrtScn
             </Text>
             <Text variant="small" color="secondary">
-              Vintage Screenshot Utility
+              Screenshot Utility
             </Text>
           </div>
         </div>

@@ -9,20 +9,5 @@
 @source not "./preload.ts";
 @source not "./dev/**/*";
 
-/* ─── PrtScn vintage theme ───────────────────────────────────────────────── */
-/* Light-mode: warm cream/beige. Seeds are authored at ~2.5× intended
-   saturation — the compositor overlays them at 40% opacity over the native
-   window material, so they must be pushed harder than they look. */
-:root {
-  --bg: #e8d5a8;
-  --bg-secondary: #d9c28a;
-  --fg: #3a2a10;
-  --theme-accent: #9a6b1a;
-}
-
-.dark {
-  --bg: #1c150a;
-  --bg-secondary: #241c0e;
-  --fg: #f0e2c0;
-  --theme-accent: #c8902a;
-}
+/* PrtScn uses the native macOS system theme — no seed overrides.
+   Colors derive from the system accent and the standard window material. */
