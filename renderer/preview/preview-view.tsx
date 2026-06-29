@@ -59,19 +59,14 @@ export function PreviewView() {
   const [isPaused, setIsPaused] = useState(false);
   const [progress, setProgress] = useState(1); // 1 = full, 0 = elapsed
   const [hovered, setHovered] = useState<string | null>(null); // toolbar action id
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const startTimeRef = useRef<number>(0);
   const durationRef = useRef<number>(0);
   const remainingRef = useRef<number>(0);
+  const isHoveredRef = useRef<boolean>(false);
   // Ref tracks the current payload id so the dismiss callback is never stale
   const payloadIdRef = useRef<string | null>(null);
 
   const clearTimers = useCallback(() => {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
@@ -79,52 +74,44 @@ export function PreviewView() {
   }, []);
 
   const startCountdown = useCallback(
-    (seconds: number, remaining?: number) => {
+    (seconds: number, initialRemaining?: number) => {
       clearTimers();
       if (seconds <= 0) return;
 
       const totalMs = seconds * 1000;
-      const remainingMs = remaining ?? totalMs;
       durationRef.current = totalMs;
-      remainingRef.current = remainingMs;
-      startTimeRef.current = Date.now();
+      remainingRef.current = initialRemaining ?? totalMs;
 
-      setProgress(remainingMs / totalMs);
+      let lastTick = Date.now();
+      setProgress(remainingRef.current / totalMs);
 
-      // Tick every 50ms for smooth bar animation
+      // Single interval drives both the visual bar and the dismiss.
+      // When the cursor is over the window (isHoveredRef), ticks are skipped
+      // so neither the bar nor the dismiss timer advance.
       intervalRef.current = setInterval(() => {
-        const elapsed = Date.now() - startTimeRef.current;
-        const left = remainingMs - elapsed;
-        setProgress(Math.max(0, left / totalMs));
-      }, 50);
+        const now = Date.now();
+        const delta = now - lastTick;
+        lastTick = now;
 
-      timerRef.current = setTimeout(() => {
-        clearTimers();
-        const currentId = payloadIdRef.current;
-        console.log("[Preview:dismiss] Auto-dismiss timer elapsed", { id: currentId });
-        window.glazeAPI.glaze.ipc
-          .invoke("screenshot:dismiss", { id: currentId })
-          .catch((err: unknown) => {
-            console.error("[Preview:dismiss] Failed", err);
-          });
-      }, remainingMs);
+        if (isHoveredRef.current) return;
+
+        remainingRef.current = Math.max(0, remainingRef.current - delta);
+        setProgress(remainingRef.current / totalMs);
+
+        if (remainingRef.current <= 0) {
+          clearTimers();
+          const currentId = payloadIdRef.current;
+          console.log("[Preview:dismiss] Auto-dismiss timer elapsed", { id: currentId });
+          window.glazeAPI.glaze.ipc
+            .invoke("screenshot:dismiss", { id: currentId })
+            .catch((err: unknown) => {
+              console.error("[Preview:dismiss] Failed", err);
+            });
+        }
+      }, 50);
     },
     [clearTimers],
   );
-
-  const pauseTimer = useCallback(() => {
-    if (!timerRef.current && !intervalRef.current) return;
-    const elapsed = Date.now() - startTimeRef.current;
-    remainingRef.current = Math.max(0, remainingRef.current - elapsed);
-    clearTimers();
-    console.log("[Preview:timer] Paused, remaining:", remainingRef.current, "ms");
-  }, [clearTimers]);
-
-  const resumeTimer = useCallback(() => {
-    if (durationRef.current <= 0) return;
-    console.log("[Preview:timer] Resumed, remaining:", remainingRef.current, "ms");
-    startCountdown(durationRef.current / 1000, remainingRef.current);
-  }, [startCountdown]);
 
   // On mount, fetch initial payload
   useEffect(() => {
@@ -166,6 +153,7 @@ export function PreviewView() {
         payloadIdRef.current = newPayload.id;
         setPayload(newPayload);
         setIsPaused(false);
+        isHoveredRef.current = false;
         durationRef.current = newPayload.timeoutSeconds * 1000;
         remainingRef.current = newPayload.timeoutSeconds * 1000;
         if (newPayload.timeoutSeconds > 0) {
@@ -189,14 +177,14 @@ export function PreviewView() {
 
   const handleMouseEnter = () => {
     if (durationRef.current <= 0) return;
+    isHoveredRef.current = true;
     setIsPaused(true);
-    pauseTimer();
   };
 
   const handleMouseLeave = () => {
     if (durationRef.current <= 0) return;
+    isHoveredRef.current = false;
     setIsPaused(false);
-    resumeTimer();
   };
 
   const handleSave = async () => {
@@ -270,6 +258,8 @@ export function PreviewView() {
     <div
       className="w-screen h-screen overflow-hidden"
       style={{ background: "transparent", padding: 22 }}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
     >
       {/* Native popover-style card — opaque (surface tokens are transparent in
           this plain overlay window, so paint the solid --bg seed directly) */}
@@ -283,8 +273,6 @@ export function PreviewView() {
           outline: "0.5px solid var(--color-border-separator)",
           outlineOffset: "-0.5px",
         }}
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
       >
         {/* Countdown bar — thin strip along the top edge */}
         {showCountdownBar && (
