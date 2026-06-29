@@ -6,12 +6,7 @@ import {
   useCallback,
 } from "react";
 import { PencilIcon, CopyIcon, SaveIcon } from "lucide-react";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-  toast,
-} from "@glaze/core/components";
+import { toast } from "@glaze/core/components";
 
 interface PreviewPayload {
   id: string;
@@ -22,41 +17,40 @@ interface PreviewPayload {
 }
 
 // ─── Toolbar button ────────────────────────────────────────────────────────
-// A flat icon button: uniform across all three actions, subtle hover/active,
-// and no focus ring (this overlay never takes keyboard focus).
+// A flat icon button with a subtle rounded hover/active highlight and no focus
+// ring. Hovering reports the action so the centre hint pill can show its name.
 function ToolbarButton({
   label,
   onClick,
   disabled,
+  onHover,
   children,
 }: {
   label: string;
   onClick: () => void;
   disabled?: boolean;
+  onHover?: (hovering: boolean) => void;
   children: ReactNode;
 }) {
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          onClick={onClick}
-          disabled={disabled}
-          aria-label={label}
-          className={[
-            "inline-flex items-center justify-center size-9 rounded-lg",
-            "text-secondary transition-colors duration-100",
-            "outline-none focus:outline-none focus-visible:outline-none",
-            "hover:bg-control hover:text-primary active:bg-control-active",
-            "disabled:opacity-40 disabled:pointer-events-none",
-            "[&>svg]:size-[18px] [&>svg]:shrink-0",
-          ].join(" ")}
-        >
-          {children}
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="top">{label}</TooltipContent>
-    </Tooltip>
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      onMouseEnter={() => onHover?.(true)}
+      onMouseLeave={() => onHover?.(false)}
+      className={[
+        "inline-flex items-center justify-center size-9 rounded-lg",
+        "text-primary transition-colors duration-100",
+        "outline-none focus:outline-none focus-visible:outline-none",
+        "hover:bg-control active:bg-control-active",
+        "disabled:opacity-40 disabled:pointer-events-none",
+        "[&>svg]:size-[18px] [&>svg]:shrink-0",
+      ].join(" ")}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -64,6 +58,7 @@ export function PreviewView() {
   const [payload, setPayload] = useState<PreviewPayload | null>(null);
   const [isPaused, setIsPaused] = useState(false);
   const [progress, setProgress] = useState(1); // 1 = full, 0 = elapsed
+  const [hovered, setHovered] = useState<string | null>(null); // toolbar action id
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startTimeRef = useRef<number>(0);
@@ -242,6 +237,32 @@ export function PreviewView() {
     }
   };
 
+  // Keyboard shortcuts (work when the popup has focus): Enter→Edit, ⌘C→Copy, ⌘S→Save
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!payload) return;
+      if (e.key === "Enter") {
+        e.preventDefault();
+        handleEdit();
+      } else if (e.metaKey && e.key.toLowerCase() === "c") {
+        e.preventDefault();
+        handleCopy();
+      } else if (e.metaKey && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        handleSave();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [payload]);
+
+  const actions = [
+    { id: "edit", label: "Edit", hint: "↵", Icon: PencilIcon, onClick: handleEdit },
+    { id: "copy", label: "Copy", hint: "⌘C", Icon: CopyIcon, onClick: handleCopy },
+    { id: "save", label: "Save", hint: "⌘S", Icon: SaveIcon, onClick: handleSave },
+  ];
+  const hint = hovered ? actions.find((a) => a.id === hovered) : null;
+
   const showCountdownBar = durationRef.current > 0;
 
   return (
@@ -282,7 +303,7 @@ export function PreviewView() {
         )}
 
         {/* Thumbnail area — flex-1, neutral control backing */}
-        <div className="flex-1 flex items-center justify-center overflow-hidden min-h-0 bg-control">
+        <div className="relative flex-1 flex items-center justify-center overflow-hidden min-h-0 bg-control">
           {payload ? (
             <img
               src={payload.thumbnailDataUrl}
@@ -297,33 +318,33 @@ export function PreviewView() {
               aria-label="Loading screenshot…"
             />
           )}
+
+          {/* Hover hint pill — shows the hovered action's name + shortcut */}
+          {hint && (
+            <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full bg-control px-3.5 py-1.5 border border-separator shadow-sm">
+              <span className="text-small font-semibold text-primary leading-none">
+                {hint.label}
+              </span>
+              <span className="text-small text-secondary leading-none tabular-nums">
+                {hint.hint}
+              </span>
+            </div>
+          )}
         </div>
 
-        {/* Bottom toolbar */}
-        <div className="shrink-0 flex items-center justify-around px-3 h-12 border-t border-separator bg-surface-secondary">
-          <ToolbarButton
-            label="Edit in Preview"
-            onClick={handleEdit}
-            disabled={!payload}
-          >
-            <PencilIcon strokeWidth={1.75} />
-          </ToolbarButton>
-
-          <ToolbarButton
-            label="Copy to Clipboard"
-            onClick={handleCopy}
-            disabled={!payload}
-          >
-            <CopyIcon strokeWidth={1.75} />
-          </ToolbarButton>
-
-          <ToolbarButton
-            label="Save Screenshot"
-            onClick={handleSave}
-            disabled={!payload}
-          >
-            <SaveIcon strokeWidth={1.75} />
-          </ToolbarButton>
+        {/* Bottom toolbar — left-aligned flat icons */}
+        <div className="shrink-0 flex items-center gap-1 px-2 h-12 border-t border-separator bg-surface-secondary">
+          {actions.map(({ id, label, Icon, onClick }) => (
+            <ToolbarButton
+              key={id}
+              label={label}
+              onClick={onClick}
+              disabled={!payload}
+              onHover={(h) => setHovered(h ? id : (cur) => (cur === id ? null : cur))}
+            >
+              <Icon strokeWidth={1.75} />
+            </ToolbarButton>
+          ))}
         </div>
       </div>
     </div>
