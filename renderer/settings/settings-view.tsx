@@ -194,39 +194,87 @@ function ShortcutRecorder({ value, onChange, disabled }: ShortcutRecorderProps) 
 // ─── Keycap Logo ─────────────────────────────────────────────────────────────
 
 function PrtScnKeycap() {
+  // Blank neighbour keys, partially clipped by the SVG viewport so the mark
+  // reads like a close-up of a real keyboard. All 18×16, top-left coords.
+  const neighbours: Array<[number, number]> = [
+    [-4, -3],
+    [18, -3],
+    [40, -3], // top row
+    [-4, 18],
+    [40, 18], // sides of the centre key
+    [-4, 39],
+    [18, 39],
+    [40, 39], // bottom row
+  ];
+
+  const lip = "#b59a62";
+
   return (
-    <div
+    <svg
       aria-hidden="true"
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        width: 48,
-        height: 40,
-        borderRadius: 6,
-        background: "linear-gradient(180deg, #e8d5a8 0%, #c8b47a 55%, #b09050 100%)",
-        boxShadow:
-          "0 3px 0 #8a6830, 0 4px 6px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.45)",
-        border: "1px solid #9a7840",
-        position: "relative",
-        flexShrink: 0,
-      }}
+      width="50"
+      height="44"
+      viewBox="0 0 56 50"
+      style={{ flexShrink: 0, display: "block" }}
     >
-      <span
-        style={{
-          fontSize: 8,
-          fontWeight: 700,
-          letterSpacing: "0.04em",
-          color: "#5a3e18",
-          textShadow: "0 1px 0 rgba(255,255,255,0.3)",
-          userSelect: "none",
-          lineHeight: 1,
-          textAlign: "center",
-        }}
-      >
-        PrtScn
-      </span>
-    </div>
+      <defs>
+        <linearGradient id="prtscn-cap" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#f3e6c4" />
+          <stop offset="0.5" stopColor="#e2d09a" />
+          <stop offset="1" stopColor="#ceb87e" />
+        </linearGradient>
+        <clipPath id="prtscn-round">
+          <rect x="0" y="0" width="56" height="50" rx="9" />
+        </clipPath>
+      </defs>
+
+      <g clipPath="url(#prtscn-round)">
+        {/* Keyboard surface between the keys */}
+        <rect x="0" y="0" width="56" height="50" fill="#d8c38c" />
+
+        {/* Blank neighbouring keycaps */}
+        {neighbours.map(([x, y], i) => (
+          <g key={i}>
+            <rect x={x} y={y + 2} width="18" height="16" rx="3.5" fill={lip} />
+            <rect
+              x={x}
+              y={y}
+              width="18"
+              height="16"
+              rx="3.5"
+              fill="url(#prtscn-cap)"
+              stroke="#c2a868"
+              strokeWidth="0.6"
+            />
+          </g>
+        ))}
+
+        {/* Centre PrtScn key */}
+        <rect x="19" y="19" width="18" height="16" rx="3.5" fill="#a98a4e" />
+        <rect
+          x="19"
+          y="17"
+          width="18"
+          height="16"
+          rx="3.5"
+          fill="url(#prtscn-cap)"
+          stroke="#b89a5e"
+          strokeWidth="0.8"
+        />
+        <text
+          x="28"
+          y="26.2"
+          textAnchor="middle"
+          fontSize="5.4"
+          fontWeight="700"
+          letterSpacing="0.02em"
+          fill="#5a3e18"
+          style={{ userSelect: "none" }}
+        >
+          PrtScn
+        </text>
+      </g>
+    </svg>
   );
 }
 

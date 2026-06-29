@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "productName": "PrtScn",
   "description": "Screenshot with instant preview and",
-  "iconDescription": "A macOS screenshot utility that captures portions of the screen, windows, or entire displays and instantly shows a preview popup next to the cursor with options to save, copy, or edit. The app features customizable keyboard shortcuts and launch-on-login settings. Think of a vintage beige keyboard key with 'PrtScn' embossed on it, or a classic computer key from retro computing era. Aesthetic: vintage, retro, nostalgic.",
+  "iconDescription": "A clean, crisp close-up of a vintage beige mechanical keyboard. The central keycap is labeled 'PrtScn' and is framed by partially visible neighbouring keycaps (blank, no text) on a matching warm beige keyboard surface — NO black background, as if photographed in place on the keyboard. Warm, nostalgic, retro-computing feel but pristine and well-kept: smooth molded beige plastic, soft top highlights, gentle shadows in the gaps between keys. Absolutely no dirt, grime, dust, scratches, stains, or wear — vintage, not filthy.",
   "private": true,
   "type": "module",
   "appConfig": {
@@ -66,6 +66,6 @@
     "host": {
       "minVersion": "0.7.0.0"
     },
-    "updatedAt": 1782722019080
+    "updatedAt": 1782722343676
   }
 }
