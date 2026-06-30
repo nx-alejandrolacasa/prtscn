@@ -1,4 +1,5 @@
 import AppKit
+import ScreenCaptureKit
 import Vision
 
 /// Runs captures via the macOS `screencapture` CLI and performs the
@@ -27,9 +28,13 @@ final class ScreenshotService {
 
         // The window-background choice can add capture flags (Trim Shadow) and/or
         // require a composite afterwards (Solid color / Desktop background).
+        //
+        // A region capture (`-i`) lets the user press Space to switch to window
+        // selection, so the window-background flags must apply there too — not
+        // just to the dedicated Window mode.
         let windowBackground = SettingsStore.shared.windowBackground
         var arguments = mode.screencaptureArgs
-        if mode == .window {
+        if mode == .window || mode == .region {
             arguments += windowBackground.extraCaptureArgs
         }
 
@@ -41,8 +46,12 @@ final class ScreenshotService {
         // check the file actually exists before showing a preview.
         guard succeeded, exists else { return }
 
-        if mode == .window && windowBackground.needsComposite {
-            compositeWindowBackground(at: tmp, background: windowBackground)
+        // Composite based on what was actually captured, not the requested mode:
+        // a Space-switched region capture is a genuine window shot and should be
+        // framed just like one. `compositeWindowBackground` no-ops on opaque
+        // (region/full-screen) shots.
+        if windowBackground.needsComposite {
+            await compositeWindowBackground(at: tmp, background: windowBackground)
         }
 
         PreviewController.shared.show(imageURL: tmp)
@@ -51,10 +60,14 @@ final class ScreenshotService {
     /// Draws the chosen background behind a window capture (which is a window +
     /// drop shadow on a transparent surround) and overwrites the temp PNG with
     /// the result. All CoreGraphics — no GPU, no dependencies.
-    private func compositeWindowBackground(at url: URL, background: WindowBackground) {
+    private func compositeWindowBackground(at url: URL, background: WindowBackground) async {
         guard let image = NSImage(contentsOf: url),
               let capture = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
               capture.width > 0, capture.height > 0 else { return }
+
+        // Only window shots have a transparent surround; region rectangles and
+        // full-screen grabs are fully opaque, so there's nothing to frame.
+        guard Self.looksLikeWindowShot(capture) else { return }
 
         // Add breathing room around the window so the background is actually
         // visible as a margin (≈6% of the longest edge, clamped). The capture is
@@ -77,7 +90,7 @@ final class ScreenshotService {
             context.setFillColor(NSColor(SettingsStore.shared.windowBackgroundColor).cgColor)
             context.fill(canvas)
         case .wallpaper:
-            if let wallpaper = Self.currentWallpaperImage() {
+            if let wallpaper = await Self.currentWallpaperImage() {
                 context.draw(wallpaper, in: Self.aspectFillRect(of: wallpaper, in: canvas))
             } else {
                 context.setFillColor(NSColor.windowBackgroundColor.cgColor)
@@ -96,8 +109,64 @@ final class ScreenshotService {
         try? png.write(to: url)
     }
 
-    /// The current desktop picture for the main display, as a `CGImage`.
-    private static func currentWallpaperImage() -> CGImage? {
+    /// Heuristic: a window capture has a transparent surround (drop shadow and/or
+    /// rounded corners), whereas region rectangles and full-screen grabs are
+    /// fully opaque. We downscale to 32×32 and check the corner pixels' alpha —
+    /// cheap and robust against a single opaque corner.
+    private static func looksLikeWindowShot(_ image: CGImage) -> Bool {
+        let side = 32
+        // Start fully transparent: source-over drawing then leaves the surround
+        // transparent (window shot) or fully opaque (region/full-screen).
+        var data = [UInt8](repeating: 0, count: side * side * 4)
+        guard let context = CGContext(
+            data: &data, width: side, height: side, bitsPerComponent: 8,
+            bytesPerRow: side * 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return false }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: side, height: side))
+
+        func alpha(_ x: Int, _ y: Int) -> UInt8 { data[(y * side + x) * 4 + 3] }
+        let corners = [alpha(0, 0), alpha(side - 1, 0), alpha(0, side - 1), alpha(side - 1, side - 1)]
+        return corners.contains { $0 < 250 }
+    }
+
+    /// The current desktop wallpaper for the main display, as a `CGImage`.
+    ///
+    /// We capture the live desktop with ScreenCaptureKit (excluding every
+    /// window, so only the wallpaper remains) rather than reading the picture
+    /// file: modern macOS dynamic/HEIC wallpapers can't be loaded reliably from
+    /// `NSWorkspace.desktopImageURL`. This reuses the Screen Recording
+    /// permission the app already has. Falls back to the picture file if the
+    /// capture is unavailable.
+    private static func currentWallpaperImage() async -> CGImage? {
+        do {
+            // Get app windows only (desktop/wallpaper windows are kept out of the
+            // list). We then exclude these app windows from the capture, leaving
+            // the display's wallpaper backstop — excluding *all* windows
+            // (including the wallpaper window) makes the stream fail to start.
+            let content = try await SCShareableContent.excludingDesktopWindows(
+                true, onScreenWindowsOnly: true)
+            let main = CGMainDisplayID()
+            guard let display = content.displays.first(where: { $0.displayID == main })
+                ?? content.displays.first else { return fallbackWallpaperImage() }
+
+            let filter = SCContentFilter(display: display, excludingWindows: content.windows)
+            let config = SCStreamConfiguration()
+            // Derive the capture size from the filter (point rect × pixel scale).
+            // Using the display's point size mismatches the stream and triggers
+            // the -3811 "failed to start" error.
+            config.width = Int(filter.contentRect.width * CGFloat(filter.pointPixelScale))
+            config.height = Int(filter.contentRect.height * CGFloat(filter.pointPixelScale))
+            config.showsCursor = false
+            return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+        } catch {
+            NSLog("[PrtScn] wallpaper capture failed: \(error)")
+            return fallbackWallpaperImage()
+        }
+    }
+
+    /// Last-resort wallpaper: read the desktop picture file directly.
+    private static func fallbackWallpaperImage() -> CGImage? {
         guard let screen = NSScreen.main,
               let url = NSWorkspace.shared.desktopImageURL(for: screen),
               let image = NSImage(contentsOf: url),

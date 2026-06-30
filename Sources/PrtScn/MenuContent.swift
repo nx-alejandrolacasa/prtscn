@@ -9,30 +9,40 @@ struct MenuContent: View {
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
-        Button("Capture Region") {
+        Button {
             ScreenshotService.shared.capture(.region)
+        } label: {
+            Label("Capture Area", systemImage: "rectangle.dashed")
         }
-        Button("Capture Window") {
+        Button {
             ScreenshotService.shared.capture(.window)
+        } label: {
+            Label("Capture Window", systemImage: "macwindow")
         }
-        Button("Capture Full Screen") {
+        Button {
             ScreenshotService.shared.capture(.fullScreen)
+        } label: {
+            Label("Capture Full Screen", systemImage: "display")
         }
 
         Divider()
 
-        Button("Settings…") {
+        Button {
             // Accessory (menu-bar) apps aren't active by default, so the
             // Settings window would open behind everything — or appear not to
             // open at all. Activate first, then open it.
             NSApp.activate(ignoringOtherApps: true)
             openSettings()
+        } label: {
+            Label("Settings…", systemImage: "gearshape")
         }
 
         Divider()
 
-        Button("Quit PrtScn") {
+        Button {
             NSApplication.shared.terminate(nil)
+        } label: {
+            Label("Quit PrtScn", systemImage: "power")
         }
     }
 }
