@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   release:
-    runs-on: macos-15 # Sequoia image ships Xcode 16 / Swift 6 (matches swift-tools-version 6.0)
+    runs-on: macos-26 # Tahoe image ships Xcode 26 — required for the macOS 26 SDK (.glassEffect)
     steps:
       - uses: actions/checkout@v4
 
