@@ -22,6 +22,9 @@ struct PreviewCard: View {
     /// Drives the cursor-anchored entrance (scale + fade up from the pointer).
     @State private var appeared = false
 
+    /// True while the user is dragging the screenshot out of the card.
+    @State private var isDragging = false
+
     private var shape: RoundedRectangle {
         RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
     }
@@ -80,14 +83,43 @@ struct PreviewCard: View {
                 .background(Color.black.opacity(0.04))
                 .clipShape(thumbnailShape)
                 .overlay(thumbnailShape.strokeBorder(.white.opacity(0.10), lineWidth: 0.5))
+                .overlay {
+                    DraggableImage(image: model.image, fileURL: model.imageURL) { dragging in
+                        withAnimation(.easeOut(duration: 0.15)) { isDragging = dragging }
+                        // Keep the card alive (pause auto-dismiss) for the
+                        // duration of the drag; release the pause when it ends.
+                        model.isHovering = dragging
+                    }
+                    .clipShape(thumbnailShape)
+                }
+                // The screenshot visibly "lifts out" of the card while dragging.
+                .scaleEffect(isDragging ? 0.96 : 1)
+                .opacity(isDragging ? 0.5 : 1)
 
-            if let action = model.hoveredAction {
+            if isDragging {
+                dragHint
+                    .padding(.top, 8)
+                    .transition(.scale(scale: 0.9).combined(with: .opacity))
+            } else if let action = model.hoveredAction {
                 hintPill(action)
                     .padding(.top, 8)
                     .transition(.scale(scale: 0.9).combined(with: .opacity))
             }
         }
         .animation(.easeOut(duration: 0.12), value: model.hoveredAction)
+        .animation(.easeOut(duration: 0.12), value: isDragging)
+    }
+
+    /// Pill shown over the thumbnail while a drag-out is in progress.
+    private var dragHint: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "arrow.up.forward.app.fill")
+            Text("Drop into any app").fontWeight(.semibold)
+        }
+        .font(.system(size: 11))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .glassEffect(.regular, in: Capsule())
     }
 
     private func hintPill(_ action: PreviewAction) -> some View {
