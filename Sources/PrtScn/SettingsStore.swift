@@ -1,0 +1,147 @@
+import AppKit
+import Carbon
+import Observation
+import ServiceManagement
+import SwiftUI
+
+/// App-wide settings, persisted to `UserDefaults` and observable by SwiftUI.
+///
+/// Each property writes itself back to `UserDefaults` (and applies any live
+/// side effect) in its `didSet`. Property observers don't fire during `init`,
+/// so loading saved values in `init` doesn't trigger spurious re-saves or
+/// re-registrations.
+@MainActor
+@Observable
+final class SettingsStore {
+    static let shared = SettingsStore()
+
+    /// Register/unregister the app as a macOS login item.
+    var launchAtLogin: Bool {
+        didSet { applyLaunchAtLogin() }
+    }
+
+    /// Auto / Light / Dark — applied to the whole app immediately.
+    var appearance: Appearance {
+        didSet {
+            defaults.set(appearance.rawValue, forKey: Keys.appearance)
+            applyAppearance()
+        }
+    }
+
+    /// Seconds before the preview auto-dismisses; `0` means "Never".
+    var previewTimeout: Double {
+        didSet { defaults.set(previewTimeout, forKey: Keys.previewTimeout) }
+    }
+
+    /// What to do with an untouched capture when the preview is dismissed.
+    var defaultAction: DefaultAction {
+        didSet { defaults.set(defaultAction.rawValue, forKey: Keys.defaultAction) }
+    }
+
+    /// Folder where captures are saved.
+    var saveFolderPath: String {
+        didSet { defaults.set(saveFolderPath, forKey: Keys.saveFolder) }
+    }
+
+    /// How the area around a *window* capture is rendered (margins / solid /
+    /// wallpaper / trimmed).
+    var windowBackground: WindowBackground {
+        didSet { defaults.set(windowBackground.rawValue, forKey: Keys.windowBackground) }
+    }
+
+    /// The fill used when `windowBackground == .solidColor`.
+    var windowBackgroundColor: Color {
+        didSet { defaults.set(windowBackgroundColor.hexString, forKey: Keys.windowBackgroundColor) }
+    }
+
+    /// Global capture shortcuts, per mode. Saving re-registers the hotkeys.
+    var shortcuts: [CaptureMode: Shortcut] {
+        didSet {
+            persistShortcuts()
+            HotkeyManager.shared.reloadFromSettings()
+        }
+    }
+
+    private let defaults = UserDefaults.standard
+
+    private enum Keys {
+        static let appearance = "appearance"
+        static let previewTimeout = "previewTimeout"
+        static let defaultAction = "defaultAction"
+        static let saveFolder = "saveFolder"
+        static let shortcuts = "shortcuts"
+        static let windowBackground = "windowBackground"
+        static let windowBackgroundColor = "windowBackgroundColor"
+    }
+
+    /// Default solid-color background — a neutral dark slate.
+    static let defaultWindowBackgroundColor = "#2C2E33"
+
+    private init() {
+        appearance = Appearance(rawValue: defaults.string(forKey: Keys.appearance) ?? "") ?? .auto
+        previewTimeout = defaults.object(forKey: Keys.previewTimeout) as? Double ?? 5.0
+        defaultAction = DefaultAction(rawValue: defaults.string(forKey: Keys.defaultAction) ?? "") ?? .save
+        saveFolderPath = defaults.string(forKey: Keys.saveFolder) ?? Self.defaultSaveFolder
+        windowBackground = WindowBackground(rawValue: defaults.string(forKey: Keys.windowBackground) ?? "") ?? .margins
+        windowBackgroundColor = Color(hex: defaults.string(forKey: Keys.windowBackgroundColor) ?? Self.defaultWindowBackgroundColor)
+        shortcuts = Self.loadShortcuts(from: defaults) ?? Self.defaultShortcuts
+        // Reflect the real system login-item state rather than a stored guess.
+        launchAtLogin = (SMAppService.mainApp.status == .enabled)
+    }
+
+    // MARK: - Shortcuts
+
+    /// Defaults match the Glaze app: ⌘⌥1 / ⌘⌥2 / ⌘⌥3 (avoid macOS's ⌘⇧3/4/5).
+    static let defaultShortcuts: [CaptureMode: Shortcut] = [
+        .region: Shortcut(keyCode: UInt32(kVK_ANSI_1), modifiers: UInt32(cmdKey | optionKey)),
+        .window: Shortcut(keyCode: UInt32(kVK_ANSI_2), modifiers: UInt32(cmdKey | optionKey)),
+        .fullScreen: Shortcut(keyCode: UInt32(kVK_ANSI_3), modifiers: UInt32(cmdKey | optionKey)),
+    ]
+
+    private func persistShortcuts() {
+        let raw = Dictionary(uniqueKeysWithValues: shortcuts.map { ($0.key.rawValue, $0.value) })
+        if let data = try? JSONEncoder().encode(raw) {
+            defaults.set(data, forKey: Keys.shortcuts)
+        }
+    }
+
+    private static func loadShortcuts(from defaults: UserDefaults) -> [CaptureMode: Shortcut]? {
+        guard let data = defaults.data(forKey: Keys.shortcuts),
+              let raw = try? JSONDecoder().decode([String: Shortcut].self, from: data)
+        else { return nil }
+        return Dictionary(uniqueKeysWithValues: raw.compactMap { key, value in
+            CaptureMode(rawValue: key).map { ($0, value) }
+        })
+    }
+
+    // MARK: - Derived
+
+    static var defaultSaveFolder: String {
+        FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask)[0].path
+    }
+
+    /// Short, friendly name for the save folder (e.g. "Desktop").
+    var saveFolderDisplay: String {
+        let name = (saveFolderPath as NSString).lastPathComponent
+        return name.isEmpty ? saveFolderPath : name
+    }
+
+    // MARK: - Side effects
+
+    /// Re-applies the saved appearance. Call once at launch (see AppDelegate).
+    func applyAppearance() {
+        NSApp.appearance = appearance.nsAppearance
+    }
+
+    private func applyLaunchAtLogin() {
+        do {
+            if launchAtLogin {
+                try SMAppService.mainApp.register()
+            } else {
+                try SMAppService.mainApp.unregister()
+            }
+        } catch {
+            NSLog("[PrtScn] launch-at-login change failed: \(error)")
+        }
+    }
+}

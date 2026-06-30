@@ -1,18 +1,10 @@
-# Dependencies
-node_modules/
+# Swift / SwiftPM build output
+.build/
+build/
 
-# Agent context (auto-generated, not worth versioning)
-.glaze_memory/
+# Generated icon intermediates (AppIcon.icns is kept; regenerate the rest)
+AppIcon.iconset/
+AppIcon-preview.png
 
-# App icons (binary, auto-generated)
-app-icon.*
-
-# OS files
+# macOS
 .DS_Store
-Thumbs.db
-
-# Logs
-*.log
-
-# Glaze agent temporary files
-tmp/*
