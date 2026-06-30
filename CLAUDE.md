@@ -27,7 +27,7 @@ README → "Sign once, grant once".
 ## Layout
 
 ```
-Package.swift            SwiftPM manifest (executable, macOS 14+)
+Package.swift            SwiftPM manifest (executable, macOS 26+)
 build.sh                 build + bundle + sign
 Resources/               Info.plist (LSUIElement), AppIcon.icns
 Sources/PrtScn/          app code (see README for the file map)

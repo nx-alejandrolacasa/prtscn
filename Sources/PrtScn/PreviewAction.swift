@@ -22,7 +22,7 @@ enum PreviewAction: CaseIterable, Identifiable {
     /// SF Symbol name for the toolbar button.
     var systemImage: String {
         switch self {
-        case .edit: "pencil.tip.crop.circle"
+        case .edit: "pencil"
         case .copy: "doc.on.doc"
         case .ocr: "text.viewfinder"
         case .save: "square.and.arrow.down"

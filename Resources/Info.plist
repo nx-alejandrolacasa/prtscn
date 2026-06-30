@@ -19,7 +19,7 @@
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
-	<string>14.0</string>
+	<string>26.0</string>
 	<!-- Menu-bar app: no Dock icon, no app menu. Mirrors the accessory
 	     activation policy also set in code in AppDelegate. -->
 	<key>LSUIElement</key>

@@ -1,6 +1,10 @@
 import SwiftUI
 
 /// The floating preview card: thumbnail + countdown bar + Edit/Copy/Save toolbar.
+///
+/// The surface is macOS 26 Liquid Glass (`.glassEffect`), which renders its own
+/// specular edge highlight and contextual shadow — so the card draws no manual
+/// stroke or drop shadow of its own.
 struct PreviewCard: View {
     let model: PreviewModel
 
@@ -8,12 +12,15 @@ struct PreviewCard: View {
     /// Inner padding around the thumbnail; also the inset that makes the
     /// thumbnail's corners sit concentrically inside the card's corners.
     private let contentPadding: CGFloat = 8
-    /// Transparent breathing room around the card so the drop shadow has space
+    /// Transparent breathing room around the card so the glass shadow has space
     /// to render (the panel window itself is clear). Static so the controller
     /// can account for it when positioning the visible card near the cursor.
     static let shadowMargin: CGFloat = 18
 
     private let cardCornerRadius: CGFloat = 16
+
+    /// Drives the cursor-anchored entrance (scale + fade up from the pointer).
+    @State private var appeared = false
 
     private var shape: RoundedRectangle {
         RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
@@ -47,12 +54,16 @@ struct PreviewCard: View {
             toolbar
         }
         .frame(width: cardWidth)
-        .background(.regularMaterial, in: shape)
-        .overlay(shape.strokeBorder(.white.opacity(0.12), lineWidth: 0.5))
-        .clipShape(shape)
-        .shadow(color: .black.opacity(0.28), radius: 14, y: 6)
+        .glassEffect(.regular, in: shape)
         .padding(Self.shadowMargin)
+        .scaleEffect(appeared ? 1 : 0.92, anchor: .bottomLeading)
+        .opacity(appeared ? 1 : 0)
         .onHover { model.isHovering = $0 }
+        .onAppear {
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+                appeared = true
+            }
+        }
         .task { await model.runCountdown() }
         .background(escapeHandler)
     }
@@ -73,7 +84,7 @@ struct PreviewCard: View {
             if let action = model.hoveredAction {
                 hintPill(action)
                     .padding(.top, 8)
-                    .transition(.opacity)
+                    .transition(.scale(scale: 0.9).combined(with: .opacity))
             }
         }
         .animation(.easeOut(duration: 0.12), value: model.hoveredAction)
@@ -87,20 +98,26 @@ struct PreviewCard: View {
         .font(.system(size: 11))
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
-        .background(.regularMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(.white.opacity(0.15), lineWidth: 0.5))
-        .shadow(color: .black.opacity(0.2), radius: 3, y: 1)
+        .glassEffect(.regular, in: Capsule())
     }
 
     // MARK: - Countdown bar
 
+    /// Inset, capsule-shaped track that sits inside the glass rather than
+    /// spanning the surface as a hard seam.
     private var countdownBar: some View {
         GeometryReader { geo in
-            Rectangle()
-                .fill(Color.accentColor)
-                .frame(width: geo.size.width * model.progress)
+            Capsule()
+                .fill(.tertiary)
+                .overlay(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.accentColor)
+                        .frame(width: geo.size.width * model.progress)
+                }
         }
-        .frame(height: 2)
+        .frame(height: 3)
+        .padding(.horizontal, contentPadding)
+        .padding(.bottom, 4)
     }
 
     // MARK: - Toolbar
@@ -122,8 +139,9 @@ struct PreviewCard: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 6)
-        .overlay(Divider(), alignment: .top)
+        .padding(.horizontal, contentPadding)
+        .padding(.bottom, contentPadding)
+        .padding(.top, model.timeout > 0 ? 0 : contentPadding)
     }
 
     /// Invisible button that maps the Escape key to dismiss.
@@ -135,8 +153,9 @@ struct PreviewCard: View {
     }
 }
 
-/// A single flat icon button in the preview toolbar: no focus ring, subtle
-/// hover highlight, crisp SF Symbol.
+/// A single flat icon button in the preview toolbar. It's fully transparent so
+/// the card's Liquid Glass shows straight through it (matching tone); only a
+/// soft fill appears on hover, which also lights up the glass beneath.
 private struct ToolbarButton: View {
     let action: PreviewAction
     let onHover: (Bool) -> Void
@@ -148,17 +167,17 @@ private struct ToolbarButton: View {
         Button(action: perform) {
             Image(systemName: action.systemImage)
                 .font(.system(size: 16, weight: .medium))
-                .frame(width: 36, height: 30)
+                .frame(width: 40, height: 32)
                 .background(
-                    hovering ? Color.primary.opacity(0.10) : .clear,
-                    in: RoundedRectangle(cornerRadius: 7)
+                    hovering ? Color.primary.opacity(0.12) : .clear,
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
                 )
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .keyboardShortcut(action.keyboardShortcut)
         .onHover { isHovering in
-            hovering = isHovering
+            withAnimation(.easeOut(duration: 0.12)) { hovering = isHovering }
             onHover(isHovering)
         }
     }
