@@ -1,0 +1,55 @@
+name: Release
+
+# Push a version tag (e.g. v1.0.0) to build the app, package a DMG, and publish
+# a GitHub Release with the DMG attached.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # required for `gh release create` to publish the release
+
+jobs:
+  release:
+    runs-on: macos-15 # Sequoia image ships Xcode 16 / Swift 6 (matches swift-tools-version 6.0)
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Derive version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Stamp version into Info.plist
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" Resources/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" Resources/Info.plist
+
+      # No "PrtScn Dev" cert exists on the runner, so build.sh signs ad-hoc.
+      - name: Build app bundle
+        run: ./build.sh
+
+      - name: Package DMG
+        run: ./dmg.sh "${{ steps.version.outputs.version }}"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "build/PrtScn-${{ steps.version.outputs.version }}.dmg" \
+            --title "PrtScn ${{ steps.version.outputs.version }}" \
+            --generate-notes \
+            --notes-file - <<'NOTES'
+          ## Install
+
+          1. Open the DMG and drag **PrtScn** to **Applications**.
+          2. This build is **not notarized by Apple**, so Gatekeeper blocks it on first launch.
+             To open it, either:
+             - **Right-click PrtScn → Open**, then confirm in the dialog, **or**
+             - run once in Terminal: `xattr -cr /Applications/PrtScn.app`
+          3. Launch PrtScn — it lives in the menu bar (camera icon), no Dock icon.
+          4. Grant **Screen Recording** permission when prompted (System Settings → Privacy & Security).
+          NOTES
