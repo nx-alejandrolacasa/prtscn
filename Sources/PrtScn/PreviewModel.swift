@@ -12,6 +12,9 @@ final class PreviewModel {
     let image: NSImage
     let imageURL: URL
     let timeout: Double
+    /// Backing scale measured at capture time; passed through to the editor for
+    /// 1:1 sizing.
+    let captureScale: CGFloat
 
     /// Seconds left before auto-dismiss; drives the countdown bar.
     var remaining: Double
@@ -28,11 +31,12 @@ final class PreviewModel {
     private var handled = false
     private var closed = false
 
-    init(image: NSImage, imageURL: URL, timeout: Double = 5.0) {
+    init(image: NSImage, imageURL: URL, timeout: Double = 5.0, captureScale: CGFloat = 2) {
         self.image = image
         self.imageURL = imageURL
         self.timeout = timeout
         self.remaining = timeout
+        self.captureScale = captureScale
     }
 
     /// 1 → 0, for the width of the countdown bar.
@@ -60,9 +64,9 @@ final class PreviewModel {
     func perform(_ action: PreviewAction) {
         switch action {
         case .edit:
-            ScreenshotService.shared.edit(imageURL)
+            EditorController.shared.show(imageURL: imageURL, captureScale: captureScale)
             handled = true
-            close(cleanup: false)           // Preview is now using the file
+            close(cleanup: false)           // the editor now owns the temp file
         case .copy:
             ScreenshotService.shared.copyToClipboard(imageURL)
             handled = true
@@ -93,8 +97,8 @@ final class PreviewModel {
             ScreenshotService.shared.copyToClipboard(imageURL)
             close(cleanup: true)
         case .edit:
-            ScreenshotService.shared.edit(imageURL)
-            close(cleanup: false)   // Preview keeps using the file
+            EditorController.shared.show(imageURL: imageURL, captureScale: captureScale)
+            close(cleanup: false)   // the editor now owns the temp file
         case .discard:
             close(cleanup: true)    // delete temp, save nothing
         }

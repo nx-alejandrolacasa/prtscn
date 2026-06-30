@@ -50,6 +50,10 @@ final class ScreenshotService {
         // check the file actually exists before showing a preview.
         guard succeeded, exists else { return }
 
+        // Measure the capture's backing scale now, from the pristine PNG — the
+        // composite step below rewrites the file at 72 DPI, which would lose it.
+        let captureScale = Self.captureScale(of: tmp)
+
         // Composite based on what was actually captured, not the requested mode:
         // a Space-switched region capture is a genuine window shot and should be
         // framed just like one. `compositeWindowBackground` no-ops on opaque
@@ -58,7 +62,15 @@ final class ScreenshotService {
             await compositeWindowBackground(at: tmp, background: windowBackground)
         }
 
-        PreviewController.shared.show(imageURL: tmp)
+        PreviewController.shared.show(imageURL: tmp, captureScale: captureScale)
+    }
+
+    /// The backing scale the capture was taken at: pixel width ÷ logical (point)
+    /// width, read from the screencapture PNG's DPI. 2 on Retina, 1 otherwise.
+    private static func captureScale(of url: URL) -> CGFloat {
+        guard let image = NSImage(contentsOf: url), image.size.width > 0 else { return 2 }
+        let pixelsWide = image.representations.map(\.pixelsWide).max() ?? Int(image.size.width)
+        return max((CGFloat(pixelsWide) / image.size.width).rounded(), 1)
     }
 
     /// Draws the chosen background behind a window capture (which is a window +

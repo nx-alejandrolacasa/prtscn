@@ -11,6 +11,9 @@ struct SettingsView: View {
             CaptureSettingsView()
                 .tabItem { Label("Capture", systemImage: "camera") }
 
+            EditorSettingsView()
+                .tabItem { Label("Editor", systemImage: "pencil.and.outline") }
+
             HotkeySettingsView()
                 .tabItem { Label("Hotkeys", systemImage: "keyboard") }
         }
@@ -99,6 +102,22 @@ private struct CaptureSettingsView: View {
         if panel.runModal() == .OK, let url = panel.url {
             settings.saveFolderPath = url.path
         }
+    }
+}
+
+// MARK: - Editor
+
+private struct EditorSettingsView: View {
+    @Bindable var settings = SettingsStore.shared
+
+    var body: some View {
+        Form {
+            Section("After an action") {
+                Toggle("Close the editor after Copy, Save, or Copy Text",
+                       isOn: $settings.closeEditorAfterAction)
+            }
+        }
+        .formStyle(.grouped)
     }
 }
 

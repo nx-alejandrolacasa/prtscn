@@ -54,6 +54,21 @@ final class SettingsStore {
         didSet { defaults.set(windowBackgroundColor.hexString, forKey: Keys.windowBackgroundColor) }
     }
 
+    /// Whether the editor closes automatically after Copy / Save / Copy Text.
+    var closeEditorAfterAction: Bool {
+        didSet { defaults.set(closeEditorAfterAction, forKey: Keys.closeEditorAfterAction) }
+    }
+
+    /// Last-used annotation drawing color, remembered across editor sessions.
+    var editorColor: Color {
+        didSet { defaults.set(editorColor.hexString, forKey: Keys.editorColor) }
+    }
+
+    /// Last-used text font design.
+    var editorFontDesign: FontDesign {
+        didSet { defaults.set(editorFontDesign.rawValue, forKey: Keys.editorFontDesign) }
+    }
+
     /// Global capture shortcuts, per mode. Saving re-registers the hotkeys.
     var shortcuts: [CaptureMode: Shortcut] {
         didSet {
@@ -72,7 +87,13 @@ final class SettingsStore {
         static let shortcuts = "shortcuts"
         static let windowBackground = "windowBackground"
         static let windowBackgroundColor = "windowBackgroundColor"
+        static let closeEditorAfterAction = "closeEditorAfterAction"
+        static let editorColor = "editorColor"
+        static let editorFontDesign = "editorFontDesign"
     }
+
+    /// Default annotation color — system red.
+    static let defaultEditorColor = "#FF3B30"
 
     /// Default solid-color background — a neutral dark slate.
     static let defaultWindowBackgroundColor = "#2C2E33"
@@ -84,6 +105,9 @@ final class SettingsStore {
         saveFolderPath = defaults.string(forKey: Keys.saveFolder) ?? Self.defaultSaveFolder
         windowBackground = WindowBackground(rawValue: defaults.string(forKey: Keys.windowBackground) ?? "") ?? .margins
         windowBackgroundColor = Color(hex: defaults.string(forKey: Keys.windowBackgroundColor) ?? Self.defaultWindowBackgroundColor)
+        closeEditorAfterAction = defaults.object(forKey: Keys.closeEditorAfterAction) as? Bool ?? true
+        editorColor = Color(hex: defaults.string(forKey: Keys.editorColor) ?? Self.defaultEditorColor)
+        editorFontDesign = FontDesign(rawValue: defaults.string(forKey: Keys.editorFontDesign) ?? "") ?? .sans
         shortcuts = Self.loadShortcuts(from: defaults) ?? Self.defaultShortcuts
         // Reflect the real system login-item state rather than a stored guess.
         launchAtLogin = (SMAppService.mainApp.status == .enabled)
