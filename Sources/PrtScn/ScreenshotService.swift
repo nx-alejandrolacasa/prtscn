@@ -1,5 +1,9 @@
 import AppKit
-import ScreenCaptureKit
+// @preconcurrency: SCShareableContent isn't Sendable, which trips Swift 6's
+// strict concurrency on newer toolchains (e.g. the Xcode 16 CI runner) when its
+// result crosses an actor boundary. The value never leaves the main actor here,
+// so downgrade those errors to warnings.
+@preconcurrency import ScreenCaptureKit
 import Vision
 
 /// Runs captures via the macOS `screencapture` CLI and performs the
