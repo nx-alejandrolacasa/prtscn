@@ -166,7 +166,20 @@ final class ScreenshotService {
             guard let display = content.displays.first(where: { $0.displayID == main })
                 ?? content.displays.first else { return fallbackWallpaperImage() }
 
-            let filter = SCContentFilter(display: display, excludingWindows: content.windows)
+            // Finder's desktop-icons layer sits one level above the wallpaper
+            // itself, so `excludingDesktopWindows` above strips it out of
+            // `content.windows` along with the wallpaper — it was never in
+            // our exclude list and kept showing through. Fetch it separately
+            // (desktop windows included this time) and exclude just that
+            // layer by window level, leaving the wallpaper's own lower level
+            // alone so the stream doesn't fail to start.
+            let iconLevel = Int(CGWindowLevelForKey(.desktopIconWindow))
+            let fullContent = try await SCShareableContent.excludingDesktopWindows(
+                false, onScreenWindowsOnly: true)
+            let desktopIcons = fullContent.windows.filter { $0.windowLayer == iconLevel }
+
+            let filter = SCContentFilter(display: display,
+                                         excludingWindows: content.windows + desktopIcons)
             let config = SCStreamConfiguration()
             // Derive the capture size from the filter (point rect × pixel scale).
             // Using the display's point size mismatches the stream and triggers
