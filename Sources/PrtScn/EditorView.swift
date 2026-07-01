@@ -75,7 +75,11 @@ struct EditorView: View {
                 setExpanded(expanded == .text ? nil : .text)
             }
 
-            CounterToolControl(model: model, isExpanded: expanded == .counter) {
+            // Counter is the last tool control before the fixed divider below,
+            // so it must not draw its own trailing one (that separator already
+            // exists) — otherwise expanding it shows a double divider.
+            CounterToolControl(model: model, isExpanded: expanded == .counter,
+                               hasTrailingSeparator: true) {
                 model.tool = .counter
                 setExpanded(expanded == .counter ? nil : .counter)
             }
@@ -306,6 +310,9 @@ private struct TextToolControl: View {
 private struct CounterToolControl: View {
     let model: EditorModel
     let isExpanded: Bool
+    /// Set when a fixed divider already follows in the palette, so the trailing
+    /// separator below is skipped to avoid a double divider.
+    var hasTrailingSeparator = false
     let onToggle: () -> Void
 
     var body: some View {
@@ -326,8 +333,9 @@ private struct CounterToolControl: View {
                 Divider().frame(height: 18)
                 SizeStepper(points: model.inPoints(model.counterSize)) { model.adjustCounterSize(by: $0) }
                 // Marks where this control's expansion ends, since whatever
-                // sits next in the toolbar otherwise butts right up against it.
-                Divider().frame(height: 18)
+                // sits next in the toolbar otherwise butts right up against it —
+                // unless a fixed separator already follows.
+                if !hasTrailingSeparator { Divider().frame(height: 18) }
             }
         }
     }
