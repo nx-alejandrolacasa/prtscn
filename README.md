@@ -7,7 +7,6 @@
 **A fast, native, menu-bar screenshot utility for macOS.**
 Capture, annotate, and ship — without ever touching a Dock icon.
 
-[![Release](https://img.shields.io/github/v/release/nx-alejandrolacasa/prtscn?label=release&color=blue)](https://github.com/nx-alejandrolacasa/prtscn/releases/latest)
 ![Platform](https://img.shields.io/badge/platform-macOS%2026%2B-lightgrey)
 ![Swift](https://img.shields.io/badge/Swift-6.0-orange)
 ![Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)
