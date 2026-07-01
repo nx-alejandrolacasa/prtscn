@@ -56,8 +56,19 @@ final class EditorModel {
     /// Text size and step-counter size are tracked independently.
     var fontSize: CGFloat
     var counterSize: CGFloat
+    /// The measure tool's pixel-count label size — independent of `fontSize`
+    /// so resizing it doesn't also resize the text tool's default.
+    var measureSize: CGFloat
     /// The next step-counter badge number to stamp.
     var nextCounter: Int = 1
+
+    /// True while the eyedropper (title-bar toolbar) is active: hovering the
+    /// capture live-previews the sampled pixel's color, a click copies its hex
+    /// and exits. Independent of `tool` — it samples *from* the capture, it
+    /// doesn't feed the drawing palette.
+    var isPickingColor = false
+    var hoverColor: Color?
+    var hoverColorHex: String?
 
     /// Committed annotations, oldest first.
     private(set) var annotations: [Annotation] = []
@@ -89,9 +100,13 @@ final class EditorModel {
         let px = Self.pixelSize(of: image)
         self.pixelSize = px
         // Stored in pixel space (annotations render with them); shown in points.
-        self.lineWidth = max((min(px.width, px.height) * 0.006).rounded(), 4)
-        self.fontSize = max((px.height * 0.035).rounded(), 22)
-        self.counterSize = max((px.height * 0.04).rounded(), 28)
+        // Sized off the capture's backing scale (retina vs. not), not its content
+        // dimensions — a small window shot and a huge multi-monitor shot taken on
+        // the same display should get the same default thickness.
+        self.lineWidth = 3 * self.captureScale
+        self.fontSize = 18 * self.captureScale
+        self.counterSize = 21 * self.captureScale
+        self.measureSize = 18 * self.captureScale
     }
 
     /// A pixel size shown to the user as logical points.
@@ -227,13 +242,20 @@ final class EditorModel {
         applyStyle(to: .counter) { $0.fontSize = self.counterSize }
     }
 
+    /// Multiplies the current measure-label size and applies it to a selected
+    /// measure line if any.
+    func adjustMeasureSize(by factor: CGFloat) {
+        measureSize = clampSize(measureSize * factor)
+        applyStyle(to: .measure) { $0.fontSize = self.measureSize }
+    }
+
     func setFontDesign(_ design: FontDesign) {
         fontDesign = design
         applyTextStyleToSelection()
     }
 
     private func clampSize(_ size: CGFloat) -> CGFloat {
-        min(max(size.rounded(), max(pixelSize.height * 0.012, 10)), pixelSize.height * 0.5)
+        min(max(size.rounded(), max(6 * captureScale, 10)), pixelSize.height * 0.5)
     }
 
     /// Pushes the current size/design onto the selected (or actively edited)
@@ -318,6 +340,62 @@ final class EditorModel {
     func copyText() {
         ScreenshotService.shared.copyText(in: baseImage)
         completed("Text copied")
+    }
+
+    /// Enters eyedropper picking mode: the canvas starts live-previewing the
+    /// hovered pixel's color (see `updateHoverColor`) until a click commits it
+    /// or Escape cancels.
+    func beginPickingColor() {
+        isPickingColor = true
+        hoverColor = nil
+        hoverColorHex = nil
+    }
+
+    func cancelPickingColor() {
+        isPickingColor = false
+        hoverColor = nil
+        hoverColorHex = nil
+    }
+
+    /// Called continuously while hovering the capture in picking mode; `pixel`
+    /// is `nil` once the cursor leaves the image.
+    func updateHoverColor(at pixel: CGPoint?) {
+        guard let pixel, let sampled = colorAt(pixel: pixel) else {
+            hoverColor = nil
+            hoverColorHex = nil
+            return
+        }
+        hoverColor = Color(sampled)
+        hoverColorHex = Self.hex(sampled)
+    }
+
+    /// Copies the currently hovered color's hex to the clipboard and exits
+    /// picking mode. A no-op if the cursor wasn't over the image on click.
+    func commitPickedColor() {
+        defer { cancelPickingColor() }
+        guard let hex = hoverColorHex else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(hex, forType: .string)
+        flash(hex)
+    }
+
+    /// Samples the base image at a pixel coordinate (top-left origin, matching
+    /// the annotation pixel space) — not the canvas's rendered annotations, so
+    /// this reads the capture's real content regardless of what's drawn atop it.
+    private func colorAt(pixel: CGPoint) -> NSColor? {
+        guard let cgImage = baseImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+        let rep = NSBitmapImageRep(cgImage: cgImage)
+        let x = Int(pixel.x), y = Int(pixel.y)
+        guard x >= 0, y >= 0, x < rep.pixelsWide, y < rep.pixelsHigh else { return nil }
+        return rep.colorAt(x: x, y: y)
+    }
+
+    private static func hex(_ color: NSColor) -> String {
+        let rgb = color.usingColorSpace(.sRGB) ?? color
+        return String(format: "#%02X%02X%02X",
+                      Int((rgb.redComponent * 255).rounded()),
+                      Int((rgb.greenComponent * 255).rounded()),
+                      Int((rgb.blueComponent * 255).rounded()))
     }
 
     /// A mosaic of `rect` (pixel coords) from the base image: downscale, then
@@ -439,6 +517,24 @@ final class EditorModel {
                 context.beginPath()
                 context.addLines(between: [geometry.leftBarb, geometry.tip, geometry.rightBarb].map(flip))
                 context.strokePath()
+            case .line:
+                context.beginPath()
+                context.move(to: flip(annotation.start))
+                context.addLine(to: flip(annotation.end))
+                context.strokePath()
+            case .measure:
+                let geometry = measureGeometry(from: annotation.start, to: annotation.end,
+                                               lineWidth: annotation.lineWidth)
+                context.beginPath()
+                context.move(to: flip(geometry.start))
+                context.addLine(to: flip(geometry.end))
+                context.move(to: flip(geometry.startTickA))
+                context.addLine(to: flip(geometry.startTickB))
+                context.move(to: flip(geometry.endTickA))
+                context.addLine(to: flip(geometry.endTickB))
+                context.strokePath()
+                drawMeasureLabel(geometry, color: annotation.color, fontSize: annotation.fontSize,
+                                 in: context, imageHeight: h)
             case .rectangle:
                 context.stroke(flippedRect(annotation.boundingRect, in: h))
             case .roundedRect:
@@ -477,6 +573,40 @@ final class EditorModel {
         ])
         let size = string.size()
         guard size.width > 0, size.height > 0 else { return }
+        let label = NSImage(size: size)
+        label.lockFocus()
+        string.draw(at: .zero)
+        label.unlockFocus()
+        guard let labelImage = label.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
+        context.draw(labelImage, in: CGRect(x: center.x - size.width / 2, y: center.y - size.height / 2,
+                                            width: size.width, height: size.height))
+    }
+
+    /// The measure tool's pixel-count label, mirroring `EditorCanvas`'s on-screen
+    /// rendering: white text on a rounded pill in the annotation color, centered
+    /// on the line's midpoint. Reported in logical points (`geometry.length /
+    /// captureScale`), matching the on-screen label.
+    private func drawMeasureLabel(_ geometry: MeasureGeometry, color: Color, fontSize: CGFloat,
+                                  in context: CGContext, imageHeight: CGFloat) {
+        let center = CGPoint(x: geometry.mid.x, y: imageHeight - geometry.mid.y)
+        let string = NSAttributedString(string: "\(Int((geometry.length / captureScale).rounded())) px", attributes: [
+            .font: NSFont.systemFont(ofSize: fontSize, weight: .semibold),
+            .foregroundColor: NSColor.white,
+        ])
+        let size = string.size()
+        guard size.width > 0, size.height > 0 else { return }
+
+        let paddingX: CGFloat = fontSize * 0.35
+        let paddingY: CGFloat = fontSize * 0.18
+        let pillSize = CGSize(width: size.width + paddingX * 2, height: size.height + paddingY * 2)
+        let pillRect = CGRect(x: center.x - pillSize.width / 2, y: center.y - pillSize.height / 2,
+                              width: pillSize.width, height: pillSize.height)
+        context.setFillColor(NSColor(color).cgColor)
+        let pillPath = CGPath(roundedRect: pillRect, cornerWidth: pillSize.height / 2,
+                              cornerHeight: pillSize.height / 2, transform: nil)
+        context.addPath(pillPath)
+        context.fillPath()
+
         let label = NSImage(size: size)
         label.lockFocus()
         string.draw(at: .zero)

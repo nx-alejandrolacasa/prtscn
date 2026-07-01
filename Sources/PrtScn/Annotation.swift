@@ -7,6 +7,8 @@ import SwiftUI
 /// annotation it produces.
 enum EditTool: String, CaseIterable, Identifiable {
     case arrow
+    case line
+    case measure
     case rectangle
     case roundedRect
     case ellipse
@@ -19,6 +21,8 @@ enum EditTool: String, CaseIterable, Identifiable {
     var label: String {
         switch self {
         case .arrow: "Arrow"
+        case .line: "Line"
+        case .measure: "Measure"
         case .rectangle: "Rectangle"
         case .roundedRect: "Rounded Rectangle"
         case .ellipse: "Ellipse"
@@ -31,6 +35,8 @@ enum EditTool: String, CaseIterable, Identifiable {
     var systemImage: String {
         switch self {
         case .arrow: "arrow.up.right"
+        case .line: "line.diagonal"
+        case .measure: "ruler"
         case .rectangle: "rectangle"
         case .roundedRect: "rectangle"   // overridden by `icon`
         case .ellipse: "circle"
@@ -172,7 +178,7 @@ extension Annotation {
     /// Text has none — it's move-only.
     var handles: [(handle: ResizeHandle, point: CGPoint)] {
         switch kind {
-        case .arrow:
+        case .arrow, .line, .measure:
             return [(.start, start), (.end, end)]
         case .rectangle, .roundedRect, .ellipse, .pixelate:
             let r = boundingRect
@@ -201,7 +207,7 @@ extension Annotation {
     /// `tolerance` — used to select/move it.
     func bodyContains(_ point: CGPoint, tolerance: CGFloat) -> Bool {
         switch kind {
-        case .arrow:
+        case .arrow, .line, .measure:
             return distanceFromPoint(point, toSegment: start, end) <= tolerance + lineWidth / 2
         case .rectangle, .roundedRect, .ellipse, .pixelate:
             return boundingRect.insetBy(dx: -tolerance, dy: -tolerance).contains(point)
@@ -247,4 +253,39 @@ func arrowGeometry(from: CGPoint, to tip: CGPoint, lineWidth: CGFloat) -> ArrowG
 
     return ArrowGeometry(shaftStart: from, tip: tip,
                          leftBarb: barb(spread), rightBarb: barb(-spread))
+}
+
+/// Geometry for the measure tool: the main segment plus a short perpendicular
+/// "cutting" tick at each end (like a dimension line), the midpoint for the
+/// pixel-count label, and the segment's true length (in the same coordinate
+/// space as `from`/`to` — the capture's pixel space, so it's the real pixel
+/// distance regardless of on-screen zoom).
+struct MeasureGeometry {
+    let start: CGPoint
+    let end: CGPoint
+    let startTickA: CGPoint
+    let startTickB: CGPoint
+    let endTickA: CGPoint
+    let endTickB: CGPoint
+    let mid: CGPoint
+    let length: CGFloat
+}
+
+func measureGeometry(from: CGPoint, to: CGPoint, lineWidth: CGFloat) -> MeasureGeometry {
+    let dx = to.x - from.x, dy = to.y - from.y
+    let length = (dx * dx + dy * dy).squareRoot()
+    let (ux, uy) = length > 0.0001 ? (dx / length, dy / length) : (1, 0)
+    let (px, py) = (-uy, ux)                         // unit perpendicular
+    // Long enough to clearly poke out past the endpoint's selection-handle
+    // dot (11 view points across), not just peek out from behind it.
+    let half = max(lineWidth * 4, 12)
+
+    return MeasureGeometry(
+        start: from, end: to,
+        startTickA: CGPoint(x: from.x + px * half, y: from.y + py * half),
+        startTickB: CGPoint(x: from.x - px * half, y: from.y - py * half),
+        endTickA: CGPoint(x: to.x + px * half, y: to.y + py * half),
+        endTickB: CGPoint(x: to.x - px * half, y: to.y - py * half),
+        mid: CGPoint(x: (from.x + to.x) / 2, y: (from.y + to.y) / 2),
+        length: length)
 }

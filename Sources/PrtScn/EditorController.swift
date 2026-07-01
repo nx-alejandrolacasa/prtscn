@@ -144,6 +144,7 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
 
     private static let crop = NSToolbarItem.Identifier("PrtScn.crop")
     private static let pixelate = NSToolbarItem.Identifier("PrtScn.pixelate")
+    private static let eyedropper = NSToolbarItem.Identifier("PrtScn.eyedropper")
     private static let copy = NSToolbarItem.Identifier("PrtScn.copy")
     private static let save = NSToolbarItem.Identifier("PrtScn.save")
     private static let copyText = NSToolbarItem.Identifier("PrtScn.copyText")
@@ -154,9 +155,11 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
     }
 
     private var ordered: [NSToolbarItem.Identifier] {
-        // Crop + Pixelate sit on the leading side; a space sets Share apart from
-        // the Copy/Save/Copy Text group on the trailing side.
-        [Self.crop, Self.pixelate, .flexibleSpace, Self.copy, Self.save, Self.copyText, .space, Self.share]
+        // Crop + Pixelate + Eyedropper (all act on the image itself) sit on the
+        // leading side; a space sets Share apart from the Copy/Save/Copy Text
+        // export group on the trailing side.
+        [Self.crop, Self.pixelate, Self.eyedropper, .flexibleSpace,
+         Self.copy, Self.save, Self.copyText, .space, Self.share]
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { ordered }
@@ -181,6 +184,8 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
             spec = ("crop", "Crop", "Crop", #selector(cropAction))
         case Self.pixelate:
             spec = ("eye.slash", "Pixelate", "Pixelate", #selector(pixelateAction))
+        case Self.eyedropper:
+            spec = ("eyedropper", "Pick Color", "Pick Color", #selector(eyedropperAction))
         case Self.copy:
             spec = ("doc.on.doc", "Copy", "Copy (⌘C)", #selector(copyAction))
         case Self.save:
@@ -203,6 +208,7 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
 
     @objc private func cropAction() { model.beginCrop() }
     @objc private func pixelateAction() { model.tool = .pixelate }
+    @objc private func eyedropperAction() { model.beginPickingColor() }
     @objc private func copyAction() { model.copy() }
     @objc private func saveAction() { model.save() }
     @objc private func copyTextAction() { model.copyText() }

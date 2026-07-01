@@ -12,7 +12,7 @@ struct EditorView: View {
     /// text and color expanders mutually exclusive.
     @State private var expanded: PaletteSection?
 
-    private enum PaletteSection { case text, counter, color }
+    private enum PaletteSection { case text, counter, measure, color }
 
     /// Opens `target` (or closes, if `nil`). When switching directly between two
     /// open sections, the current one collapses *before* the next expands, so
@@ -32,9 +32,9 @@ struct EditorView: View {
     var body: some View {
         EditorCanvas(model: model)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // A subtle backdrop so transparent window-shots and any letterboxing
-            // stay legible.
-            .background(.background.secondary)
+            // Fixed dark backdrop (not theme-driven) so transparent window-shots
+            // and any letterboxing read consistently regardless of appearance.
+            .background(Color(white: 0.13))
             .overlay(alignment: .bottom) {
                 if model.isCropping { cropBar } else { palette }
             }
@@ -55,11 +55,18 @@ struct EditorView: View {
 
     private var palette: some View {
         HStack(spacing: 6) {
-            ForEach(EditTool.allCases.filter { $0 != .text && $0 != .pixelate && $0 != .counter }) { tool in
+            ForEach(EditTool.allCases.filter {
+                $0 != .text && $0 != .pixelate && $0 != .counter && $0 != .measure
+            }) { tool in
                 PaletteButton(help: tool.label, isOn: model.tool == tool) {
                     model.tool = tool
                     setExpanded(nil)
                 } icon: { tool.icon }
+            }
+
+            MeasureToolControl(model: model, isExpanded: expanded == .measure) {
+                model.tool = .measure
+                setExpanded(expanded == .measure ? nil : .measure)
             }
 
             TextToolControl(model: model, isExpanded: expanded == .text) {
@@ -117,7 +124,22 @@ struct EditorView: View {
 
     @ViewBuilder
     private var toast: some View {
-        if let status = model.statusMessage {
+        if model.isPickingColor {
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(model.hoverColor ?? .clear)
+                    .overlay(Circle().strokeBorder(.primary.opacity(0.25), lineWidth: 1))
+                    .frame(width: 14, height: 14)
+                Text(model.hoverColorHex ?? "Hover the capture")
+                    .font(.system(size: 12, weight: .medium))
+                    .monospacedDigit()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .glassEffect(.regular, in: Capsule())
+            .padding(.top, 12)
+            .transition(.move(edge: .top).combined(with: .opacity))
+        } else if let status = model.statusMessage {
             Label(status, systemImage: "checkmark.circle.fill")
                 .font(.system(size: 12, weight: .medium))
                 .padding(.horizontal, 12)
@@ -141,7 +163,9 @@ struct EditorView: View {
             Button("", action: { if model.isCropping { model.applyCrop() } })
                 .keyboardShortcut(.return, modifiers: [])
             Button("") {
-                if model.isCropping { model.cancelCrop() } else { model.selectedID = nil }
+                if model.isCropping { model.cancelCrop() }
+                else if model.isPickingColor { model.cancelPickingColor() }
+                else { model.selectedID = nil }
             }
             .keyboardShortcut(.cancelAction)
         }
@@ -267,6 +291,28 @@ private struct CounterToolControl: View {
             if isExpanded {
                 Divider().frame(height: 18)
                 SizeStepper(points: model.inPoints(model.counterSize)) { model.adjustCounterSize(by: $0) }
+            }
+        }
+    }
+}
+
+/// The measure tool: a dimension line with a pixel-count label that, while
+/// active, expands a size stepper for that label — independent of the text
+/// tool's own size.
+private struct MeasureToolControl: View {
+    let model: EditorModel
+    let isExpanded: Bool
+    let onToggle: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            PaletteButton(help: EditTool.measure.label, isOn: model.tool == .measure, action: onToggle) {
+                EditTool.measure.icon
+            }
+
+            if isExpanded {
+                Divider().frame(height: 18)
+                SizeStepper(points: model.inPoints(model.measureSize)) { model.adjustMeasureSize(by: $0) }
             }
         }
     }

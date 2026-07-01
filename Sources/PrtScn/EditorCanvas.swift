@@ -36,6 +36,7 @@ private struct DragSession {
         case finishingEdit
         case move(UUID)
         case resize(UUID, ResizeHandle)
+        case pickColor
     }
 
     let kind: Kind
@@ -85,6 +86,15 @@ struct EditorCanvas: View {
                 canvas(fit: fit)
                     .gesture(drawGesture(fit: fit))
                     .simultaneousGesture(doubleClickGesture(fit: fit))
+                    .onContinuousHover(coordinateSpace: .local) { phase in
+                        guard model.isPickingColor else { return }
+                        switch phase {
+                        case .active(let location):
+                            model.updateHoverColor(at: fit.toImage(location, clampedTo: model.pixelSize))
+                        case .ended:
+                            model.updateHoverColor(at: nil)
+                        }
+                    }
                 textOverlay(fit: fit)
             }
             .frame(width: geo.size.width, height: geo.size.height)
@@ -137,6 +147,24 @@ struct EditorCanvas: View {
             path.addLine(to: fit.toView(geometry.tip))
             path.addLine(to: fit.toView(geometry.rightBarb))
             context.stroke(path, with: .color(annotation.color), style: style)
+        case .line:
+            var path = Path()
+            path.move(to: fit.toView(annotation.start))
+            path.addLine(to: fit.toView(annotation.end))
+            context.stroke(path, with: .color(annotation.color), style: style)
+        case .measure:
+            let geometry = measureGeometry(from: annotation.start, to: annotation.end,
+                                           lineWidth: annotation.lineWidth)
+            var path = Path()
+            path.move(to: fit.toView(geometry.start))
+            path.addLine(to: fit.toView(geometry.end))
+            path.move(to: fit.toView(geometry.startTickA))
+            path.addLine(to: fit.toView(geometry.startTickB))
+            path.move(to: fit.toView(geometry.endTickA))
+            path.addLine(to: fit.toView(geometry.endTickB))
+            context.stroke(path, with: .color(annotation.color), style: style)
+            drawMeasureLabel(geometry, in: &context, fit: fit, color: annotation.color,
+                             fontSize: annotation.fontSize, captureScale: model.captureScale)
         case .rectangle:
             context.stroke(Path(rect), with: .color(annotation.color), style: style)
         case .roundedRect:
@@ -168,6 +196,36 @@ struct EditorCanvas: View {
                 .foregroundStyle(annotation.color)
             context.draw(text, at: fit.toView(annotation.start), anchor: .topLeading)
         }
+    }
+
+    /// The measure tool's pixel-count label: white text on a rounded pill in
+    /// the annotation color, centered on the line's midpoint. Reported in
+    /// logical points (`geometry.length / captureScale`) — the unit a design
+    /// spec or eyeballed estimate uses — and stays correct no matter how
+    /// zoomed-out the on-screen canvas is, since it comes from the capture's
+    /// pixel space, not the view.
+    private func drawMeasureLabel(_ geometry: MeasureGeometry, in context: inout GraphicsContext,
+                                  fit: CanvasFit, color: Color, fontSize: CGFloat, captureScale: CGFloat) {
+        // Built as a plain String first: interpolating an Int directly inside
+        // a Text("...") literal routes through LocalizedStringKey, which
+        // applies locale thousands-grouping (e.g. "1.152" on a Spanish
+        // locale) — not what we want for a raw measurement.
+        let label: String = "\(Int((geometry.length / captureScale).rounded())) px"
+        let text = Text(label)
+            .font(.system(size: fontSize * fit.scale, weight: .semibold))
+            .foregroundStyle(.white)
+        let resolved = context.resolve(text)
+        let huge = CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        let size = resolved.measure(in: huge)
+        let center = fit.toView(geometry.mid)
+        let paddingX: CGFloat = 6
+        let paddingY: CGFloat = 3
+        let pillWidth = size.width + paddingX * 2
+        let pillHeight = size.height + paddingY * 2
+        let pillOrigin = CGPoint(x: center.x - pillWidth / 2, y: center.y - pillHeight / 2)
+        let pillRect = CGRect(origin: pillOrigin, size: CGSize(width: pillWidth, height: pillHeight))
+        context.fill(Path(roundedRect: pillRect, cornerRadius: pillHeight / 2), with: .color(color))
+        context.draw(text, at: center, anchor: .center)
     }
 
     /// Draws the selection affordances: a thin outline for text (no handles) and
@@ -212,9 +270,10 @@ struct EditorCanvas: View {
 
                 switch current.kind {
                 case .draw:
+                    let labelSize = model.tool == .measure ? model.measureSize : model.fontSize
                     model.draft = Annotation(kind: model.tool, start: current.pressImage, end: image,
                                              color: model.color, lineWidth: model.lineWidth,
-                                             fontSize: model.fontSize)
+                                             fontSize: labelSize)
                 case .move(let id):
                     guard moved else { return }
                     if !current.didMutate { model.snapshot(); current.didMutate = true; session = current }
@@ -230,7 +289,7 @@ struct EditorCanvas: View {
                     case .end: model.setPoints(id: id, start: current.originalStart, end: image)
                     default: model.setPoints(id: id, start: current.anchor ?? current.originalStart, end: image)
                     }
-                case .placeText, .placeCounter, .finishingEdit:
+                case .placeText, .placeCounter, .finishingEdit, .pickColor:
                     break
                 }
             }
@@ -253,6 +312,8 @@ struct EditorCanvas: View {
                     model.stampCounter(at: current.pressImage)
                 case .finishingEdit:
                     model.finishTextEditing()
+                case .pickColor:
+                    model.commitPickedColor()
                 case .move, .resize:
                     break
                 }
@@ -262,6 +323,12 @@ struct EditorCanvas: View {
     /// Decides, on press, what this drag will do.
     private func makeSession(pressView: CGPoint, fit: CanvasFit) -> DragSession {
         let pressImage = fit.toImage(pressView, clampedTo: model.pixelSize)
+
+        // Picking mode takes over every click on the canvas until it commits
+        // or is cancelled — it doesn't select/move/draw annotations.
+        if model.isPickingColor {
+            return DragSession(kind: .pickColor, pressImage: pressImage)
+        }
 
         // A press while editing text just commits it.
         if model.editingTextID != nil {
