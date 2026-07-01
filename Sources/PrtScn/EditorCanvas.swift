@@ -90,8 +90,12 @@ struct EditorCanvas: View {
                         guard model.isPickingColor else { return }
                         switch phase {
                         case .active(let location):
+                            // Re-assert every move: SwiftUI resets the cursor on
+                            // each mouse-moved, so a one-shot set wouldn't stick.
+                            NSCursor.crosshair.set()
                             model.updateHoverColor(at: fit.toImage(location, clampedTo: model.pixelSize))
                         case .ended:
+                            NSCursor.arrow.set()
                             model.updateHoverColor(at: nil)
                         }
                     }
@@ -103,6 +107,11 @@ struct EditorCanvas: View {
         // Switching tools commits any in-progress text.
         .onChange(of: model.tool) { _, _ in
             if model.editingTextID != nil { model.finishTextEditing() }
+        }
+        // Restore the arrow the moment picking ends (a lingering crosshair would
+        // otherwise stay until the next mouse move).
+        .onChange(of: model.isPickingColor) { _, picking in
+            if !picking { NSCursor.arrow.set() }
         }
     }
 
@@ -125,7 +134,9 @@ struct EditorCanvas: View {
             }
         }
         .contentShape(Rectangle())
-        // Marquee/crosshair pointer while cropping.
+        // Marquee pointer while cropping. (The color picker uses NSCursor's
+        // crosshair instead — see the hover handler — as SwiftUI's PointerStyle
+        // has no crosshair.)
         .pointerStyle(model.isCropping ? .rectSelection : nil)
     }
 
