@@ -139,6 +139,20 @@ struct Annotation: Identifiable {
     /// Radius of the step-counter badge (image coords); `start` is its center.
     var counterRadius: CGFloat { fontSize * 0.9 }
 
+    /// A copy with a fresh identity, shifted by `offset` (pixel coords) so it
+    /// doesn't sit exactly atop the original. All style/content is preserved;
+    /// the caller re-numbers a duplicated step counter.
+    func duplicated(offsetBy offset: CGPoint) -> Annotation {
+        var copy = Annotation(kind: kind,
+                              start: CGPoint(x: start.x + offset.x, y: start.y + offset.y),
+                              end: CGPoint(x: end.x + offset.x, y: end.y + offset.y),
+                              color: color, lineWidth: lineWidth, fontSize: fontSize)
+        copy.text = text
+        copy.fontDesign = fontDesign
+        copy.number = number
+        return copy
+    }
+
     /// Corner radius for the rounded-rectangle tool, proportional to the
     /// shorter side and clamped so it reads as a squircle, not a stadium.
     var cornerRadius: CGFloat {

@@ -164,6 +164,23 @@ final class EditorModel {
         annotations[index].end = end
     }
 
+    /// Duplicates the selected annotation, offset slightly so the copy is
+    /// visible, and selects it (so ⌘D again keeps cascading). A duplicated step
+    /// counter takes the next sequential number rather than repeating the badge.
+    func duplicateSelected() {
+        finishTextEditing()
+        guard let original = selectedAnnotation else { return }
+        snapshot()
+        let offset = 16 * captureScale
+        var copy = original.duplicated(offsetBy: CGPoint(x: offset, y: offset))
+        if copy.kind == .counter {
+            copy.number = nextCounter
+            nextCounter += 1
+        }
+        annotations.append(copy)
+        selectedID = copy.id
+    }
+
     func deleteSelected() {
         guard let id = selectedID, annotations.contains(where: { $0.id == id }) else { return }
         snapshot()

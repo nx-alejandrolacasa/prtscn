@@ -165,6 +165,7 @@ struct EditorView: View {
             Button("", action: model.undo).keyboardShortcut("z", modifiers: .command)
             Button("", action: model.redo).keyboardShortcut("z", modifiers: [.command, .shift])
             Button("", action: model.deleteSelected).keyboardShortcut(.delete, modifiers: [])
+            Button("", action: model.duplicateSelected).keyboardShortcut("d", modifiers: .command)
             Button("", action: { if model.isCropping { model.applyCrop() } })
                 .keyboardShortcut(.return, modifiers: [])
             Button("") {
