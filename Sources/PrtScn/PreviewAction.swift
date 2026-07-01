@@ -3,8 +3,8 @@ import SwiftUI
 /// The three actions offered on the preview card, plus their icon, label, and
 /// keyboard shortcut.
 enum PreviewAction: CaseIterable, Identifiable {
-    case copy
     case edit
+    case copy
     case save
     case ocr
 
@@ -22,7 +22,7 @@ enum PreviewAction: CaseIterable, Identifiable {
     /// SF Symbol name for the toolbar button.
     var systemImage: String {
         switch self {
-        case .edit: "pencil"
+        case .edit: "pencil.and.outline"
         case .copy: "doc.on.doc"
         case .ocr: "text.viewfinder"
         case .save: "square.and.arrow.down"
