@@ -27,11 +27,35 @@ README → "Sign once, grant once".
 ## Layout
 
 ```
-Package.swift            SwiftPM manifest (executable, macOS 26+)
-build.sh                 build + bundle + sign
-Resources/               Info.plist (LSUIElement), AppIcon.icns
-Sources/PrtScn/          app code (see README for the file map)
-tools/IconGenerator.swift  draws the app icon (CoreGraphics); see README to regenerate
+Package.swift                 SwiftPM manifest (executable target, macOS 26)
+Resources/Info.plist          bundle metadata; LSUIElement = menu-bar app
+build.sh                      build + bundle + sign
+Sources/PrtScn/
+  PrtScnApp.swift              @main App: MenuBarExtra + Settings scenes
+  AppDelegate.swift            accessory policy, appearance + hotkey setup
+  MenuContent.swift            the menu-bar dropdown
+  CaptureMode.swift            region/window/full → screencapture flags
+  WindowBackground.swift       margins/solid/wallpaper/trim window-shot backgrounds
+  ScreenshotService.swift      runs /usr/sbin/screencapture; composite, save/copy/OCR
+  PreviewController.swift      floating NSPanel that hosts the card
+  PreviewModel.swift           card state + countdown + actions
+  PreviewCard.swift            the SwiftUI preview card
+  PreviewAction.swift          Edit/Copy/Save/Copy Text + icons + shortcuts
+  DefaultAction.swift          what happens on auto-dismiss / Esc
+  DraggableImage.swift         drag-to-export from the preview thumbnail
+  Annotation.swift             annotation model + per-tool geometry
+  EditorModel.swift            editor state, undo/redo, export flattening
+  EditorCanvas.swift           the SwiftUI Canvas: drawing + gestures
+  EditorView.swift             editor window body + floating tool palette
+  EditorController.swift       editor NSWindow + title-bar toolbar
+  SettingsStore.swift          @Observable settings, persisted to UserDefaults
+  SettingsView.swift           General / Capture / Hotkeys tabs
+  Appearance.swift             Auto/Light/Dark
+  Shortcut.swift                key code + modifiers + glyph display
+  HotkeyManager.swift          Carbon global hotkey registration
+  ShortcutRecorder.swift       click-to-record key field
+tools/IconGenerator.swift     draws the app icon (CoreGraphics); see README to regenerate
+Resources/AppIcon.icns        generated app icon
 ```
 
 ## Conventions
