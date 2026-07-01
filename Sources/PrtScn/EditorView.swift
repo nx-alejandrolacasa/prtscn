@@ -241,6 +241,9 @@ private struct TextToolControl: View {
                 fontPicker
                 Divider().frame(height: 18)
                 SizeStepper(points: model.inPoints(model.fontSize)) { model.adjustFontSize(by: $0) }
+                // Marks where this control's expansion ends, since whatever
+                // sits next in the toolbar otherwise butts right up against it.
+                Divider().frame(height: 18)
             }
         }
         .onChange(of: isExpanded) { _, open in if !open { fontExpanded = false } }
@@ -291,6 +294,9 @@ private struct CounterToolControl: View {
             if isExpanded {
                 Divider().frame(height: 18)
                 SizeStepper(points: model.inPoints(model.counterSize)) { model.adjustCounterSize(by: $0) }
+                // Marks where this control's expansion ends, since whatever
+                // sits next in the toolbar otherwise butts right up against it.
+                Divider().frame(height: 18)
             }
         }
     }
@@ -313,6 +319,9 @@ private struct MeasureToolControl: View {
             if isExpanded {
                 Divider().frame(height: 18)
                 SizeStepper(points: model.inPoints(model.measureSize)) { model.adjustMeasureSize(by: $0) }
+                // Marks where this control's expansion ends, since whatever
+                // sits next in the toolbar otherwise butts right up against it.
+                Divider().frame(height: 18)
             }
         }
     }
