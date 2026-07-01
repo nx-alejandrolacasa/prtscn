@@ -32,9 +32,10 @@ struct EditorView: View {
     var body: some View {
         EditorCanvas(model: model)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // Fixed dark backdrop (not theme-driven) so transparent window-shots
-            // and any letterboxing read consistently regardless of appearance.
-            .background(Color(white: 0.13))
+            // A Photoshop-style transparency checkerboard, so transparent
+            // window-shots and any letterboxing read clearly. Adapts its grays
+            // to light/dark mode.
+            .background(CheckerboardBackground())
             .overlay(alignment: .bottom) {
                 if model.isCropping { cropBar } else { palette }
             }
@@ -172,6 +173,36 @@ struct EditorView: View {
         .opacity(0)
         .frame(width: 0, height: 0)
         .accessibilityHidden(true)
+    }
+}
+
+/// The classic image-editor "transparency" checkerboard, drawn behind the
+/// capture so transparent window-shots and letterboxing read clearly. Its two
+/// grays follow the current appearance (light vs. dark).
+private struct CheckerboardBackground: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// Tile edge in points; each cell is one square of the pattern.
+    private let tile: CGFloat = 10
+
+    var body: some View {
+        Canvas { context, size in
+            let (base, alt) = colorScheme == .dark
+                ? (Color(white: 0.17), Color(white: 0.13))
+                : (Color(white: 1.0), Color(white: 0.90))
+            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(base))
+
+            let cols = Int((size.width / tile).rounded(.up))
+            let rows = Int((size.height / tile).rounded(.up))
+            var squares = Path()
+            for row in 0..<rows {
+                for col in 0..<cols where (row + col) % 2 == 1 {
+                    squares.addRect(CGRect(x: CGFloat(col) * tile, y: CGFloat(row) * tile,
+                                           width: tile, height: tile))
+                }
+            }
+            context.fill(squares, with: .color(alt))
+        }
     }
 }
 
