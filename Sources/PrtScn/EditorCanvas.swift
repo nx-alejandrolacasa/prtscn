@@ -73,6 +73,13 @@ struct EditorCanvas: View {
     @FocusState private var textFieldFocused: Bool
     @State private var session: DragSession?
     @State private var cropSession: CropSession?
+    /// The measure endpoint being dragged (image coords, snapped) — a magnifier
+    /// loupe follows it for pixel-precise placement. `nil` when not dragging.
+    @State private var loupePoint: CGPoint?
+    /// The hovered point (image coords, snapped) while the measure tool is
+    /// armed but not yet dragging — the loupe shows here too, so the *first*
+    /// endpoint can be aimed precisely, not just the second.
+    @State private var hoverPoint: CGPoint?
 
     /// Hit slop in view points.
     private let handleHitRadius: CGFloat = 11
@@ -87,19 +94,26 @@ struct EditorCanvas: View {
                     .gesture(drawGesture(fit: fit))
                     .simultaneousGesture(doubleClickGesture(fit: fit))
                     .onContinuousHover(coordinateSpace: .local) { phase in
-                        guard model.isPickingColor else { return }
                         switch phase {
                         case .active(let location):
-                            // Re-assert every move: SwiftUI resets the cursor on
-                            // each mouse-moved, so a one-shot set wouldn't stick.
-                            NSCursor.crosshair.set()
-                            model.updateHoverColor(at: fit.toImage(location, clampedTo: model.pixelSize))
+                            if model.isPickingColor {
+                                // Re-assert every move: SwiftUI resets the cursor on
+                                // each mouse-moved, so a one-shot set wouldn't stick.
+                                NSCursor.crosshair.set()
+                                model.updateHoverColor(at: fit.toImage(location, clampedTo: model.pixelSize))
+                            } else {
+                                hoverPoint = snapped(fit.toImage(location, clampedTo: model.pixelSize))
+                            }
                         case .ended:
-                            NSCursor.arrow.set()
-                            model.updateHoverColor(at: nil)
+                            hoverPoint = nil
+                            if model.isPickingColor {
+                                NSCursor.arrow.set()
+                                model.updateHoverColor(at: nil)
+                            }
                         }
                     }
                 textOverlay(fit: fit)
+                loupeOverlay(fit: fit, canvasSize: geo.size)
             }
             .frame(width: geo.size.width, height: geo.size.height)
             .onDeleteCommand { model.deleteSelected() }
@@ -209,19 +223,16 @@ struct EditorCanvas: View {
         }
     }
 
-    /// The measure tool's pixel-count label: white text on a rounded pill in
-    /// the annotation color, centered on the line's midpoint. Reported in
-    /// logical points (`geometry.length / captureScale`) — the unit a design
-    /// spec or eyeballed estimate uses — and stays correct no matter how
-    /// zoomed-out the on-screen canvas is, since it comes from the capture's
-    /// pixel space, not the view.
+    /// The measure tool's distance label: white text on a rounded pill in
+    /// the annotation color, centered on the line's midpoint. Formatted by
+    /// `measureLabelText` (shared with the export, so the two can never
+    /// disagree) and stays correct no matter how zoomed-out the on-screen
+    /// canvas is, since the length comes from the capture's pixel space,
+    /// not the view.
     private func drawMeasureLabel(_ geometry: MeasureGeometry, in context: inout GraphicsContext,
                                   fit: CanvasFit, color: Color, fontSize: CGFloat, captureScale: CGFloat) {
-        // Built as a plain String first: interpolating an Int directly inside
-        // a Text("...") literal routes through LocalizedStringKey, which
-        // applies locale thousands-grouping (e.g. "1.152" on a Spanish
-        // locale) — not what we want for a raw measurement.
-        let label: String = "\(Int((geometry.length / captureScale).rounded())) px"
+        let label = measureLabelText(length: geometry.length, captureScale: captureScale,
+                                     unit: SettingsStore.shared.measureUnit)
         let text = Text(label)
             .font(.system(size: fontSize * fit.scale, weight: .semibold))
             .foregroundStyle(.white)
@@ -229,14 +240,61 @@ struct EditorCanvas: View {
         let huge = CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         let size = resolved.measure(in: huge)
         let center = fit.toView(geometry.mid)
-        let paddingX: CGFloat = 6
-        let paddingY: CGFloat = 3
+        // Font-proportional, matching the export's pill exactly.
+        let paddingX: CGFloat = fontSize * 0.35 * fit.scale
+        let paddingY: CGFloat = fontSize * 0.18 * fit.scale
         let pillWidth = size.width + paddingX * 2
         let pillHeight = size.height + paddingY * 2
         let pillOrigin = CGPoint(x: center.x - pillWidth / 2, y: center.y - pillHeight / 2)
         let pillRect = CGRect(origin: pillOrigin, size: CGSize(width: pillWidth, height: pillHeight))
         context.fill(Path(roundedRect: pillRect, cornerRadius: pillHeight / 2), with: .color(color))
         context.draw(text, at: center, anchor: .center)
+    }
+
+    // MARK: - Loupe
+
+    /// The point the loupe magnifies: the dragged measure endpoint, or — while
+    /// the measure tool is armed but idle — the hovered point, so the *first*
+    /// endpoint can be aimed too.
+    private var activeLoupePoint: CGPoint? {
+        if let loupePoint { return loupePoint }
+        guard session == nil, model.tool == .measure, !model.isCropping,
+              !model.isPickingColor, model.editingTextID == nil else { return nil }
+        return hoverPoint
+    }
+
+    /// The loupe, as a real SwiftUI overlay (not Canvas drawing) so its side
+    /// flip springs across the cursor and its appearance can scale/fade in,
+    /// while its position still tracks the mouse 1:1 with no lag.
+    @ViewBuilder
+    private func loupeOverlay(fit: CanvasFit, canvasSize: CGSize) -> some View {
+        let diameter: CGFloat = 120
+        let radius = diameter / 2
+        let gap: CGFloat = 10
+        // Keep the loupe above the bottom tool palette, which floats over the
+        // canvas's bottom-center.
+        let paletteClearance: CGFloat = 56
+        let point = SettingsStore.shared.measureLoupe ? activeLoupePoint : nil
+
+        ZStack {
+            if let point {
+                let anchor = fit.toView(point)
+                // Beside the cursor; springs to the left when the right side
+                // wouldn't fit. `EditorController.minContentSize` (600×200)
+                // guarantees one side always does.
+                let fitsRight = anchor.x + gap + diameter <= canvasSize.width
+                MeasureLoupe(image: model.baseImage, pixelSize: model.pixelSize,
+                             point: point, diameter: diameter)
+                    .offset(x: fitsRight ? gap + radius : -(gap + radius))
+                    .animation(.spring(duration: 0.3, bounce: 0.25), value: fitsRight)
+                    .transition(.scale(scale: 0.6).combined(with: .opacity))
+                    .position(x: anchor.x,
+                              y: min(max(anchor.y, radius),
+                                     max(radius, canvasSize.height - radius - paletteClearance)))
+            }
+        }
+        .animation(.spring(duration: 0.25, bounce: 0.15), value: point != nil)
+        .allowsHitTesting(false)
     }
 
     /// Draws the selection affordances: a thin outline for text (no handles) and
@@ -278,33 +336,61 @@ struct EditorCanvas: View {
                 let moved = hypot(value.location.x - value.startLocation.x,
                                   value.location.y - value.startLocation.y) > 2
                 let image = fit.toImage(value.location, clampedTo: model.pixelSize)
+                let shiftDown = NSEvent.modifierFlags.contains(.shift)
 
                 switch current.kind {
                 case .draw:
-                    let labelSize = model.tool == .measure ? model.measureSize : model.fontSize
-                    model.draft = Annotation(kind: model.tool, start: current.pressImage, end: image,
+                    let isMeasure = model.tool == .measure
+                    var start = current.pressImage
+                    var end = image
+                    if shiftDown, axisLocks(model.tool) { end = axisLocked(end, relativeTo: start) }
+                    if isMeasure {
+                        start = snapped(start)
+                        end = snapped(end)
+                        loupePoint = end
+                    }
+                    let labelSize = isMeasure ? model.measureSize : model.fontSize
+                    model.draft = Annotation(kind: model.tool, start: start, end: end,
                                              color: model.color, lineWidth: model.lineWidth,
                                              fontSize: labelSize)
                 case .move(let id):
                     guard moved else { return }
                     if !current.didMutate { model.snapshot(); current.didMutate = true; session = current }
-                    let dx = image.x - current.pressImage.x, dy = image.y - current.pressImage.y
+                    var dx = image.x - current.pressImage.x, dy = image.y - current.pressImage.y
+                    // Keep a measure line's endpoints on the pixel grid across moves.
+                    if annotationKind(id) == .measure { dx = dx.rounded(); dy = dy.rounded() }
                     model.setPoints(id: id,
                                     start: CGPoint(x: current.originalStart.x + dx, y: current.originalStart.y + dy),
                                     end: CGPoint(x: current.originalEnd.x + dx, y: current.originalEnd.y + dy))
                 case .resize(let id, let handle):
                     guard moved else { return }
                     if !current.didMutate { model.snapshot(); current.didMutate = true; session = current }
+                    let kind = annotationKind(id)
+                    let isMeasure = kind == .measure
                     switch handle {
-                    case .start: model.setPoints(id: id, start: image, end: current.originalEnd)
-                    case .end: model.setPoints(id: id, start: current.originalStart, end: image)
-                    default: model.setPoints(id: id, start: current.anchor ?? current.originalStart, end: image)
+                    case .start:
+                        var p = image
+                        if shiftDown, let kind, axisLocks(kind) { p = axisLocked(p, relativeTo: current.originalEnd) }
+                        if isMeasure { p = snapped(p); loupePoint = p }
+                        model.setPoints(id: id, start: p, end: current.originalEnd)
+                    case .end:
+                        var p = image
+                        if shiftDown, let kind, axisLocks(kind) { p = axisLocked(p, relativeTo: current.originalStart) }
+                        if isMeasure { p = snapped(p); loupePoint = p }
+                        model.setPoints(id: id, start: current.originalStart, end: p)
+                    default:
+                        model.setPoints(id: id, start: current.anchor ?? current.originalStart, end: image)
                     }
                 case .placeText, .placeCounter, .finishingEdit, .pickColor:
                     break
                 }
             }
             .onEnded { value in
+                // Hover events don't fire during a drag; seed the hover point
+                // from the drag's endpoint so the loupe doesn't jump back to a
+                // stale position until the mouse next moves.
+                if let point = loupePoint { hoverPoint = point }
+                loupePoint = nil
                 if model.isCropping {
                     // Discard a too-small drag so we stay in the "draw a region" phase.
                     if let r = model.cropRect, r.width < 8 || r.height < 8 { model.cropRect = nil }
@@ -376,6 +462,30 @@ struct EditorCanvas: View {
 
     private func distance(_ a: CGPoint, _ b: CGPoint) -> CGFloat {
         hypot(a.x - b.x, a.y - b.y)
+    }
+
+    private func annotationKind(_ id: UUID) -> EditTool? {
+        model.annotations.first(where: { $0.id == id })?.kind
+    }
+
+    /// Measure endpoints snap to integer pixel *boundaries* (not centers), so
+    /// repeated measurements of the same edge always read the same and the
+    /// boundary-to-boundary width convention is preserved.
+    private func snapped(_ p: CGPoint) -> CGPoint {
+        CGPoint(x: p.x.rounded(), y: p.y.rounded())
+    }
+
+    /// Which tools Shift constrains to the dominant axis.
+    private func axisLocks(_ kind: EditTool) -> Bool {
+        kind == .measure || kind == .line || kind == .arrow
+    }
+
+    /// `p` projected onto a horizontal or vertical through `anchor`, whichever
+    /// is closer to the actual drag direction.
+    private func axisLocked(_ p: CGPoint, relativeTo anchor: CGPoint) -> CGPoint {
+        abs(p.x - anchor.x) >= abs(p.y - anchor.y)
+            ? CGPoint(x: p.x, y: anchor.y)
+            : CGPoint(x: anchor.x, y: p.y)
     }
 
     // MARK: - Double-click: edit text
@@ -530,5 +640,69 @@ struct EditorCanvas: View {
                     }
                 }
         }
+    }
+}
+
+/// The measure tool's magnifier: the capture around `point` at 8 view-points
+/// per pixel with nearest-neighbor sampling (a crisp pixel grid), a crosshair
+/// on the snapped endpoint, and a ringed, shadowed circular chrome. Pure CPU
+/// Core Graphics.
+private struct MeasureLoupe: View {
+    let image: NSImage
+    let pixelSize: CGSize
+    /// The magnified point (image coords, snapped) — sits at the center.
+    let point: CGPoint
+    let diameter: CGFloat
+
+    private let magnification: CGFloat = 8   // view points per capture pixel
+
+    var body: some View {
+        Canvas { context, size in
+            let center = CGPoint(x: size.width / 2, y: size.height / 2)
+            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.black))
+
+            guard let base = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+            else { return }
+            // Crop to just the visible neighborhood so CG never scales the
+            // whole capture; `point` stays mapped to the center even when the
+            // integral crop clamps at the image edges.
+            let radiusPx = size.width / 2 / magnification + 1
+            let crop = CGRect(x: point.x - radiusPx, y: point.y - radiusPx,
+                              width: radiusPx * 2, height: radiusPx * 2)
+                .integral.intersection(CGRect(origin: .zero, size: pixelSize))
+            guard crop.width >= 1, crop.height >= 1, let sub = base.cropping(to: crop) else { return }
+
+            context.withCGContext { cg in
+                let drawRect = CGRect(x: center.x + (crop.minX - point.x) * magnification,
+                                      y: center.y + (crop.minY - point.y) * magnification,
+                                      width: crop.width * magnification,
+                                      height: crop.height * magnification)
+                // The GraphicsContext's CGContext is y-down; unflip locally so
+                // the magnified crop isn't drawn upside down.
+                cg.saveGState()
+                cg.interpolationQuality = .none
+                cg.translateBy(x: drawRect.minX, y: drawRect.maxY)
+                cg.scaleBy(x: 1, y: -1)
+                cg.draw(sub, in: CGRect(origin: .zero, size: drawRect.size))
+                cg.restoreGState()
+            }
+        }
+        .frame(width: diameter, height: diameter)
+        .clipShape(Circle())
+        // Crosshair through the center — exactly the snapped endpoint.
+        .overlay {
+            Path { p in
+                p.move(to: CGPoint(x: 0, y: diameter / 2))
+                p.addLine(to: CGPoint(x: diameter, y: diameter / 2))
+                p.move(to: CGPoint(x: diameter / 2, y: 0))
+                p.addLine(to: CGPoint(x: diameter / 2, y: diameter))
+            }
+            .stroke(.white.opacity(0.85), lineWidth: 1)
+        }
+        .overlay(Circle().strokeBorder(.white, lineWidth: 2))
+        // Hairline dark ring just outside the white one, so the loupe still
+        // reads against light captures.
+        .overlay(Circle().inset(by: -0.5).stroke(.black.opacity(0.25), lineWidth: 1))
+        .shadow(color: .black.opacity(0.35), radius: 10, y: 3)
     }
 }

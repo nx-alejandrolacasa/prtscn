@@ -60,6 +60,39 @@ enum EditTool: String, CaseIterable, Identifiable {
     }
 }
 
+/// The unit the measure tool reports distances in — a user preference.
+enum MeasureUnit: String, CaseIterable, Identifiable {
+    case points, pixels, both
+
+    var id: Self { self }
+
+    var label: String {
+        switch self {
+        case .points: "Points (pt)"
+        case .pixels: "Pixels (px)"
+        case .both: "Both"
+        }
+    }
+}
+
+/// The measure tool's label text, shared by the on-screen canvas and the
+/// export so they can never disagree. `length` is in capture pixels;
+/// `captureScale` converts to logical points. Built as a plain `String`:
+/// interpolating an Int directly inside a `Text("...")` literal routes
+/// through LocalizedStringKey, which applies locale thousands-grouping
+/// (e.g. "1.152" on a Spanish locale) — not what we want for a raw
+/// measurement.
+func measureLabelText(length: CGFloat, captureScale: CGFloat, unit: MeasureUnit) -> String {
+    let pixels = "\(Int(length.rounded())) px"
+    let points = "\(Int((length / captureScale).rounded())) pt"
+    switch unit {
+    case .points: return points
+    case .pixels: return pixels
+    // On a 1x capture points and pixels coincide — collapse to one figure.
+    case .both: return captureScale > 1 ? "\(points) · \(pixels)" : pixels
+    }
+}
+
 /// Typeface family for text annotations — the three system designs.
 enum FontDesign: String, CaseIterable, Identifiable {
     case sans, serif, monospaced
@@ -133,7 +166,12 @@ struct Annotation: Identifiable {
         if kind == .counter { return true }   // a stamp is always valid
         if kind == .text { return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         let dx = end.x - start.x, dy = end.y - start.y
-        return (dx * dx + dy * dy).squareRoot() > 4
+        let length = (dx * dx + dy * dy).squareRoot()
+        // A 1–2 px measurement (a hairline border) is a legitimate use; the
+        // endpoints snap to the pixel grid, so a stray click snaps to zero
+        // length and is still discarded.
+        if kind == .measure { return length >= 1 }
+        return length > 4
     }
 
     /// Radius of the step-counter badge (image coords); `start` is its center.

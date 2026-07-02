@@ -116,6 +116,14 @@ private struct EditorSettingsView: View {
                 Toggle("Close the editor after Copy, Save, or Copy Text",
                        isOn: $settings.closeEditorAfterAction)
             }
+            Section("Measure tool") {
+                Picker("Show distances in", selection: $settings.measureUnit) {
+                    ForEach(MeasureUnit.allCases) { unit in
+                        Text(unit.label).tag(unit)
+                    }
+                }
+                Toggle("Show a magnifier loupe while measuring", isOn: $settings.measureLoupe)
+            }
         }
         .formStyle(.grouped)
     }

@@ -31,7 +31,7 @@ final class PreviewModel {
     private var handled = false
     private var closed = false
 
-    init(image: NSImage, imageURL: URL, timeout: Double = 5.0, captureScale: CGFloat = 2) {
+    init(image: NSImage, imageURL: URL, timeout: Double = 5.0, captureScale: CGFloat) {
         self.image = image
         self.imageURL = imageURL
         self.timeout = timeout

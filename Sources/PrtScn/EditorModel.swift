@@ -599,14 +599,16 @@ final class EditorModel {
                                             width: size.width, height: size.height))
     }
 
-    /// The measure tool's pixel-count label, mirroring `EditorCanvas`'s on-screen
+    /// The measure tool's distance label, mirroring `EditorCanvas`'s on-screen
     /// rendering: white text on a rounded pill in the annotation color, centered
-    /// on the line's midpoint. Reported in logical points (`geometry.length /
-    /// captureScale`), matching the on-screen label.
+    /// on the line's midpoint. Formatted by `measureLabelText`, the same
+    /// function the on-screen label uses, so the two can never disagree.
     private func drawMeasureLabel(_ geometry: MeasureGeometry, color: Color, fontSize: CGFloat,
                                   in context: CGContext, imageHeight: CGFloat) {
         let center = CGPoint(x: geometry.mid.x, y: imageHeight - geometry.mid.y)
-        let string = NSAttributedString(string: "\(Int((geometry.length / captureScale).rounded())) px", attributes: [
+        let labelText = measureLabelText(length: geometry.length, captureScale: captureScale,
+                                         unit: SettingsStore.shared.measureUnit)
+        let string = NSAttributedString(string: labelText, attributes: [
             .font: NSFont.systemFont(ofSize: fontSize, weight: .semibold),
             .foregroundColor: NSColor.white,
         ])

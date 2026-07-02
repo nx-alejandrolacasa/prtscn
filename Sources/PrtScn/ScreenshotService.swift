@@ -67,8 +67,13 @@ final class ScreenshotService {
 
     /// The backing scale the capture was taken at: pixel width ÷ logical (point)
     /// width, read from the screencapture PNG's DPI. 2 on Retina, 1 otherwise.
+    /// If the PNG can't be re-read, fall back to the main display's scale
+    /// rather than assuming Retina — measure labels divide by this, so a wrong
+    /// guess would silently skew every reading.
     private static func captureScale(of url: URL) -> CGFloat {
-        guard let image = NSImage(contentsOf: url), image.size.width > 0 else { return 2 }
+        guard let image = NSImage(contentsOf: url), image.size.width > 0 else {
+            return NSScreen.main?.backingScaleFactor ?? 2
+        }
         let pixelsWide = image.representations.map(\.pixelsWide).max() ?? Int(image.size.width)
         return max((CGFloat(pixelsWide) / image.size.width).rounded(), 1)
     }

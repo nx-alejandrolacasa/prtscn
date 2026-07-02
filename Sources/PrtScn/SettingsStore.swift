@@ -69,6 +69,16 @@ final class SettingsStore {
         didSet { defaults.set(editorFontDesign.rawValue, forKey: Keys.editorFontDesign) }
     }
 
+    /// The unit the measure tool's labels report distances in.
+    var measureUnit: MeasureUnit {
+        didSet { defaults.set(measureUnit.rawValue, forKey: Keys.measureUnit) }
+    }
+
+    /// Whether the measure tool shows the magnifier loupe while aiming/dragging.
+    var measureLoupe: Bool {
+        didSet { defaults.set(measureLoupe, forKey: Keys.measureLoupe) }
+    }
+
     /// Global capture shortcuts, per mode. Saving re-registers the hotkeys.
     var shortcuts: [CaptureMode: Shortcut] {
         didSet {
@@ -90,6 +100,8 @@ final class SettingsStore {
         static let closeEditorAfterAction = "closeEditorAfterAction"
         static let editorColor = "editorColor"
         static let editorFontDesign = "editorFontDesign"
+        static let measureUnit = "measureUnit"
+        static let measureLoupe = "measureLoupe"
     }
 
     /// Default annotation color — system red.
@@ -108,6 +120,8 @@ final class SettingsStore {
         closeEditorAfterAction = defaults.object(forKey: Keys.closeEditorAfterAction) as? Bool ?? true
         editorColor = Color(hex: defaults.string(forKey: Keys.editorColor) ?? Self.defaultEditorColor)
         editorFontDesign = FontDesign(rawValue: defaults.string(forKey: Keys.editorFontDesign) ?? "") ?? .sans
+        measureUnit = MeasureUnit(rawValue: defaults.string(forKey: Keys.measureUnit) ?? "") ?? .points
+        measureLoupe = defaults.object(forKey: Keys.measureLoupe) as? Bool ?? true
         shortcuts = Self.loadShortcuts(from: defaults) ?? Self.defaultShortcuts
         // Reflect the real system login-item state rather than a stored guess.
         launchAtLogin = (SMAppService.mainApp.status == .enabled)
