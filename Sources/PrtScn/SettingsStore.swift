@@ -79,6 +79,42 @@ final class SettingsStore {
         didSet { defaults.set(measureLoupe, forKey: Keys.measureLoupe) }
     }
 
+    /// Whether full-screen captures include the mouse pointer
+    /// (`screencapture -C`; interactive modes ignore the flag).
+    var includePointer: Bool {
+        didSet { defaults.set(includePointer, forKey: Keys.includePointer) }
+    }
+
+    /// Whether the system shutter sound plays on capture (`-x` silences it).
+    var shutterSound: Bool {
+        didSet { defaults.set(shutterSound, forKey: Keys.shutterSound) }
+    }
+
+    /// Filename prefix for saved/shared captures ("PrtScn 2026-01-01 at ….png").
+    var filenamePrefix: String {
+        didSet { defaults.set(filenamePrefix, forKey: Keys.filenamePrefix) }
+    }
+
+    /// `filenamePrefix` made safe for a filename: trimmed, path separators
+    /// stripped, and never empty.
+    var sanitizedFilenamePrefix: String {
+        let cleaned = filenamePrefix
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return cleaned.isEmpty ? "PrtScn" : cleaned
+    }
+
+    /// Whether the editor reopens with the last-used tool (vs. always Arrow).
+    var rememberLastTool: Bool {
+        didSet { defaults.set(rememberLastTool, forKey: Keys.rememberLastTool) }
+    }
+
+    /// The last-used editor tool, kept fresh by `EditorModel`.
+    var editorTool: EditTool {
+        didSet { defaults.set(editorTool.rawValue, forKey: Keys.editorTool) }
+    }
+
     /// Global capture shortcuts, per mode. Saving re-registers the hotkeys.
     var shortcuts: [CaptureMode: Shortcut] {
         didSet {
@@ -102,6 +138,11 @@ final class SettingsStore {
         static let editorFontDesign = "editorFontDesign"
         static let measureUnit = "measureUnit"
         static let measureLoupe = "measureLoupe"
+        static let includePointer = "includePointer"
+        static let shutterSound = "shutterSound"
+        static let filenamePrefix = "filenamePrefix"
+        static let rememberLastTool = "rememberLastTool"
+        static let editorTool = "editorTool"
     }
 
     /// Default annotation color — system red.
@@ -122,6 +163,11 @@ final class SettingsStore {
         editorFontDesign = FontDesign(rawValue: defaults.string(forKey: Keys.editorFontDesign) ?? "") ?? .sans
         measureUnit = MeasureUnit(rawValue: defaults.string(forKey: Keys.measureUnit) ?? "") ?? .points
         measureLoupe = defaults.object(forKey: Keys.measureLoupe) as? Bool ?? true
+        includePointer = defaults.object(forKey: Keys.includePointer) as? Bool ?? false
+        shutterSound = defaults.object(forKey: Keys.shutterSound) as? Bool ?? true
+        filenamePrefix = defaults.string(forKey: Keys.filenamePrefix) ?? "PrtScn"
+        rememberLastTool = defaults.object(forKey: Keys.rememberLastTool) as? Bool ?? true
+        editorTool = EditTool(rawValue: defaults.string(forKey: Keys.editorTool) ?? "") ?? .arrow
         shortcuts = Self.loadShortcuts(from: defaults) ?? Self.defaultShortcuts
         // Reflect the real system login-item state rather than a stored guess.
         launchAtLogin = (SMAppService.mainApp.status == .enabled)

@@ -41,6 +41,10 @@ final class ScreenshotService {
         if mode == .window || mode == .region {
             arguments += windowBackground.extraCaptureArgs
         }
+        if !SettingsStore.shared.shutterSound { arguments.append("-x") }
+        // Only non-interactive (full-screen) captures can include the pointer;
+        // the flag is ignored by the interactive modes.
+        if SettingsStore.shared.includePointer { arguments.append("-C") }
 
         let succeeded = await Self.runScreencapture(arguments: arguments + [tmp.path])
         let exists = FileManager.default.fileExists(atPath: tmp.path)
@@ -252,7 +256,8 @@ final class ScreenshotService {
         if !(valid && isDirectory.boolValue) {
             folder = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask)[0]
         }
-        let destination = folder.appendingPathComponent("PrtScn \(Self.timestamp()).png")
+        let destination = folder.appendingPathComponent(
+            "\(SettingsStore.shared.sanitizedFilenamePrefix) \(Self.timestamp()).png")
         do {
             try FileManager.default.copyItem(at: url, to: destination)
             return destination

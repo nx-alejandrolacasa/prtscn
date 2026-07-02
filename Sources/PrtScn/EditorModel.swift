@@ -155,7 +155,12 @@ final class EditorModel {
 
     // MARK: - Drawing state
 
-    var tool: EditTool = .arrow
+    /// Restored from the last session when the user opts in; always kept
+    /// fresh so the preference can be flipped on at any time.
+    var tool: EditTool = SettingsStore.shared.rememberLastTool
+        ? SettingsStore.shared.editorTool : .arrow {
+        didSet { SettingsStore.shared.editorTool = tool }
+    }
     /// Drawing color and text font design — remembered across sessions via
     /// `SettingsStore`.
     var color: Color {
@@ -609,7 +614,8 @@ final class EditorModel {
 
         // A friendly-named copy so share targets get a sensible filename.
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("PrtScn \(Self.shareTimestamp()).png")
+            .appendingPathComponent(
+                "\(SettingsStore.shared.sanitizedFilenamePrefix) \(Self.shareTimestamp()).png")
         try? FileManager.default.removeItem(at: url)
         let shared = (try? FileManager.default.copyItem(at: workingURL, to: url)) != nil ? url : workingURL
 

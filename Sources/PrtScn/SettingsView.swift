@@ -22,7 +22,7 @@ struct SettingsView: View {
             AboutSettingsView()
                 .tabItem { Label("About", systemImage: "info.circle") }
         }
-        .frame(width: 480, height: 320)
+        .frame(width: 480, height: 360)
     }
 }
 
@@ -45,8 +45,33 @@ private struct GeneralSettingsView: View {
             Section("Startup") {
                 Toggle("Launch PrtScn at login", isOn: $settings.launchAtLogin)
             }
+
+            Section("Files") {
+                LabeledContent("Save to") {
+                    HStack(spacing: 8) {
+                        Text(settings.saveFolderDisplay)
+                            .foregroundStyle(.secondary)
+                            .help(settings.saveFolderPath)
+                        Button("Choose…", action: chooseFolder)
+                    }
+                }
+
+                TextField("Filename prefix", text: $settings.filenamePrefix, prompt: Text("PrtScn"))
+            }
         }
         .formStyle(.grouped)
+    }
+
+    private func chooseFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        panel.directoryURL = URL(fileURLWithPath: settings.saveFolderPath)
+        if panel.runModal() == .OK, let url = panel.url {
+            settings.saveFolderPath = url.path
+        }
     }
 }
 
@@ -83,30 +108,13 @@ private struct CaptureSettingsView: View {
                 }
             }
 
-            Section("Save location") {
-                LabeledContent("Folder") {
-                    HStack(spacing: 8) {
-                        Text(settings.saveFolderDisplay)
-                            .foregroundStyle(.secondary)
-                            .help(settings.saveFolderPath)
-                        Button("Choose…", action: chooseFolder)
-                    }
-                }
+            Section("Options") {
+                Toggle("Include the mouse pointer (full-screen captures)",
+                       isOn: $settings.includePointer)
+                Toggle("Play the shutter sound", isOn: $settings.shutterSound)
             }
         }
         .formStyle(.grouped)
-    }
-
-    private func chooseFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Choose"
-        panel.directoryURL = URL(fileURLWithPath: settings.saveFolderPath)
-        if panel.runModal() == .OK, let url = panel.url {
-            settings.saveFolderPath = url.path
-        }
     }
 }
 
@@ -117,6 +125,9 @@ private struct EditorSettingsView: View {
 
     var body: some View {
         Form {
+            Section("Tools") {
+                Toggle("Reopen with the last-used tool", isOn: $settings.rememberLastTool)
+            }
             Section("After an action") {
                 Toggle("Close the editor after Copy, Save, or Copy Text",
                        isOn: $settings.closeEditorAfterAction)
