@@ -30,6 +30,10 @@ struct EditorView: View {
     }
 
     var body: some View {
+        // The canvas spans the whole content area; the frame margins around the
+        // fitted capture (and their reduction by a window shot's transparent
+        // surround) live inside `CanvasFit`, so a zoomed image can grow out of
+        // its framed rectangle and bleed edge-to-edge.
         EditorCanvas(model: model)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             // A Photoshop-style transparency checkerboard, so transparent
@@ -104,7 +108,7 @@ struct EditorView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
         .glassEffect(.regular, in: Capsule())
-        .padding(.bottom, 16)
+        .padding(.bottom, EditorController.contentMargin)
     }
 
     // MARK: - Crop bar
@@ -122,7 +126,7 @@ struct EditorView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .glassEffect(.regular, in: Capsule())
-        .padding(.bottom, 16)
+        .padding(.bottom, EditorController.contentMargin)
     }
 
     // MARK: - Toast
@@ -152,6 +156,14 @@ struct EditorView: View {
                 .glassEffect(.regular, in: Capsule())
                 .padding(.top, 12)
                 .transition(.move(edge: .top).combined(with: .opacity))
+        } else if let tip = model.tipMessage {
+            Label(tip, systemImage: "hand.draw")
+                .font(.system(size: 12, weight: .medium))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .glassEffect(.regular, in: Capsule())
+                .padding(.top, 12)
+                .transition(.move(edge: .top).combined(with: .opacity))
         }
     }
 
@@ -166,6 +178,11 @@ struct EditorView: View {
             Button("", action: model.redo).keyboardShortcut("z", modifiers: [.command, .shift])
             Button("", action: model.deleteSelected).keyboardShortcut(.delete, modifiers: [])
             Button("", action: model.duplicateSelected).keyboardShortcut("d", modifiers: .command)
+            Button("", action: model.zoomIn).keyboardShortcut("+", modifiers: .command)
+            // ⌘= zooms in too — on many layouts "+" needs Shift, "=" doesn't.
+            Button("", action: model.zoomIn).keyboardShortcut("=", modifiers: .command)
+            Button("", action: model.zoomOut).keyboardShortcut("-", modifiers: .command)
+            Button("", action: model.resetZoom).keyboardShortcut("0", modifiers: .command)
             Button("", action: { if model.isCropping { model.applyCrop() } })
                 .keyboardShortcut(.return, modifiers: [])
             Button("") {

@@ -1,7 +1,9 @@
 import AppKit
 import SwiftUI
 
-/// The Settings window: General / Capture / Hotkeys tabs.
+/// The Settings window: General / Capture / Editor / Hotkeys / About tabs.
+/// About lives here because a menu-bar app has no app menu to hang the
+/// standard About panel from.
 struct SettingsView: View {
     var body: some View {
         TabView {
@@ -16,6 +18,9 @@ struct SettingsView: View {
 
             HotkeySettingsView()
                 .tabItem { Label("Hotkeys", systemImage: "keyboard") }
+
+            AboutSettingsView()
+                .tabItem { Label("About", systemImage: "info.circle") }
         }
         .frame(width: 480, height: 320)
     }
@@ -176,5 +181,56 @@ private struct HotkeySettingsView: View {
         var updated = settings.shortcuts
         updated[mode] = value
         settings.shortcuts = updated
+    }
+}
+
+// MARK: - About
+
+/// The stand-in for the standard About panel (a menu-bar app has no app menu):
+/// icon, name, version, author, and copyright, all read from the bundle so the
+/// dev variant shows its own identity automatically.
+private struct AboutSettingsView: View {
+    private var appName: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? "PrtScn"
+    }
+
+    private var version: String {
+        let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
+        return "Version \(short) (\(build))"
+    }
+
+    private var copyright: String {
+        Bundle.main.object(forInfoDictionaryKey: "NSHumanReadableCopyright") as? String
+            ?? "© 2026 Alejandro G. Lacasa"
+    }
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .frame(width: 84, height: 84)
+
+            Text(appName)
+                .font(.title3.weight(.semibold))
+            Text(version)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            Text("The Print Screen key your Mac never had.")
+                .font(.callout)
+                .padding(.top, 10)
+
+            Spacer(minLength: 0)
+
+            Text("Created by Alejandro G. Lacasa")
+                .font(.callout)
+            Text(copyright)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.top, 18)
+        .padding(.bottom, 14)
+        .frame(maxWidth: .infinity)
     }
 }

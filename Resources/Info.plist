@@ -14,10 +14,12 @@
 	<string>AppIcon</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
+	<!-- Placeholders — build.sh stamps the real version (its VERSION variable)
+	     and build number (git commit count) into the bundled copy. -->
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.0</string>
+	<string>0.0.0</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>0</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>26.0</string>
 	<!-- Menu-bar app: no Dock icon, no app menu. Mirrors the accessory
@@ -25,6 +27,6 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
-	<string>PrtScn</string>
+	<string>© 2026 Alejandro G. Lacasa. All rights reserved.</string>
 </dict>
 </plist>

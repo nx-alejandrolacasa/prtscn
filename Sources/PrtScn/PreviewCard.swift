@@ -199,6 +199,9 @@ private struct ToolbarButton: View {
         Button(action: perform) {
             Image(systemName: action.systemImage)
                 .font(.system(size: 16, weight: .medium))
+                // Subtler than full primary: dark gray on light glass, light
+                // gray on dark — regaining contrast on hover.
+                .foregroundStyle(.primary.opacity(hovering ? 0.9 : 0.65))
                 .frame(width: 40, height: 32)
                 .background(
                     hovering ? Color.primary.opacity(0.12) : .clear,

@@ -9,9 +9,14 @@ been removed — this is now a pure native Swift app.)
 ## Build & run
 
 - **No full Xcode** here — Command Line Tools only. Use **Swift Package Manager**.
-- `./build.sh` — compile + assemble `build/PrtScn.app` (Info.plist + code sign).
-- `./build.sh run` — also launch it. It's a menu-bar app (no Dock icon); look for
-  the camera icon in the menu bar.
+- `./build.sh` — compile + assemble the **dev** app, `build/PrtScn Dev.app`
+  (bundle id `…prtscn.dev`, camera-with-ellipsis menu-bar icon, ⌘⌥⇧ default
+  hotkeys) so it coexists with an installed stable copy — separate Screen
+  Recording grant, settings, and login item.
+- `./build.sh run` — also (re)launch it (kills only the dev instance).
+- `./build.sh install` — build the **release** app (`PrtScn.app`, bundle id
+  `…prtscn`) and install/relaunch it in `/Applications`.
+- It's a menu-bar app (no Dock icon); look for the camera icon in the menu bar.
 - `swift build -c release --disable-sandbox` to just compile. `--disable-sandbox`
   is required when building inside an agent/CI shell (SwiftPM's own sandbox can't
   nest); harmless otherwise.

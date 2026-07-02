@@ -7,16 +7,36 @@
 # (so macOS Screen Recording permission can be granted and remembered). SwiftPM
 # only produces a bare executable, so we wrap it here.
 #
+# Two variants, so a stable install and a work-in-progress build can run side
+# by side without fighting over permissions, settings, or hotkeys:
+#   dev     → "PrtScn Dev.app", bundle id com.alejandrolacasa.prtscn.dev
+#   release → "PrtScn.app",     bundle id com.alejandrolacasa.prtscn
+# macOS keys Screen Recording (TCC), UserDefaults, and login items to the
+# bundle id, so each variant gets its own one-time permission grant and its
+# own settings. The app itself shows a distinct menu-bar icon for the dev
+# build and defaults its hotkeys to ⌘⌥⇧ (vs ⌘⌥) so both can coexist.
+#
 # Usage:
-#   ./build.sh        build + bundle
-#   ./build.sh run    build + bundle + launch
+#   ./build.sh            build the DEV app (build/PrtScn Dev.app)
+#   ./build.sh run        build the dev app + (re)launch it
+#   ./build.sh release    build the RELEASE app bundle (build/PrtScn.app) only
+#                         — what CI uses before packaging the DMG
+#   ./build.sh install    build the RELEASE app + install into /Applications
+#                         (replacing and relaunching the installed copy)
 
 set -euo pipefail
 cd "$(dirname "$0")"
 
-APP_NAME="PrtScn"
+if [[ "${1:-}" == "install" || "${1:-}" == "release" ]]; then
+  APP_NAME="PrtScn"
+  BUNDLE_ID="com.alejandrolacasa.prtscn"
+else
+  APP_NAME="PrtScn Dev"
+  BUNDLE_ID="com.alejandrolacasa.prtscn.dev"
+fi
+
 CONFIG="release"
-BIN=".build/${CONFIG}/${APP_NAME}"
+BIN=".build/${CONFIG}/PrtScn"
 APP="build/${APP_NAME}.app"
 
 # --disable-sandbox: SwiftPM normally wraps build steps in its own sandbox,
@@ -32,12 +52,30 @@ cp "$BIN" "$APP/Contents/MacOS/${APP_NAME}"
 cp "Resources/Info.plist" "$APP/Contents/Info.plist"
 cp "Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 
+# The marketing version. Bump it here when cutting a release; the build
+# number comes from git (commit count — monotonic and reproducible), so the
+# About tab and Finder always show which build this actually is. CI overrides
+# the version from the pushed tag via PRTSCN_VERSION.
+VERSION="${PRTSCN_VERSION:-0.4.0}"
+BUILD_NUMBER="$(git rev-list --count HEAD 2>/dev/null || echo 0)"
+
+# Stamp the variant's identity and the version into the bundle.
+/usr/libexec/PlistBuddy \
+  -c "Set :CFBundleIdentifier ${BUNDLE_ID}" \
+  -c "Set :CFBundleName ${APP_NAME}" \
+  -c "Set :CFBundleDisplayName ${APP_NAME}" \
+  -c "Set :CFBundleExecutable ${APP_NAME}" \
+  -c "Set :CFBundleShortVersionString ${VERSION}" \
+  -c "Set :CFBundleVersion ${BUILD_NUMBER}" \
+  "$APP/Contents/Info.plist"
+
 # Code signing.
 #
 # macOS ties Screen Recording (and other) permissions to the app's signing
 # identity. An ad-hoc signature ("-") changes every build, so macOS re-prompts
 # for permission each time. Signing with a STABLE self-signed certificate keeps
 # the identity constant, so you grant Screen Recording once and it sticks.
+# (Both variants share the certificate; their bundle ids keep them distinct.)
 #
 # Create the certificate once (see README "Sign once, grant once"), then this
 # script picks it up automatically. Override the name with PRTSCN_SIGN_IDENTITY.
@@ -56,7 +94,17 @@ fi
 echo "Built ${APP}"
 
 if [[ "${1:-}" == "run" ]]; then
-  # Relaunch cleanly if an old instance is running.
+  # Relaunch cleanly if an old dev instance is running (the installed
+  # "PrtScn" is a different process name and is left alone).
   pkill -x "$APP_NAME" 2>/dev/null || true
   open "$APP"
+fi
+
+if [[ "${1:-}" == "install" ]]; then
+  killall "$APP_NAME" 2>/dev/null || true
+  rm -rf "/Applications/${APP_NAME}.app"
+  # ditto preserves the code signature and metadata better than cp.
+  ditto "$APP" "/Applications/${APP_NAME}.app"
+  open "/Applications/${APP_NAME}.app"
+  echo "Installed /Applications/${APP_NAME}.app"
 fi

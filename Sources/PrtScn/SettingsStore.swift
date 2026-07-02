@@ -129,12 +129,20 @@ final class SettingsStore {
 
     // MARK: - Shortcuts
 
-    /// Defaults match the Glaze app: ⌘⌥1 / ⌘⌥2 / ⌘⌥3 (avoid macOS's ⌘⇧3/4/5).
-    static let defaultShortcuts: [CaptureMode: Shortcut] = [
-        .region: Shortcut(keyCode: UInt32(kVK_ANSI_1), modifiers: UInt32(cmdKey | optionKey)),
-        .window: Shortcut(keyCode: UInt32(kVK_ANSI_2), modifiers: UInt32(cmdKey | optionKey)),
-        .fullScreen: Shortcut(keyCode: UInt32(kVK_ANSI_3), modifiers: UInt32(cmdKey | optionKey)),
-    ]
+    /// ⌘⌥1 / ⌘⌥2 / ⌘⌥3 (avoiding macOS's ⌘⇧3/4/5). The dev build — its own
+    /// bundle id, run alongside the installed app — adds ⇧ so the two don't
+    /// register the same global hotkeys. (Each variant persists its own
+    /// shortcuts anyway; these are just the first-run defaults.)
+    static let defaultShortcuts: [CaptureMode: Shortcut] = {
+        let modifiers = Bundle.main.bundleIdentifier?.hasSuffix(".dev") == true
+            ? UInt32(cmdKey | optionKey | shiftKey)
+            : UInt32(cmdKey | optionKey)
+        return [
+            .region: Shortcut(keyCode: UInt32(kVK_ANSI_1), modifiers: modifiers),
+            .window: Shortcut(keyCode: UInt32(kVK_ANSI_2), modifiers: modifiers),
+            .fullScreen: Shortcut(keyCode: UInt32(kVK_ANSI_3), modifiers: modifiers),
+        ]
+    }()
 
     private func persistShortcuts() {
         let raw = Dictionary(uniqueKeysWithValues: shortcuts.map { ($0.key.rawValue, $0.value) })

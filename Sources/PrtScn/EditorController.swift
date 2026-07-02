@@ -12,6 +12,9 @@ final class EditorController: NSObject, NSWindowDelegate {
     private var model: EditorModel?
     /// Retained because `NSToolbar.delegate` is weak.
     private var toolbarDelegate: EditorToolbarDelegate?
+    /// Local right-mouse event monitor that pans the zoomed capture.
+    private var panMonitor: Any?
+    private var isPanning = false
 
     private override init() {}
 
@@ -29,17 +32,20 @@ final class EditorController: NSObject, NSWindowDelegate {
         // content's fitting size — we set the window to the capture's 1:1 size
         // and the content must fill it (otherwise the image scales down to fit).
         hosting.sizingOptions = []
-        let size = Self.windowSize(for: image, captureScale: captureScale)
+        let size = Self.windowSize(for: model)
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
-        window.title = "PrtScn"
+        window.title = "PrtScn"   // kept for Mission Control / the Window menu
+        // No title text in the title bar itself — the brand lives in the menu
+        // bar, and hiding it lets the tool groups hug the traffic lights.
+        window.titleVisibility = .hidden
         window.contentViewController = hosting
         // Assigning the content view controller makes AppKit resize the window to
-        // the SwiftUI view's fitting size (the 600pt min width), so force the
+        // the SwiftUI view's fitting size (the minimum width), so force the
         // capture's 1:1 size back afterwards.
         window.setContentSize(size)
         window.contentMinSize = Self.minContentSize   // never shrink past the buttons
@@ -56,11 +62,17 @@ final class EditorController: NSObject, NSWindowDelegate {
         toolbar.displayMode = .iconOnly
         window.toolbar = toolbar
         window.toolbarStyle = .unified
+        // Attaching the toolbar changes the title-bar height, and AppKit's
+        // frame math then inflates a content size set before it (the window
+        // opened ~32pt too tall, letterboxing the capture). Re-assert the
+        // content size now that the final title-bar height is known.
+        window.setContentSize(size)
+        window.center()
 
         // Resize the window to fit the image after a crop.
         model.onGeometryChange = { [weak window, weak model] in
             guard let window, let model else { return }
-            window.setContentSize(Self.windowSize(for: model.baseImage, captureScale: model.captureScale))
+            window.setContentSize(Self.windowSize(for: model))
             window.center()
         }
 
@@ -68,71 +80,142 @@ final class EditorController: NSObject, NSWindowDelegate {
         self.model = model
         self.toolbarDelegate = toolbarDelegate
 
+        // Right-click drag pans the capture while zoomed in. A local monitor
+        // (scoped to this window's content area) sees the events no matter
+        // which SwiftUI view sits under the cursor; left-clicks are untouched,
+        // so drawing/selecting keeps working while zoomed. Monitors deliver on
+        // the main thread (hence `assumeIsolated`), but NSEvent isn't
+        // Sendable, so its payload is unpacked before crossing in.
+        panMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.rightMouseDown, .rightMouseDragged, .rightMouseUp]
+        ) { event in
+            let type = event.type
+            let windowID = event.window.map(ObjectIdentifier.init)
+            let location = event.locationInWindow
+            let dx = event.deltaX, dy = event.deltaY
+            let consumed = MainActor.assumeIsolated {
+                Self.shared.handlePan(type: type, windowID: windowID,
+                                      location: location, dx: dx, dy: dy)
+            }
+            return consumed ? nil : event
+        }
+
         // Accessory (menu-bar) apps need an explicit activate for a normal
         // window to come forward and accept keyboard focus.
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
     }
 
+    /// Consumes right-mouse events over the editor's content while zoomed in,
+    /// turning the drag into a pan (with a grabbing-hand cursor). Returns
+    /// whether the event was consumed.
+    private func handlePan(type: NSEvent.EventType, windowID: ObjectIdentifier?,
+                           location: NSPoint, dx: CGFloat, dy: CGFloat) -> Bool {
+        guard let window, let model, windowID == ObjectIdentifier(window),
+              model.canZoomOut else { return false }
+        switch type {
+        case .rightMouseDown:
+            guard let content = window.contentView,
+                  content.bounds.contains(content.convert(location, from: nil))
+            else { return false }
+            isPanning = true
+            NSCursor.closedHand.set()
+        case .rightMouseDragged:
+            guard isPanning else { return false }
+            model.panBy(dx: dx, dy: dy)
+        default:
+            guard isPanning else { return false }
+            isPanning = false
+            NSCursor.arrow.set()
+        }
+        return true
+    }
+
     func close() {
         model?.close()      // cleans up the temp file (guarded against re-entry)
         window?.orderOut(nil)
-        window = nil
-        model = nil
-        toolbarDelegate = nil
+        teardown()
     }
 
     /// The standard close button routes here — tear down through the model so
     /// the temp file is cleaned up exactly once.
     func windowWillClose(_ notification: Notification) {
         model?.close()
+        teardown()
+    }
+
+    private func teardown() {
         window = nil
         model = nil
         toolbarDelegate = nil
+        isPanning = false
+        if let panMonitor { NSEvent.removeMonitor(panMonitor) }
+        panMonitor = nil
     }
 
-    /// The smallest content area: wide enough for the full tool palette (and the
-    /// title-bar buttons), with just enough height for the palette. The window
-    /// otherwise hugs the capture's 1:1 size, capped to the screen — so it isn't
-    /// letterboxed around a short image.
-    static let minContentSize = NSSize(width: 600, height: 200)
+    /// Breathing room around the capture (left / top / right), so the floating
+    /// controls and the loupe aren't glued to the image.
+    static let contentMargin: CGFloat = 32
+
+    /// Height of the floating tool palette / crop bar capsule (28pt buttons +
+    /// 7pt vertical padding each side — see `PaletteButton` / `palette`).
+    static let paletteHeight: CGFloat = 42
+
+    /// The band reserved *below* the capture: a margin, the palette, and
+    /// another margin — so the palette floats in its own space instead of
+    /// covering the image.
+    static var bottomInset: CGFloat { contentMargin + paletteHeight + contentMargin }
+
+    /// The canvas padding for a capture: the frame margins *minus* whatever
+    /// transparent surround the capture already carries (a window shot's
+    /// shadow box), so the visible breathing room around the content is the
+    /// same for every capture type. Shared by the view layout and
+    /// `windowSize(for:)` so they can't drift apart.
+    static func canvasPadding(for model: EditorModel) -> NSEdgeInsets {
+        let insets = model.contentInsets
+        return NSEdgeInsets(top: max(0, contentMargin - insets.top),
+                            left: max(0, contentMargin - insets.left),
+                            bottom: max(0, bottomInset - insets.bottom),
+                            right: max(0, contentMargin - insets.right))
+    }
+
+    /// The smallest content area: wide enough that every title-bar toolbar
+    /// item (crop/pixelate/eyedropper, the −/%/+ zoom group, and the export
+    /// buttons) stays visible without collapsing into the overflow chevron —
+    /// and for the full tool palette; tall enough for the palette band plus a
+    /// canvas that can still fit the measure loupe. The window otherwise hugs
+    /// the capture's 1:1 size plus margins, capped to the screen. (The title
+    /// text is hidden, so the width only has to cover the tool groups.)
+    static let minContentSize = NSSize(width: 680, height: 280)
 
     /// Sizes the window so the capture opens at full resolution: its true pixel
     /// dimensions mapped 1:1 to the screen's device pixels (pixels ÷ backing
-    /// scale → points). The window hugs the screenshot — it isn't enlarged past
-    /// it — except that it never opens smaller than the toolbar needs, and a
-    /// capture too large to fit (e.g. a full-screen grab) is scaled down,
-    /// preserving aspect.
-    private static func windowSize(for image: NSImage, captureScale: CGFloat) -> NSSize {
+    /// scale → points), framed by `canvasPadding` — the standard margins,
+    /// reduced by any transparent surround the capture brings itself. The
+    /// image — not its frame — is scaled down when a capture is too large for
+    /// the screen (e.g. a full-screen grab), and the window never opens
+    /// smaller than the toolbar needs.
+    private static func windowSize(for model: EditorModel) -> NSSize {
         let visible = NSScreen.main?.visibleFrame.size ?? NSSize(width: 1440, height: 900)
-        let pixels = pixelSize(of: image)
         // The capture's logical (1:1) size = pixels ÷ the scale it was taken at.
-        var w = pixels.width / max(captureScale, 1)
-        var h = pixels.height / max(captureScale, 1)
+        var w = model.pixelSize.width / model.captureScale
+        var h = model.pixelSize.height / model.captureScale
         guard w > 0, h > 0 else { return NSSize(width: 820, height: 620) }
 
-        // Shrink to fit the visible screen only if needed; never enlarge.
-        let fit = min(1, min(visible.width * 0.95 / w, visible.height * 0.95 / h))
-        w *= fit
-        h *= fit
+        // Shrink the image to fit the visible screen (frame included) only if
+        // needed; never enlarge.
+        let padding = canvasPadding(for: model)
+        let horizontalChrome = padding.left + padding.right
+        let verticalChrome = padding.top + padding.bottom
+        let fit = min(1, min((visible.width * 0.95 - horizontalChrome) / w,
+                             (visible.height * 0.95 - verticalChrome) / h))
+        w = w * fit + horizontalChrome
+        h = h * fit + verticalChrome
         // Floor at the toolbar's minimum so the controls always fit.
         return NSSize(width: max(w.rounded(), minContentSize.width),
                       height: max(h.rounded(), minContentSize.height))
     }
 
-    /// The capture's real pixel dimensions, read from its bitmap representation
-    /// (independent of any DPI metadata in `NSImage.size`).
-    private static func pixelSize(of image: NSImage) -> NSSize {
-        var width = 0
-        var height = 0
-        for rep in image.representations {
-            width = max(width, rep.pixelsWide)
-            height = max(height, rep.pixelsHigh)
-        }
-        return width > 0 && height > 0
-            ? NSSize(width: width, height: height)
-            : image.size
-    }
 }
 
 /// Supplies the editor window's toolbar items (Copy / Save / Copy Text) as
@@ -141,10 +224,13 @@ final class EditorController: NSObject, NSWindowDelegate {
 @MainActor
 final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingServicePickerToolbarItemDelegate {
     private let model: EditorModel
+    /// The ( − | % | + ) control, kept to live-update its percentage segment.
+    private weak var zoomControl: NSSegmentedControl?
 
     private static let crop = NSToolbarItem.Identifier("PrtScn.crop")
     private static let pixelate = NSToolbarItem.Identifier("PrtScn.pixelate")
     private static let eyedropper = NSToolbarItem.Identifier("PrtScn.eyedropper")
+    private static let zoom = NSToolbarItem.Identifier("PrtScn.zoom")
     private static let copy = NSToolbarItem.Identifier("PrtScn.copy")
     private static let save = NSToolbarItem.Identifier("PrtScn.save")
     private static let copyText = NSToolbarItem.Identifier("PrtScn.copyText")
@@ -156,9 +242,10 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
 
     private var ordered: [NSToolbarItem.Identifier] {
         // Crop + Pixelate + Eyedropper (all act on the image itself) sit on the
-        // leading side; a space sets Share apart from the Copy/Save/Copy Text
-        // export group on the trailing side.
-        [Self.crop, Self.pixelate, Self.eyedropper, .flexibleSpace,
+        // leading side, with the zoom −/+ group set apart next to them; a space
+        // sets Share apart from the Copy/Save/Copy Text export group on the
+        // trailing side.
+        [Self.crop, Self.pixelate, Self.eyedropper, .space, Self.zoom, .flexibleSpace,
          Self.copy, Self.save, Self.copyText, .space, Self.share]
     }
 
@@ -168,6 +255,34 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
     func toolbar(_ toolbar: NSToolbar,
                  itemForItemIdentifier id: NSToolbarItem.Identifier,
                  willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
+        if id == Self.zoom {
+            // One connected ( − | 100% | + ) control: a segmented control with
+            // the live zoom percentage as a display-only middle segment.
+            let control = NSSegmentedControl()
+            control.segmentCount = 3
+            control.trackingMode = .momentary
+            control.setImage(NSImage(systemSymbolName: "minus.magnifyingglass",
+                                     accessibilityDescription: "Zoom Out"), forSegment: 0)
+            control.setLabel("100%", forSegment: 1)
+            control.setEnabled(false, forSegment: 1)   // a readout, not a button
+            // Fixed width: no jitter as digits change, and roomy enough that
+            // even "1000%" never truncates to an ellipsis.
+            control.setWidth(58, forSegment: 1)
+            control.setImage(NSImage(systemSymbolName: "plus.magnifyingglass",
+                                     accessibilityDescription: "Zoom In"), forSegment: 2)
+            control.target = self
+            control.action = #selector(zoomAction(_:))
+
+            let group = NSToolbarItemGroup(itemIdentifier: id)
+            group.view = control
+            group.label = "Zoom"
+            group.toolTip = "Zoom (⌘− / ⌘+, ⌘0 resets, or pinch)"
+            zoomControl = control
+            updateZoomLabel()
+            observeZoomPercent()
+            return group
+        }
+
         if id == Self.share {
             let item = NSSharingServicePickerToolbarItem(itemIdentifier: id)
             item.toolTip = "Share"
@@ -204,6 +319,29 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
         item.target = self
         item.action = spec.action
         return item
+    }
+
+    @objc private func zoomAction(_ sender: NSSegmentedControl) {
+        if sender.selectedSegment == 0 { model.zoomOut() } else { model.zoomIn() }
+    }
+
+    private func updateZoomLabel() {
+        zoomControl?.setLabel("\(model.zoomPercent)%", forSegment: 1)
+    }
+
+    /// Re-renders the percentage segment whenever anything `zoomPercent` reads
+    /// (zoom, canvas size, crop) changes — the Observation equivalent of what
+    /// a SwiftUI view would do automatically, re-armed after each change.
+    private func observeZoomPercent() {
+        withObservationTracking {
+            _ = model.zoomPercent
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self, self.zoomControl != nil else { return }
+                self.updateZoomLabel()
+                self.observeZoomPercent()
+            }
+        }
     }
 
     @objc private func cropAction() { model.beginCrop() }

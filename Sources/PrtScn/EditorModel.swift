@@ -27,9 +27,123 @@ final class EditorModel {
     /// Used to display the image at native size and to show sizes in points.
     let captureScale: CGFloat
 
+    /// Insets (in points) of the capture's *opaque* content within its bounds.
+    /// Window shots in "margins" mode keep their transparent shadow surround —
+    /// the editor's frame margins subtract these so the visible breathing room
+    /// around the content stays consistent for every capture type. Zero for
+    /// opaque captures. Recomputed after a crop.
+    private(set) var contentInsets = NSEdgeInsets()
+
     /// Called after the image geometry changes (a crop) so the controller can
     /// resize the window to fit.
     var onGeometryChange: (() -> Void)?
+
+    // MARK: - Zoom & pan
+
+    /// Canvas magnification on top of the aspect-fit base scale. 1 = fitted.
+    private(set) var zoom: CGFloat = 1
+    /// Pan offset (view points) from the centered position while zoomed in.
+    /// `CanvasFit` ignores it on any axis where the image still fits.
+    private(set) var pan: CGSize = .zero
+    /// The canvas's current size (view points), reported by `EditorCanvas`,
+    /// so zoom and pan can be clamped without the view's geometry at hand.
+    private(set) var canvasSize: CGSize = .zero
+    /// Transient hint shown in the toast slot (e.g. how to pan while zoomed).
+    private(set) var tipMessage: String?
+
+    /// The −/+ buttons move in steps of this many percentage points.
+    private static let zoomStepPercent: CGFloat = 50
+    private static let maxZoom: CGFloat = 8
+
+    var canZoomIn: Bool { zoom < Self.maxZoom }
+    var canZoomOut: Bool { zoom > 1 }
+
+    func zoomIn() { stepZoom(by: 1) }
+
+    func zoomOut() { stepZoom(by: -1) }
+
+    func resetZoom() { setZoom(1) }
+
+    /// Steps the displayed percentage to the next multiple of 50 in the given
+    /// direction. From an in-between state (a pinch), the first step lands on
+    /// the nearest multiple in that direction; a hair's distance from a
+    /// multiple (float noise from a previous step) counts as being on it.
+    private func stepZoom(by direction: CGFloat) {
+        let unit = fittedPercent
+        guard unit > 0 else { return }
+        let step = Self.zoomStepPercent
+        let current = zoom * unit
+        let nearest = (current / step).rounded() * step
+        let target: CGFloat
+        if abs(current - nearest) < 1 {
+            target = nearest + direction * step
+        } else {
+            target = direction > 0 ? ceil(current / step) * step : floor(current / step) * step
+        }
+        setZoom(target / unit)
+    }
+
+    /// Sets an absolute zoom (clamped) — the continuous path used by pinching;
+    /// the stepped buttons funnel through it too.
+    func setZoom(_ value: CGFloat) {
+        let new = min(max(value, 1), Self.maxZoom)
+        guard new != zoom else { return }
+        if zoom == 1, new > 1 { showTip("Right-click and drag to move around") }
+        // Scale the pan proportionally so the point at the anchor stays put
+        // while zooming.
+        pan = CGSize(width: pan.width * new / zoom, height: pan.height * new / zoom)
+        zoom = new
+        if zoom == 1 { pan = .zero } else { clampPan() }
+    }
+
+    /// The percentage shown at zoom 1 — the fitted scale relative to the
+    /// capture's 1:1 point size. 100 when the capture fits at true size; a
+    /// large capture that had to be fitted down starts lower.
+    private var fittedPercent: CGFloat {
+        guard canvasSize.width > 0, pixelSize.width > 0 else { return 100 }
+        let base = CanvasFit.baseScale(pixelSize: pixelSize, captureScale: captureScale,
+                                       insets: EditorController.canvasPadding(for: self),
+                                       in: canvasSize)
+        return base * captureScale * 100
+    }
+
+    /// The displayed scale relative to the capture's 1:1 point size — what the
+    /// title-bar percentage shows. 100% = true size.
+    var zoomPercent: Int { Int((fittedPercent * zoom).rounded()) }
+
+    /// Right-click-drag panning; deltas in view points.
+    func panBy(dx: CGFloat, dy: CGFloat) {
+        guard zoom > 1 else { return }
+        pan.width += dx
+        pan.height += dy
+        clampPan()
+    }
+
+    func setCanvasSize(_ size: CGSize) {
+        canvasSize = size
+        clampPan()
+    }
+
+    /// Keeps the stored pan within what `CanvasFit` can actually show, so it
+    /// doesn't accumulate off-screen distance that would make later zoom-outs
+    /// or window resizes land somewhere stale.
+    private func clampPan() {
+        guard canvasSize.width > 0, canvasSize.height > 0,
+              pixelSize.width > 0, pixelSize.height > 0 else { return }
+        let insets = EditorController.canvasPadding(for: self)
+        let scale = CanvasFit.baseScale(pixelSize: pixelSize, captureScale: captureScale,
+                                        insets: insets, in: canvasSize) * zoom
+        let drawn = CGSize(width: pixelSize.width * scale, height: pixelSize.height * scale)
+        pan = CanvasFit.clampedPan(drawn: drawn, pan: pan, insets: insets, in: canvasSize)
+    }
+
+    private func showTip(_ message: String) {
+        tipMessage = message
+        Task {
+            try? await Task.sleep(for: .seconds(3))
+            if tipMessage == message { tipMessage = nil }
+        }
+    }
 
     // MARK: - Crop
 
@@ -107,6 +221,47 @@ final class EditorModel {
         self.fontSize = 18 * self.captureScale
         self.counterSize = 21 * self.captureScale
         self.measureSize = 18 * self.captureScale
+        self.contentInsets = Self.opaqueInsets(of: image, dividedBy: self.captureScale)
+    }
+
+    /// Bounding box of the pixels with meaningful alpha, as insets from the
+    /// image edges, converted to points. Zero if the capture is fully opaque
+    /// (the common case: the first row/column scanned is already opaque) or
+    /// fully transparent.
+    private static func opaqueInsets(of image: NSImage, dividedBy scale: CGFloat) -> NSEdgeInsets {
+        guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            return NSEdgeInsets()
+        }
+        let w = cg.width, h = cg.height
+        guard w > 0, h > 0 else { return NSEdgeInsets() }
+        var data = [UInt8](repeating: 0, count: w * h * 4)
+        guard let context = CGContext(
+            data: &data, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return NSEdgeInsets() }
+        context.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+
+        // Row 0 of the buffer is the top scanline. "Opaque" = alpha ≥ 10%,
+        // so a whisper of shadow doesn't count as content.
+        func rowHasContent(_ y: Int) -> Bool {
+            let base = y * w * 4
+            for x in 0..<w where data[base + x * 4 + 3] >= 26 { return true }
+            return false
+        }
+        func columnHasContent(_ x: Int) -> Bool {
+            for y in 0..<h where data[(y * w + x) * 4 + 3] >= 26 { return true }
+            return false
+        }
+        guard let top = (0..<h).first(where: rowHasContent),
+              let bottom = (0..<h).reversed().first(where: rowHasContent),
+              let left = (0..<w).first(where: columnHasContent),
+              let right = (0..<w).reversed().first(where: columnHasContent)
+        else { return NSEdgeInsets() }
+        return NSEdgeInsets(top: CGFloat(top) / scale,
+                            left: CGFloat(left) / scale,
+                            bottom: CGFloat(h - 1 - bottom) / scale,
+                            right: CGFloat(w - 1 - right) / scale)
     }
 
     /// A pixel size shown to the user as logical points.
@@ -224,6 +379,9 @@ final class EditorModel {
 
         baseImage = NSImage(cgImage: cropped, size: rect.size)
         pixelSize = rect.size
+        contentInsets = Self.opaqueInsets(of: baseImage, dividedBy: captureScale)
+        zoom = 1
+        pan = .zero
         selectedID = nil
         onGeometryChange?()
     }

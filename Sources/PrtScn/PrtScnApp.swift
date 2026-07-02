@@ -12,10 +12,17 @@ struct PrtScnApp: App {
     /// the preview panel and global hotkeys — things SwiftUI alone can't do.
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
+    /// The dev variant (bundle id suffixed ".dev" by build.sh) runs alongside
+    /// the installed app — give it a visibly different menu-bar icon.
+    private var isDevBuild: Bool {
+        Bundle.main.bundleIdentifier?.hasSuffix(".dev") == true
+    }
+
     var body: some Scene {
         // The menu-bar item. `.menu` style makes it a classic dropdown menu
         // (vs. a popover window). The SF Symbol is the menu-bar icon.
-        MenuBarExtra("PrtScn", systemImage: "camera.viewfinder") {
+        MenuBarExtra(isDevBuild ? "PrtScn Dev" : "PrtScn",
+                     systemImage: isDevBuild ? "camera.badge.ellipsis" : "camera.viewfinder") {
             MenuContent()
         }
         .menuBarExtraStyle(.menu)

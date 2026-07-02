@@ -4,8 +4,9 @@
 
 # PrtScn
 
-**A fast, native, menu-bar screenshot utility for macOS.**
-Capture, annotate, and ship — without ever touching a Dock icon.
+**The Print Screen key your Mac never had.**
+A fast, native, menu-bar screenshot utility for macOS —
+capture, annotate, and ship without ever touching a Dock icon.
 
 ![Platform](https://img.shields.io/badge/platform-macOS%2026%2B-lightgrey)
 ![Swift](https://img.shields.io/badge/Swift-6.0-orange)
@@ -15,12 +16,14 @@ Capture, annotate, and ship — without ever touching a Dock icon.
 
 ---
 
-PrtScn lives quietly in your menu bar and gets out of the way. Fire a global
-shortcut, grab a region / window / the whole screen, and a preview pops up
-right next to your cursor — copy it, save it, or drop straight into a
-built-in editor to annotate before it ever touches your clipboard. No
-third-party dependencies, no telemetry, no background daemon eating your
-battery — just system frameworks, doing exactly what you asked.
+PrtScn takes its name from the old keyboard's **Print Screen** key — the one
+that promised exactly this and delivered a full-screen dump to nowhere. This
+is that key, done right: it lives quietly in your menu bar and gets out of
+the way. Fire a global shortcut, grab a region / window / the whole screen,
+and a preview pops up right next to your cursor — copy it, save it, or drop
+straight into a built-in editor to annotate before it ever touches your
+clipboard. No third-party dependencies, no telemetry, no background daemon
+eating your battery — just system frameworks, doing exactly what you asked.
 
 ## Highlights
 

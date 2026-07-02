@@ -1,19 +1,58 @@
 import SwiftUI
 
-/// Maps between the capture's pixel space and on-screen view coordinates for an
-/// aspect-fit image.
-private struct CanvasFit {
+/// Maps between the capture's pixel space and on-screen view coordinates.
+///
+/// The canvas spans the window's whole content area; `insets` describe the
+/// frame margins (and the palette band) the *fitted* image sits within. As
+/// `zoom` grows, the image expands out of that framed area — its boundaries
+/// move into the margins and eventually bleed edge-to-edge — rather than
+/// magnifying inside a fixed rectangle.
+struct CanvasFit {
     let imageRect: CGRect
     let scale: CGFloat
 
-    init(pixelSize: CGSize, captureScale: CGFloat, in size: CGSize) {
-        // Fit the image, but never enlarge past its native 1:1 size
-        // (1 / captureScale view-points per pixel), so it always reads true-size.
-        let scale = min(size.width / pixelSize.width, size.height / pixelSize.height, 1 / max(captureScale, 1))
+    /// The aspect-fit scale at zoom 1: fit the framed (inset) area, but never
+    /// enlarge past the image's native 1:1 size (1 / captureScale view-points
+    /// per pixel), so it always reads true-size.
+    static func baseScale(pixelSize: CGSize, captureScale: CGFloat,
+                          insets: NSEdgeInsets, in size: CGSize) -> CGFloat {
+        let available = CGSize(width: max(size.width - insets.left - insets.right, 1),
+                               height: max(size.height - insets.top - insets.bottom, 1))
+        return min(available.width / pixelSize.width, available.height / pixelSize.height,
+                   1 / max(captureScale, 1))
+    }
+
+    /// Center of the framed area — the point the image grows around.
+    private static func anchor(insets: NSEdgeInsets, in size: CGSize) -> CGPoint {
+        CGPoint(x: insets.left + (size.width - insets.left - insets.right) / 2,
+                y: insets.top + (size.height - insets.top - insets.bottom) / 2)
+    }
+
+    /// Pan clamped per axis: while the image fits in the window it stays fully
+    /// visible; once it overflows, no gap may open at an edge. Shared with
+    /// `EditorModel` so the stored pan never drifts off what can be shown.
+    static func clampedPan(drawn: CGSize, pan: CGSize,
+                           insets: NSEdgeInsets, in size: CGSize) -> CGSize {
+        let anchor = anchor(insets: insets, in: size)
+        func clamp(_ pan: CGFloat, anchor: CGFloat, drawn: CGFloat, full: CGFloat) -> CGFloat {
+            let origin = anchor - drawn / 2 + pan
+            let clamped = min(max(origin, min(0, full - drawn)), max(0, full - drawn))
+            return pan + (clamped - origin)
+        }
+        return CGSize(width: clamp(pan.width, anchor: anchor.x, drawn: drawn.width, full: size.width),
+                      height: clamp(pan.height, anchor: anchor.y, drawn: drawn.height, full: size.height))
+    }
+
+    init(pixelSize: CGSize, captureScale: CGFloat, zoom: CGFloat, pan: CGSize,
+         insets: NSEdgeInsets, in size: CGSize) {
+        let scale = Self.baseScale(pixelSize: pixelSize, captureScale: captureScale,
+                                   insets: insets, in: size) * zoom
         let drawn = CGSize(width: pixelSize.width * scale, height: pixelSize.height * scale)
+        let anchor = Self.anchor(insets: insets, in: size)
+        let pan = Self.clampedPan(drawn: drawn, pan: pan, insets: insets, in: size)
         self.scale = scale
-        self.imageRect = CGRect(x: (size.width - drawn.width) / 2,
-                                y: (size.height - drawn.height) / 2,
+        self.imageRect = CGRect(x: anchor.x - drawn.width / 2 + pan.width,
+                                y: anchor.y - drawn.height / 2 + pan.height,
                                 width: drawn.width, height: drawn.height)
     }
 
@@ -73,6 +112,9 @@ struct EditorCanvas: View {
     @FocusState private var textFieldFocused: Bool
     @State private var session: DragSession?
     @State private var cropSession: CropSession?
+    /// The zoom level when a pinch began; the gesture's magnification is
+    /// relative to it, so consecutive pinches compound naturally.
+    @State private var pinchBaseZoom: CGFloat?
     /// The measure endpoint being dragged (image coords, snapped) — a magnifier
     /// loupe follows it for pixel-precise placement. `nil` when not dragging.
     @State private var loupePoint: CGPoint?
@@ -87,12 +129,15 @@ struct EditorCanvas: View {
 
     var body: some View {
         GeometryReader { geo in
-            let fit = CanvasFit(pixelSize: model.pixelSize, captureScale: model.captureScale, in: geo.size)
+            let fit = CanvasFit(pixelSize: model.pixelSize, captureScale: model.captureScale,
+                                zoom: model.zoom, pan: model.pan,
+                                insets: EditorController.canvasPadding(for: model), in: geo.size)
 
             ZStack(alignment: .topLeading) {
                 canvas(fit: fit)
                     .gesture(drawGesture(fit: fit))
                     .simultaneousGesture(doubleClickGesture(fit: fit))
+                    .simultaneousGesture(pinchGesture)
                     .onContinuousHover(coordinateSpace: .local) { phase in
                         switch phase {
                         case .active(let location):
@@ -117,6 +162,8 @@ struct EditorCanvas: View {
             }
             .frame(width: geo.size.width, height: geo.size.height)
             .onDeleteCommand { model.deleteSelected() }
+            // The model clamps zoom panning against the canvas's actual size.
+            .onChange(of: geo.size, initial: true) { _, size in model.setCanvasSize(size) }
         }
         // Switching tools commits any in-progress text.
         .onChange(of: model.tool) { _, _ in
@@ -271,17 +318,14 @@ struct EditorCanvas: View {
         let diameter: CGFloat = 120
         let radius = diameter / 2
         let gap: CGFloat = 10
-        // Keep the loupe above the bottom tool palette, which floats over the
-        // canvas's bottom-center.
-        let paletteClearance: CGFloat = 56
         let point = SettingsStore.shared.measureLoupe ? activeLoupePoint : nil
 
         ZStack {
             if let point {
                 let anchor = fit.toView(point)
                 // Beside the cursor; springs to the left when the right side
-                // wouldn't fit. `EditorController.minContentSize` (600×200)
-                // guarantees one side always does.
+                // wouldn't fit. `EditorController.minContentSize` guarantees
+                // one side always does.
                 let fitsRight = anchor.x + gap + diameter <= canvasSize.width
                 MeasureLoupe(image: model.baseImage, pixelSize: model.pixelSize,
                              point: point, diameter: diameter)
@@ -290,7 +334,7 @@ struct EditorCanvas: View {
                     .transition(.scale(scale: 0.6).combined(with: .opacity))
                     .position(x: anchor.x,
                               y: min(max(anchor.y, radius),
-                                     max(radius, canvasSize.height - radius - paletteClearance)))
+                                     max(radius, canvasSize.height - radius)))
             }
         }
         .animation(.spring(duration: 0.25, bounce: 0.15), value: point != nil)
@@ -462,6 +506,16 @@ struct EditorCanvas: View {
 
     private func distance(_ a: CGPoint, _ b: CGPoint) -> CGFloat {
         hypot(a.x - b.x, a.y - b.y)
+    }
+
+    /// Trackpad pinch: continuous zoom, live-updating the title-bar percentage.
+    private var pinchGesture: some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                if pinchBaseZoom == nil { pinchBaseZoom = model.zoom }
+                model.setZoom((pinchBaseZoom ?? 1) * value.magnification)
+            }
+            .onEnded { _ in pinchBaseZoom = nil }
     }
 
     private func annotationKind(_ id: UUID) -> EditTool? {
