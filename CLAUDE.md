@@ -59,9 +59,26 @@ Sources/PrtScn/
   Shortcut.swift                key code + modifiers + glyph display
   HotkeyManager.swift          Carbon global hotkey registration
   ShortcutRecorder.swift       click-to-record key field
-tools/IconGenerator.swift     draws the app icon (CoreGraphics); see README to regenerate
+tools/IconGenerator.swift     draws the app icon (CoreGraphics); see "App icon"
+assets/                       README header image
 Resources/AppIcon.icns        generated app icon
 ```
+
+## App icon
+
+The icon is drawn programmatically — tweak colors/layout in
+`tools/IconGenerator.swift`, then:
+
+```sh
+swiftc tools/IconGenerator.swift -o /tmp/icongen && /tmp/icongen
+iconutil -c icns AppIcon.iconset -o Resources/AppIcon.icns
+./build.sh
+```
+
+`AppIcon-preview.png` (1024px) is written for quick inspection; the README
+header image is `assets/PrtScr-AppIcon-1024.png` (update it too if the design
+changes). The intermediates (`AppIcon.iconset/`, the preview) are gitignored —
+only `Resources/AppIcon.icns` and the assets PNG are committed.
 
 ## Conventions
 

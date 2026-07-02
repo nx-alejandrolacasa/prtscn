@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="icons/PrtScr-AppIcon-1024.png" width="160" alt="PrtScn icon">
+<img src="assets/PrtScr-AppIcon-1024.png" width="160" alt="PrtScn icon">
 
 # PrtScn
 
@@ -109,19 +109,6 @@ Security → Screen Recording**, remove them and keep the new one.
 > Want a different cert name? `PRTSCN_SIGN_IDENTITY="My Cert" ./build.sh`.
 
 > For the full file-by-file layout, see [`CLAUDE.md`](CLAUDE.md).
-
-## Regenerating the app icon
-
-The icon is drawn programmatically (no image editor needed) — tweak colors or
-layout in `tools/IconGenerator.swift`, then:
-
-```sh
-swiftc tools/IconGenerator.swift -o /tmp/icongen && /tmp/icongen
-iconutil -c icns AppIcon.iconset -o Resources/AppIcon.icns
-./build.sh
-```
-
-`AppIcon-preview.png` (1024px) is written for quick inspection.
 
 ## Releasing
 

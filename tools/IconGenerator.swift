@@ -4,6 +4,8 @@ import CoreText
 // PrtScn app icon: a dark keycap with a subtly glowing "PrtScn" legend
 // (bottom-left) and the menu-bar camera glyph (top-right). Single accent color,
 // gentle glow, no rim. Change `accent` to recolor.
+//
+// Regeneration recipe: CLAUDE.md → "App icon".
 
 // MARK: - Palette
 
