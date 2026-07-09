@@ -41,6 +41,19 @@ struct PreviewCard: View {
     }
 }
 
+/// Popover-style finishing for a glass surface: a hairline stroke to define
+/// the edge and a soft contextual shadow to lift it off the background.
+/// Liquid Glass renders its own specular edge, but over a plain white
+/// backdrop there's nothing to refract and the surface melts into the page —
+/// this keeps the boundary legible without fighting the material.
+extension View {
+    func glassCardEdge(in shape: some InsettableShape) -> some View {
+        self
+            .overlay(shape.strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
+            .shadow(color: .black.opacity(0.18), radius: 12, y: 5)
+    }
+}
+
 // MARK: - Shared: thumbnail
 
 /// The screenshot thumbnail every style builds on: the aspect-fitted image,
@@ -246,6 +259,7 @@ private struct ClassicPreviewCard: View {
         }
         .frame(width: cardWidth)
         .glassEffect(.regular, in: shape)
+        .glassCardEdge(in: shape)
         .scaleEffect(appeared ? 1 : 0.92, anchor: .bottomLeading)
         .opacity(appeared ? 1 : 0)
         .onAppear {

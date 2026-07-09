@@ -30,10 +30,13 @@ struct IslandsPreviewCard: View {
                     .padding(framePadding)
                     .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 10 + framePadding,
                                                                 style: .continuous))
+                    .glassCardEdge(in: RoundedRectangle(cornerRadius: 10 + framePadding,
+                                                        style: .continuous))
 
                 PreviewToolbar(model: model, circularButtons: true)
                     .padding(6)
                     .glassEffect(.regular, in: Capsule())
+                    .glassCardEdge(in: Capsule())
             }
         }
         .scaleEffect(appeared ? 1 : 0.92, anchor: .bottomLeading)
