@@ -29,8 +29,8 @@ jobs:
       # build.sh then finds the identity by name. Without the secrets this
       # step no-ops and build.sh falls back to ad-hoc (updates re-prompt).
       #
-      # Secrets: PRTSCN_CERT_P12 (base64 of the "PrtScn Dev" cert+key exported
-      # as .p12 from Keychain Access) and PRTSCN_CERT_PASSWORD (its password).
+      # Secrets: PRTSCN_CERT_P12 (base64 .p12 of the "PrtScn Release" cert +
+      # private key) and PRTSCN_CERT_PASSWORD (its password).
       - name: Import signing certificate
         env:
           CERT_P12: ${{ secrets.PRTSCN_CERT_P12 }}
@@ -53,7 +53,7 @@ jobs:
             -s -k ci "$KEYCHAIN" > /dev/null
           security list-keychains -d user -s "$KEYCHAIN" login.keychain
           # Trust the self-signed cert so codesign can build its chain.
-          security find-certificate -c "PrtScn Dev" -p "$KEYCHAIN" > "$RUNNER_TEMP/cert.pem"
+          security find-certificate -c "PrtScn Release" -p "$KEYCHAIN" > "$RUNNER_TEMP/cert.pem"
           sudo security add-trusted-cert -d -r trustRoot \
             -k /Library/Keychains/System.keychain "$RUNNER_TEMP/cert.pem"
           rm "$RUNNER_TEMP/cert.pem"

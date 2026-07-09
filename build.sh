@@ -79,7 +79,13 @@ BUILD_NUMBER="$(git rev-list --count HEAD 2>/dev/null || echo 0)"
 #
 # Create the certificate once (see README "Sign once, grant once"), then this
 # script picks it up automatically. Override the name with PRTSCN_SIGN_IDENTITY.
-SIGN_IDENTITY="${PRTSCN_SIGN_IDENTITY:-PrtScn Dev}"
+# Each variant has its own identity so dev and prod don't collide: the release
+# cert also lives in CI (repo secrets), the dev one never leaves this machine.
+if [[ "${1:-}" == "install" || "${1:-}" == "release" ]]; then
+  SIGN_IDENTITY="${PRTSCN_SIGN_IDENTITY:-PrtScn Release}"
+else
+  SIGN_IDENTITY="${PRTSCN_SIGN_IDENTITY:-PrtScn Dev}"
+fi
 
 if security find-identity -v -p codesigning | grep -q "$SIGN_IDENTITY"; then
   codesign --force --sign "$SIGN_IDENTITY" "$APP"
