@@ -8,6 +8,8 @@ struct MenuContent: View {
     /// SwiftUI-provided action to open the `Settings` scene (macOS 14+).
     @Environment(\.openSettings) private var openSettings
 
+    private var updater: UpdateChecker { UpdateChecker.shared }
+
     var body: some View {
         Button {
             ScreenshotService.shared.capture(.region)
@@ -26,6 +28,17 @@ struct MenuContent: View {
         }
 
         Divider()
+
+        // Surfaced by the quiet launch-time check — most users never open
+        // Settings → About, so the update offer has to live where they look.
+        if updater.phase == .available, let release = updater.latest {
+            Button {
+                Task { await updater.installLatest() }
+            } label: {
+                Label("Update to \(release.version)…", systemImage: "arrow.down.circle")
+            }
+            Divider()
+        }
 
         Button {
             // Accessory (menu-bar) apps aren't active by default, so the

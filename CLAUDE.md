@@ -39,6 +39,8 @@ Sources/PrtScn/
   PrtScnApp.swift              @main App: MenuBarExtra + Settings scenes
   AppDelegate.swift            accessory policy, appearance + hotkey setup
   MenuContent.swift            the menu-bar dropdown
+  MenuBarState.swift           menu-bar icon "shot taken" flash state
+  UpdateChecker.swift          GitHub Releases update check + DMG self-install
   CaptureMode.swift            region/window/full → screencapture flags
   WindowBackground.swift       margins/solid/wallpaper/trim window-shot backgrounds
   ScreenshotService.swift      runs /usr/sbin/screencapture; composite, save/copy/OCR

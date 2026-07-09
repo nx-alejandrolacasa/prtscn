@@ -21,9 +21,10 @@ struct PrtScnApp: App {
     var body: some Scene {
         // The menu-bar item. `.menu` style makes it a classic dropdown menu
         // (vs. a popover window). The SF Symbol is the menu-bar icon.
-        MenuBarExtra(isDevBuild ? "PrtScn Dev" : "PrtScn",
-                     systemImage: isDevBuild ? "camera.badge.ellipsis" : "camera.viewfinder") {
+        MenuBarExtra {
             MenuContent()
+        } label: {
+            MenuBarIcon(restingIcon: isDevBuild ? "camera.badge.ellipsis" : "camera.viewfinder")
         }
         .menuBarExtraStyle(.menu)
 
@@ -31,5 +32,17 @@ struct PrtScnApp: App {
         Settings {
             SettingsView()
         }
+    }
+}
+
+/// The menu-bar icon, briefly swapped to a filled camera right after a
+/// capture so even silent captures (shutter sound off, eyes away from the
+/// preview) get visible feedback.
+private struct MenuBarIcon: View {
+    let restingIcon: String
+    private let state = MenuBarState.shared
+
+    var body: some View {
+        Image(systemName: state.flashingCapture ? "camera.fill" : restingIcon)
     }
 }

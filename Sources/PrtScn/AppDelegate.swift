@@ -17,5 +17,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Register the global capture shortcuts.
         HotkeyManager.shared.reloadFromSettings()
+
+        // Quiet daily update check; if a newer release exists, the menu and
+        // the About tab offer the update.
+        Task { await UpdateChecker.shared.checkAutomatically() }
     }
 }

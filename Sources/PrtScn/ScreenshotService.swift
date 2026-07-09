@@ -54,6 +54,10 @@ final class ScreenshotService {
         // check the file actually exists before showing a preview.
         guard succeeded, exists else { return }
 
+        // Flash the menu-bar icon: feedback that survives a missed preview
+        // (eyes elsewhere) or a silenced shutter sound.
+        MenuBarState.shared.flashCaptureFeedback()
+
         // Measure the capture's backing scale now, from the pristine PNG — the
         // composite step below rewrites the file at 72 DPI, which would lose it.
         let captureScale = Self.captureScale(of: tmp)

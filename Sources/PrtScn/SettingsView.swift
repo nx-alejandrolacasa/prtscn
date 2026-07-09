@@ -201,6 +201,14 @@ private struct HotkeySettingsView: View {
 /// icon, name, version, author, and copyright, all read from the bundle so the
 /// dev variant shows its own identity automatically.
 private struct AboutSettingsView: View {
+    private let updater = UpdateChecker.shared
+
+    /// True for the dev variant, which opens the release page instead of
+    /// self-installing — mirror that in the button label.
+    private var isDevBuild: Bool {
+        Bundle.main.bundleIdentifier?.hasSuffix(".dev") == true
+    }
+
     private var appName: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? "PrtScn"
     }
@@ -228,6 +236,9 @@ private struct AboutSettingsView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
+            updateControls
+                .padding(.top, 8)
+
             Text("The Print Screen key your Mac never had.")
                 .font(.callout)
                 .padding(.top, 10)
@@ -243,5 +254,54 @@ private struct AboutSettingsView: View {
         .padding(.top, 18)
         .padding(.bottom, 14)
         .frame(maxWidth: .infinity)
+    }
+
+    /// One line of update state under the version: a check button, progress,
+    /// the install offer, or an error with retry.
+    @ViewBuilder
+    private var updateControls: some View {
+        switch updater.phase {
+        case .idle:
+            Button("Check for Updates…") { Task { await updater.check() } }
+                .controlSize(.small)
+        case .checking:
+            progressLine("Checking…")
+        case .upToDate:
+            Text("You're up to date.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .available:
+            HStack(spacing: 8) {
+                Text("Version \(updater.latest?.version ?? "?") is available.")
+                    .font(.caption)
+                Button(isDevBuild ? "View on GitHub…" : "Install Update") {
+                    Task { await updater.installLatest() }
+                }
+                .controlSize(.small)
+                .buttonStyle(.borderedProminent)
+            }
+        case .downloading:
+            progressLine("Downloading update…")
+        case .installing:
+            progressLine("Installing… the app will relaunch.")
+        case .failed(let message):
+            HStack(spacing: 8) {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                Button("Try Again") { Task { await updater.check() } }
+                    .controlSize(.small)
+            }
+        }
+    }
+
+    private func progressLine(_ label: String) -> some View {
+        HStack(spacing: 6) {
+            ProgressView()
+                .controlSize(.small)
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 }
