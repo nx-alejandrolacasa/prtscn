@@ -30,9 +30,11 @@ struct PreviewCard: View {
         .background(escapeHandler)
     }
 
-    /// Invisible button that maps the Escape key to dismiss.
+    /// Invisible button that maps the Escape key to discard: an explicit
+    /// "cancel this shot" that deletes the capture, unlike the auto-dismiss
+    /// timeout, which still applies the configured default action.
     private var escapeHandler: some View {
-        Button("", action: { model.dismiss() })
+        Button("", action: { model.perform(.discard) })
             .keyboardShortcut(.cancelAction)
             .opacity(0)
             .frame(width: 0, height: 0)
@@ -172,13 +174,22 @@ struct ToolbarButton: View {
             : AnyShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
+    /// Discard turns red on hover to read as destructive; the rest stay
+    /// subtler than full primary (dark gray on light glass, light gray on
+    /// dark), regaining contrast on hover.
+    private var iconStyle: AnyShapeStyle {
+        if action == .discard && hovering {
+            AnyShapeStyle(Color.red)
+        } else {
+            AnyShapeStyle(.primary.opacity(hovering ? 0.9 : 0.65))
+        }
+    }
+
     var body: some View {
         Button(action: perform) {
             Image(systemName: action.systemImage)
                 .font(.system(size: 16, weight: .medium))
-                // Subtler than full primary: dark gray on light glass, light
-                // gray on dark — regaining contrast on hover.
-                .foregroundStyle(.primary.opacity(hovering ? 0.9 : 0.65))
+                .foregroundStyle(iconStyle)
                 .frame(width: circular ? 34 : 40, height: circular ? 34 : 32)
                 .background(
                     hovering ? Color.primary.opacity(0.12) : .clear,

@@ -79,11 +79,15 @@ final class PreviewModel {
             ScreenshotService.shared.save(imageURL)
             handled = true
             close(cleanup: true)
+        case .discard:
+            handled = true
+            close(cleanup: true)    // delete the temp capture, save nothing
         }
     }
 
-    /// Auto-dismiss (timeout) or Esc. An untouched capture gets the user's
-    /// configured default action (Save by default) so it isn't silently lost.
+    /// Auto-dismiss (timeout). An untouched capture gets the user's configured
+    /// default action (Save by default) so it isn't silently lost. (Esc is
+    /// different: it explicitly discards — see PreviewCard's escape handler.)
     func dismiss() {
         guard !handled else {
             close(cleanup: true)

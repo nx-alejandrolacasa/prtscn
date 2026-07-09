@@ -1,12 +1,13 @@
 import SwiftUI
 
-/// The three actions offered on the preview card, plus their icon, label, and
+/// The actions offered on the preview card, plus their icon, label, and
 /// keyboard shortcut.
 enum PreviewAction: CaseIterable, Identifiable {
     case edit
     case copy
     case save
     case ocr
+    case discard
 
     var id: Self { self }
 
@@ -16,6 +17,7 @@ enum PreviewAction: CaseIterable, Identifiable {
         case .copy: "Copy"
         case .ocr: "OCR"
         case .save: "Save"
+        case .discard: "Discard"
         }
     }
 
@@ -26,6 +28,7 @@ enum PreviewAction: CaseIterable, Identifiable {
         case .copy: "doc.on.doc"
         case .ocr: "text.viewfinder"
         case .save: "square.and.arrow.down"
+        case .discard: "trash"
         }
     }
 
@@ -36,18 +39,20 @@ enum PreviewAction: CaseIterable, Identifiable {
         case .copy: "⌘C"
         case .ocr: "⌘T"
         case .save: "⌘S"
+        case .discard: "⌫"
         }
     }
 
     /// The SwiftUI keyboard shortcut that triggers this action while the
-    /// preview is focused: Enter → Edit, ⌘C → Copy, ⌘T → Copy Text (OCR),
-    /// ⌘S → Save.
+    /// preview is focused: Enter → Edit, ⌘C → Copy, ⌘T → OCR, ⌘S → Save,
+    /// Delete → Discard.
     var keyboardShortcut: KeyboardShortcut {
         switch self {
         case .edit: KeyboardShortcut(.return, modifiers: [])
         case .copy: KeyboardShortcut("c", modifiers: .command)
         case .ocr: KeyboardShortcut("t", modifiers: .command)
         case .save: KeyboardShortcut("s", modifiers: .command)
+        case .discard: KeyboardShortcut(.delete, modifiers: [])
         }
     }
 }
