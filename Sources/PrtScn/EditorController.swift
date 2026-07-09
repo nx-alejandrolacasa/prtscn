@@ -306,7 +306,7 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
         case Self.save:
             spec = ("square.and.arrow.down", "Save", "Save (⌘S)", #selector(saveAction))
         case Self.copyText:
-            spec = ("text.viewfinder", "Copy Text", "Copy Text (⌘T)", #selector(copyTextAction))
+            spec = ("text.viewfinder", "OCR", "Copy text with OCR (⌘T)", #selector(copyTextAction))
         default:
             return nil
         }

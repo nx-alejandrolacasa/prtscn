@@ -14,7 +14,7 @@ enum PreviewAction: CaseIterable, Identifiable {
         switch self {
         case .edit: "Edit"
         case .copy: "Copy"
-        case .ocr: "Copy Text"
+        case .ocr: "OCR"
         case .save: "Save"
         }
     }

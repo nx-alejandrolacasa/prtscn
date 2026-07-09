@@ -33,6 +33,12 @@ final class SettingsStore {
         didSet { defaults.set(previewTimeout, forKey: Keys.previewTimeout) }
     }
 
+    /// Visual style of the floating preview: Archipelago (floating islands,
+    /// the default) or Island (the classic one-slab card).
+    var previewStyle: PreviewStyle {
+        didSet { defaults.set(previewStyle.rawValue, forKey: Keys.previewStyle) }
+    }
+
     /// What to do with an untouched capture when the preview is dismissed.
     var defaultAction: DefaultAction {
         didSet { defaults.set(defaultAction.rawValue, forKey: Keys.defaultAction) }
@@ -128,6 +134,7 @@ final class SettingsStore {
     private enum Keys {
         static let appearance = "appearance"
         static let previewTimeout = "previewTimeout"
+        static let previewStyle = "previewStyle"
         static let defaultAction = "defaultAction"
         static let saveFolder = "saveFolder"
         static let shortcuts = "shortcuts"
@@ -154,6 +161,7 @@ final class SettingsStore {
     private init() {
         appearance = Appearance(rawValue: defaults.string(forKey: Keys.appearance) ?? "") ?? .auto
         previewTimeout = defaults.object(forKey: Keys.previewTimeout) as? Double ?? 5.0
+        previewStyle = PreviewStyle(rawValue: defaults.string(forKey: Keys.previewStyle) ?? "") ?? .islands
         defaultAction = DefaultAction(rawValue: defaults.string(forKey: Keys.defaultAction) ?? "") ?? .save
         saveFolderPath = defaults.string(forKey: Keys.saveFolder) ?? Self.defaultSaveFolder
         windowBackground = WindowBackground(rawValue: defaults.string(forKey: Keys.windowBackground) ?? "") ?? .margins

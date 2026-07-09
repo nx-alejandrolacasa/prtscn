@@ -1,96 +1,88 @@
 import SwiftUI
 
-/// The floating preview card: thumbnail + countdown bar + Edit/Copy/Save toolbar.
+/// The floating preview, drawn in whichever style is selected in
+/// Settings → Capture → "Preview style" so the design directions can be
+/// compared live. Every style shares the same model, actions, keyboard
+/// shortcuts, countdown, and drag-out behavior — they only arrange the same
+/// pieces differently.
 ///
-/// The surface is macOS 26 Liquid Glass (`.glassEffect`), which renders its own
-/// specular edge highlight and contextual shadow — so the card draws no manual
-/// stroke or drop shadow of its own.
+/// This file holds the style dispatcher, the building blocks all styles share,
+/// and the classic card; the experimental styles live in PreviewCardStyles.swift.
 struct PreviewCard: View {
     let model: PreviewModel
 
-    private let cardWidth: CGFloat = 248
-    /// Inner padding around the thumbnail; also the inset that makes the
-    /// thumbnail's corners sit concentrically inside the card's corners.
-    private let contentPadding: CGFloat = 8
-    /// Transparent breathing room around the card so the glass shadow has space
-    /// to render (the panel window itself is clear). Static so the controller
-    /// can account for it when positioning the visible card near the cursor.
+    /// Transparent breathing room around the visible card so shadows (and the
+    /// polaroid's tilt) have space to render — the panel window itself is
+    /// clear. Static so the controller can account for it when positioning the
+    /// visible card near the cursor.
     static let shadowMargin: CGFloat = 18
 
-    private let cardCornerRadius: CGFloat = 16
-
-    /// Drives the cursor-anchored entrance (scale + fade up from the pointer).
-    @State private var appeared = false
-
-    /// True while the user is dragging the screenshot out of the card.
-    @State private var isDragging = false
-
-    private var shape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
-    }
-
-    /// The thumbnail spans the full content width; its corners are smaller than
-    /// the card's by the padding, so the two radii stay concentric.
-    private var thumbnailShape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: cardCornerRadius - contentPadding, style: .continuous)
-    }
-
-    private var contentWidth: CGFloat { cardWidth - contentPadding * 2 }
-
-    /// Thumbnail height derived from the capture's aspect ratio so the image
-    /// fills the full width and the card height adapts. Clamped only to guard
-    /// against extreme aspect ratios.
-    private var thumbnailHeight: CGFloat {
-        let size = model.image.size
-        guard size.width > 0 else { return 140 }
-        let proportional = contentWidth * size.height / size.width
-        return min(max(proportional, 80), 220)
-    }
-
     var body: some View {
-        VStack(spacing: 0) {
-            thumbnail
-                .padding(contentPadding)
-            if model.timeout > 0 {
-                countdownBar
+        Group {
+            switch SettingsStore.shared.previewStyle {
+            case .classic: ClassicPreviewCard(model: model)
+            case .islands: IslandsPreviewCard(model: model)
             }
-            toolbar
         }
-        .frame(width: cardWidth)
-        .glassEffect(.regular, in: shape)
         .padding(Self.shadowMargin)
-        .scaleEffect(appeared ? 1 : 0.92, anchor: .bottomLeading)
-        .opacity(appeared ? 1 : 0)
         .onHover { model.isHovering = $0 }
-        .onAppear {
-            withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
-                appeared = true
-            }
-        }
         .task { await model.runCountdown() }
         .background(escapeHandler)
     }
 
-    // MARK: - Thumbnail + hover hint
+    /// Invisible button that maps the Escape key to dismiss.
+    private var escapeHandler: some View {
+        Button("", action: { model.dismiss() })
+            .keyboardShortcut(.cancelAction)
+            .opacity(0)
+            .frame(width: 0, height: 0)
+    }
+}
 
-    private var thumbnail: some View {
+// MARK: - Shared: thumbnail
+
+/// The screenshot thumbnail every style builds on: the aspect-fitted image,
+/// the drag-out overlay, and the hover-hint / drag-hint pills over its top edge.
+struct PreviewThumbnail: View {
+    let model: PreviewModel
+    let width: CGFloat
+    let cornerRadius: CGFloat
+    /// Invoked on a plain click (no drag) on the screenshot.
+    var onClick: (() -> Void)? = nil
+    @Binding var isDragging: Bool
+
+    private var shape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+    }
+
+    /// Height derived from the capture's aspect ratio so the image fills the
+    /// full width and the card height adapts. Clamped only to guard against
+    /// extreme aspect ratios.
+    static func height(for image: NSImage, width: CGFloat) -> CGFloat {
+        let size = image.size
+        guard size.width > 0 else { return 140 }
+        return min(max(width * size.height / size.width, 80), 220)
+    }
+
+    var body: some View {
         ZStack(alignment: .top) {
             Image(nsImage: model.image)
                 .resizable()
                 .aspectRatio(contentMode: .fill)
-                .frame(width: contentWidth, height: thumbnailHeight)
+                .frame(width: width, height: Self.height(for: model.image, width: width))
                 .clipped()
                 .background(Color.black.opacity(0.04))
-                .clipShape(thumbnailShape)
-                .overlay(thumbnailShape.strokeBorder(.white.opacity(0.10), lineWidth: 0.5))
+                .clipShape(shape)
+                .overlay(shape.strokeBorder(.white.opacity(0.10), lineWidth: 0.5))
                 .overlay {
-                    DraggableImage(image: model.image, fileURL: model.imageURL) { dragging in
+                    DraggableImage(image: model.image, fileURL: model.imageURL,
+                                   onClick: onClick) { dragging in
                         withAnimation(.easeOut(duration: 0.15)) { isDragging = dragging }
                         // Keep the card alive (pause auto-dismiss) for the
                         // duration of the drag; release the pause when it ends.
                         model.isHovering = dragging
                     }
-                    .clipShape(thumbnailShape)
+                    .clipShape(shape)
                 }
                 // The screenshot visibly "lifts out" of the card while dragging.
                 .scaleEffect(isDragging ? 0.96 : 1)
@@ -132,8 +124,125 @@ struct PreviewCard: View {
         .padding(.vertical, 5)
         .glassEffect(.regular, in: Capsule())
     }
+}
 
-    // MARK: - Countdown bar
+// MARK: - Shared: toolbar
+
+/// The row of action buttons; each style wraps it in its own chrome.
+struct PreviewToolbar: View {
+    let model: PreviewModel
+    /// Circular button highlights, for capsule-shaped chrome.
+    var circularButtons = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(PreviewAction.allCases) { action in
+                ToolbarButton(
+                    action: action,
+                    circular: circularButtons,
+                    onHover: { hovering in
+                        if hovering {
+                            model.hoveredAction = action
+                        } else if model.hoveredAction == action {
+                            model.hoveredAction = nil
+                        }
+                    },
+                    perform: { model.perform(action) }
+                )
+            }
+        }
+    }
+}
+
+/// A single flat icon button in the preview toolbar. It's fully transparent so
+/// the surface beneath shows straight through it (matching tone); only a soft
+/// fill appears on hover, which also lights up the glass beneath.
+struct ToolbarButton: View {
+    let action: PreviewAction
+    /// Circle hover highlight (for capsule chrome) instead of a rounded rect.
+    var circular = false
+    let onHover: (Bool) -> Void
+    let perform: () -> Void
+
+    @State private var hovering = false
+
+    private var highlightShape: AnyShape {
+        circular
+            ? AnyShape(Circle())
+            : AnyShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    var body: some View {
+        Button(action: perform) {
+            Image(systemName: action.systemImage)
+                .font(.system(size: 16, weight: .medium))
+                // Subtler than full primary: dark gray on light glass, light
+                // gray on dark — regaining contrast on hover.
+                .foregroundStyle(.primary.opacity(hovering ? 0.9 : 0.65))
+                .frame(width: circular ? 34 : 40, height: circular ? 34 : 32)
+                .background(
+                    hovering ? Color.primary.opacity(0.12) : .clear,
+                    in: highlightShape
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .keyboardShortcut(action.keyboardShortcut)
+        .onHover { isHovering in
+            withAnimation(.easeOut(duration: 0.12)) { hovering = isHovering }
+            onHover(isHovering)
+        }
+    }
+}
+
+// MARK: - Classic card
+
+/// The original Shottr-style card: thumbnail + countdown bar + toolbar fused
+/// into one macOS 26 Liquid Glass slab (`.glassEffect` renders its own specular
+/// edge highlight and contextual shadow — no manual stroke or drop shadow).
+private struct ClassicPreviewCard: View {
+    let model: PreviewModel
+
+    private let cardWidth: CGFloat = 248
+    /// Inner padding around the thumbnail; also the inset that makes the
+    /// thumbnail's corners sit concentrically inside the card's corners.
+    private let contentPadding: CGFloat = 8
+    private let cardCornerRadius: CGFloat = 16
+
+    /// Drives the cursor-anchored entrance (scale + fade up from the pointer).
+    @State private var appeared = false
+    @State private var isDragging = false
+
+    private var shape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            PreviewThumbnail(model: model,
+                             width: cardWidth - contentPadding * 2,
+                             cornerRadius: cardCornerRadius - contentPadding,
+                             isDragging: $isDragging)
+                .padding(contentPadding)
+            if model.timeout > 0 {
+                countdownBar
+            }
+            PreviewToolbar(model: model)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, contentPadding)
+                .padding(.bottom, contentPadding)
+                .padding(.top, model.timeout > 0 ? 0 : contentPadding)
+        }
+        .frame(width: cardWidth)
+        .glassEffect(.regular, in: shape)
+        .scaleEffect(appeared ? 1 : 0.92, anchor: .bottomLeading)
+        .opacity(appeared ? 1 : 0)
+        .onAppear {
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+                appeared = true
+            }
+        }
+    }
 
     /// Inset, capsule-shaped track that sits inside the glass rather than
     /// spanning the surface as a hard seam.
@@ -150,70 +259,5 @@ struct PreviewCard: View {
         .frame(height: 3)
         .padding(.horizontal, contentPadding)
         .padding(.bottom, 4)
-    }
-
-    // MARK: - Toolbar
-
-    private var toolbar: some View {
-        HStack(spacing: 8) {
-            ForEach(PreviewAction.allCases) { action in
-                ToolbarButton(
-                    action: action,
-                    onHover: { hovering in
-                        if hovering {
-                            model.hoveredAction = action
-                        } else if model.hoveredAction == action {
-                            model.hoveredAction = nil
-                        }
-                    },
-                    perform: { model.perform(action) }
-                )
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, contentPadding)
-        .padding(.bottom, contentPadding)
-        .padding(.top, model.timeout > 0 ? 0 : contentPadding)
-    }
-
-    /// Invisible button that maps the Escape key to dismiss.
-    private var escapeHandler: some View {
-        Button("", action: { model.dismiss() })
-            .keyboardShortcut(.cancelAction)
-            .opacity(0)
-            .frame(width: 0, height: 0)
-    }
-}
-
-/// A single flat icon button in the preview toolbar. It's fully transparent so
-/// the card's Liquid Glass shows straight through it (matching tone); only a
-/// soft fill appears on hover, which also lights up the glass beneath.
-private struct ToolbarButton: View {
-    let action: PreviewAction
-    let onHover: (Bool) -> Void
-    let perform: () -> Void
-
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: perform) {
-            Image(systemName: action.systemImage)
-                .font(.system(size: 16, weight: .medium))
-                // Subtler than full primary: dark gray on light glass, light
-                // gray on dark — regaining contrast on hover.
-                .foregroundStyle(.primary.opacity(hovering ? 0.9 : 0.65))
-                .frame(width: 40, height: 32)
-                .background(
-                    hovering ? Color.primary.opacity(0.12) : .clear,
-                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-                )
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .keyboardShortcut(action.keyboardShortcut)
-        .onHover { isHovering in
-            withAnimation(.easeOut(duration: 0.12)) { hovering = isHovering }
-            onHover(isHovering)
-        }
     }
 }

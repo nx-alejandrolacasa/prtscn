@@ -16,6 +16,8 @@ struct DraggableImage: NSViewRepresentable {
     /// The on-disk file dragged to the destination (a real file URL, so Finder
     /// copies the file and Terminal inserts its path).
     let fileURL: URL
+    /// Invoked on a plain click (mouse up without dragging), if set.
+    var onClick: (() -> Void)? = nil
     /// Reports drag start (`true`) and end (`false`).
     let onDragStateChange: (Bool) -> Void
 
@@ -32,41 +34,63 @@ struct DraggableImage: NSViewRepresentable {
     private func configure(_ view: DragSourceView) {
         view.image = image
         view.fileURL = fileURL
+        view.onClick = onClick
         view.onDragStateChange = onDragStateChange
     }
 }
 
-/// The drag-catcher. Begins a copy drag on `mouseDown`, drawing the screenshot
-/// itself as the drag image so the user sees what they're carrying.
+/// The drag-catcher. Arms on `mouseDown`, but only begins the copy drag once
+/// the pointer moves a few points — so a plain click stays a click (`onClick`)
+/// instead of spawning a zero-length drag session. The screenshot itself is
+/// the drag image, so the user sees what they're carrying.
 final class DragSourceView: NSView, NSDraggingSource {
     var image: NSImage?
     var fileURL: URL?
+    var onClick: (() -> Void)?
     var onDragStateChange: ((Bool) -> Void)?
+
+    /// The armed mouse-down, pending either a drag (session starts) or a
+    /// mouse-up in place (click).
+    private var pendingDown: NSEvent?
 
     /// Start the drag on the very first click, even when the panel isn't the
     /// key window yet — otherwise the first click is swallowed just to focus it.
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    /// Hint that the thumbnail is grabbable.
+    /// Hint at the primary gesture: grabbable, or clickable when a click acts.
     override func resetCursorRects() {
-        addCursorRect(bounds, cursor: .openHand)
+        addCursorRect(bounds, cursor: onClick != nil ? .pointingHand : .openHand)
     }
 
     override func mouseDown(with event: NSEvent) {
-        guard let fileURL, let image else { return }
+        pendingDown = event
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let down = pendingDown, let fileURL, let image else { return }
+        let start = convert(down.locationInWindow, from: nil)
+        let current = convert(event.locationInWindow, from: nil)
+        guard hypot(current.x - start.x, current.y - start.y) > 3 else { return }
+        pendingDown = nil
 
         let item = NSDraggingItem(pasteboardWriter: fileURL as NSURL)
         let dragSize = draggingImageSize(for: image.size)
-        let center = convert(event.locationInWindow, from: nil)
         let frame = NSRect(
-            x: center.x - dragSize.width / 2,
-            y: center.y - dragSize.height / 2,
+            x: start.x - dragSize.width / 2,
+            y: start.y - dragSize.height / 2,
             width: dragSize.width,
             height: dragSize.height
         )
         item.setDraggingFrame(frame, contents: image)
 
-        beginDraggingSession(with: [item], event: event, source: self)
+        beginDraggingSession(with: [item], event: down, source: self)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        if pendingDown != nil {
+            pendingDown = nil
+            onClick?()
+        }
     }
 
     func draggingSession(

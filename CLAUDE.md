@@ -46,8 +46,10 @@ Sources/PrtScn/
   ScreenshotService.swift      runs /usr/sbin/screencapture; composite, save/copy/OCR
   PreviewController.swift      floating NSPanel that hosts the card
   PreviewModel.swift           card state + countdown + actions
-  PreviewCard.swift            the SwiftUI preview card
-  PreviewAction.swift          Edit/Copy/Save/Copy Text + icons + shortcuts
+  PreviewCard.swift            style dispatcher + shared pieces + classic card
+  PreviewCardStyles.swift      the Archipelago (floating islands) style
+  PreviewStyle.swift           which preview style is active (Settings → Capture)
+  PreviewAction.swift          Edit/Copy/Save/OCR + icons + shortcuts
   DefaultAction.swift          what happens on auto-dismiss / Esc
   DraggableImage.swift         drag-to-export from the preview thumbnail
   Annotation.swift             annotation model + per-tool geometry

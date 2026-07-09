@@ -83,6 +83,12 @@ private struct CaptureSettingsView: View {
     var body: some View {
         Form {
             Section("Preview") {
+                Picker("Preview style", selection: $settings.previewStyle) {
+                    ForEach(PreviewStyle.allCases) { style in
+                        Text(style.label).tag(style)
+                    }
+                }
+
                 Picker("Auto-dismiss after", selection: $settings.previewTimeout) {
                     Text("3 seconds").tag(3.0)
                     Text("5 seconds").tag(5.0)
@@ -129,7 +135,7 @@ private struct EditorSettingsView: View {
                 Toggle("Reopen with the last-used tool", isOn: $settings.rememberLastTool)
             }
             Section("After an action") {
-                Toggle("Close the editor after Copy, Save, or Copy Text",
+                Toggle("Close the editor after Copy, Save, or OCR",
                        isOn: $settings.closeEditorAfterAction)
             }
             Section("Measure tool") {
