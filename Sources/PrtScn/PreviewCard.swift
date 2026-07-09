@@ -13,9 +13,10 @@ struct PreviewCard: View {
 
     /// Transparent breathing room around the visible card so shadows (and the
     /// polaroid's tilt) have space to render — the panel window itself is
-    /// clear. Static so the controller can account for it when positioning the
-    /// visible card near the cursor.
-    static let shadowMargin: CGFloat = 18
+    /// clear. Must exceed the shadow's full blur tail (~2× radius + offset) or
+    /// the panel edge clips it into a visible hard line. Static so the
+    /// controller can account for it when positioning the card near the cursor.
+    static let shadowMargin: CGFloat = 36
 
     var body: some View {
         Group {
@@ -41,16 +42,19 @@ struct PreviewCard: View {
     }
 }
 
-/// Popover-style finishing for a glass surface: a hairline stroke to define
-/// the edge and a soft contextual shadow to lift it off the background.
-/// Liquid Glass renders its own specular edge, but over a plain white
-/// backdrop there's nothing to refract and the surface melts into the page —
-/// this keeps the boundary legible without fighting the material.
+/// Menu-style finishing for a glass surface: the NSMenu edge treatment — a
+/// crisp dark outer hairline with a brighter highlight rim just inside it —
+/// plus a soft contextual shadow to lift it off the background. Liquid Glass
+/// renders its own specular edge, but over a plain white backdrop there's
+/// nothing to refract and the surface melts into the page — this keeps the
+/// boundary legible without fighting the material.
 extension View {
     func glassCardEdge(in shape: some InsettableShape) -> some View {
         self
-            .overlay(shape.strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
-            .shadow(color: .black.opacity(0.18), radius: 12, y: 5)
+            .overlay(shape.inset(by: 0.5).strokeBorder(.white.opacity(0.35), lineWidth: 1))
+            .overlay(shape.strokeBorder(Color.black.opacity(0.22), lineWidth: 0.5))
+            .shadow(color: .black.opacity(0.07), radius: 1.5, y: 1)   // contact
+            .shadow(color: .black.opacity(0.10), radius: 14, y: 6)    // ambient
     }
 }
 
