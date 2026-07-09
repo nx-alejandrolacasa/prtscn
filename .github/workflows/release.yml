@@ -22,10 +22,45 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
+      # macOS ties Screen Recording (TCC) permission to the signing identity,
+      # so DMG updates only keep the user's grant if every release is signed
+      # with the SAME certificate. Import it from repo secrets into a throwaway
+      # keychain and trust it (codesign refuses untrusted self-signed certs);
+      # build.sh then finds the identity by name. Without the secrets this
+      # step no-ops and build.sh falls back to ad-hoc (updates re-prompt).
+      #
+      # Secrets: PRTSCN_CERT_P12 (base64 of the "PrtScn Dev" cert+key exported
+      # as .p12 from Keychain Access) and PRTSCN_CERT_PASSWORD (its password).
+      - name: Import signing certificate
+        env:
+          CERT_P12: ${{ secrets.PRTSCN_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.PRTSCN_CERT_PASSWORD }}
+        run: |
+          if [ -z "$CERT_P12" ]; then
+            echo "No PRTSCN_CERT_P12 secret — the app will be signed ad-hoc."
+            exit 0
+          fi
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          security create-keychain -p ci "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p ci "$KEYCHAIN"
+          echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+            -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/cert.p12"
+          # Let codesign use the key headlessly (no keychain UI prompt exists in CI).
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k ci "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain
+          # Trust the self-signed cert so codesign can build its chain.
+          security find-certificate -c "PrtScn Dev" -p "$KEYCHAIN" > "$RUNNER_TEMP/cert.pem"
+          sudo security add-trusted-cert -d -r trustRoot \
+            -k /Library/Keychains/System.keychain "$RUNNER_TEMP/cert.pem"
+          rm "$RUNNER_TEMP/cert.pem"
+
       # `release` builds the stable variant (PrtScn.app, production bundle id)
       # rather than the default dev one, and stamps the tag's version plus the
-      # commit-count build number into the bundle itself. No "PrtScn Dev" cert
-      # exists on the runner, so build.sh signs ad-hoc.
+      # commit-count build number into the bundle itself.
       - name: Build app bundle
         env:
           PRTSCN_VERSION: ${{ steps.version.outputs.version }}
