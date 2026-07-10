@@ -39,6 +39,9 @@ eating your battery — just system frameworks, doing exactly what you asked.
 - 🪟 **Shottr-style window backgrounds** — margins with a drop shadow, a
   solid color, your actual desktop wallpaper, or a tight trim — for
   screenshots that already look presentation-ready.
+- 📌 **Pin to screen** — float any capture in an always-on-top window: drag
+  it anywhere, scroll to resize, and keep as many pinned as you like while
+  you work.
 - 🔍 **Copy Text (OCR)** straight out of any capture, powered by Vision.
 - 🚀 **Launch at login**, a native macOS 26 Liquid Glass interface, and a
   menu bar you'll forget is even running.
