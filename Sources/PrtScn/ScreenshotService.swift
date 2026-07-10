@@ -66,11 +66,17 @@ final class ScreenshotService {
         // a Space-switched region capture is a genuine window shot and should be
         // framed just like one. `compositeWindowBackground` no-ops on opaque
         // (region/full-screen) shots.
+        //
+        // Keep the pre-composite capture in memory: Pin displays the bare
+        // window (trimmed), not the framed margins/solid/wallpaper version.
+        var pristine: NSImage?
         if windowBackground.needsComposite {
+            pristine = NSImage(contentsOf: tmp)
             await compositeWindowBackground(at: tmp, background: windowBackground)
         }
 
-        PreviewController.shared.show(imageURL: tmp, captureScale: captureScale)
+        PreviewController.shared.show(imageURL: tmp, captureScale: captureScale,
+                                      pristineImage: pristine)
     }
 
     /// The backing scale the capture was taken at: pixel width ÷ logical (point)

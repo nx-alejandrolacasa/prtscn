@@ -22,13 +22,14 @@ final class PreviewController {
 
     private init() {}
 
-    func show(imageURL: URL, captureScale: CGFloat) {
+    func show(imageURL: URL, captureScale: CGFloat, pristineImage: NSImage? = nil) {
         guard let image = NSImage(contentsOf: imageURL) else { return }
         close()   // dismiss any existing preview first
 
         let model = PreviewModel(image: image, imageURL: imageURL,
                                  timeout: SettingsStore.shared.previewTimeout,
-                                 captureScale: captureScale)
+                                 captureScale: captureScale,
+                                 pristineImage: pristineImage)
         model.onClose = { [weak self] in self?.close() }
 
         // Size the panel to the SwiftUI content. We use an NSHostingController

@@ -207,7 +207,7 @@ struct ToolbarButton: View {
             Image(systemName: action.systemImage)
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(iconStyle)
-                .frame(width: circular ? 34 : 40, height: circular ? 34 : 32)
+                .frame(width: 32, height: 32)
                 .background(
                     hovering ? Color.primary.opacity(0.12) : .clear,
                     in: highlightShape

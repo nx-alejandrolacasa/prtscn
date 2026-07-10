@@ -15,6 +15,10 @@ final class PreviewModel {
     /// Backing scale measured at capture time; passed through to the editor for
     /// 1:1 sizing.
     let captureScale: CGFloat
+    /// The capture before window-background compositing (nil when no composite
+    /// ran). Pin displays this so a pinned window floats bare, without its
+    /// margins/solid/wallpaper backdrop.
+    let pristineImage: NSImage?
 
     /// Seconds left before auto-dismiss; drives the countdown bar.
     var remaining: Double
@@ -31,12 +35,14 @@ final class PreviewModel {
     private var handled = false
     private var closed = false
 
-    init(image: NSImage, imageURL: URL, timeout: Double = 5.0, captureScale: CGFloat) {
+    init(image: NSImage, imageURL: URL, timeout: Double = 5.0, captureScale: CGFloat,
+         pristineImage: NSImage? = nil) {
         self.image = image
         self.imageURL = imageURL
         self.timeout = timeout
         self.remaining = timeout
         self.captureScale = captureScale
+        self.pristineImage = pristineImage
     }
 
     /// 1 → 0, for the width of the countdown bar.
@@ -79,6 +85,11 @@ final class PreviewModel {
             ScreenshotService.shared.save(imageURL)
             handled = true
             close(cleanup: true)
+        case .pin:
+            PinnedController.shared.pin(image: pristineImage ?? image, imageURL: imageURL,
+                                        captureScale: captureScale)
+            handled = true
+            close(cleanup: false)           // the pin now owns the temp file
         case .discard:
             handled = true
             close(cleanup: true)    // delete the temp capture, save nothing
