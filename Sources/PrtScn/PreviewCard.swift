@@ -225,7 +225,7 @@ struct ToolbarButton: View {
 
 // MARK: - Classic card
 
-/// The original Shottr-style card: thumbnail + countdown bar + toolbar fused
+/// The original card: thumbnail + countdown bar + toolbar fused
 /// into one macOS 26 Liquid Glass slab (`.glassEffect` renders its own specular
 /// edge highlight and contextual shadow — no manual stroke or drop shadow).
 private struct ClassicPreviewCard: View {

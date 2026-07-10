@@ -8,7 +8,7 @@ enum PreviewStyle: String, CaseIterable, Identifiable {
     /// The classic pieces de-fused into separate floating glass islands.
     /// Declared first so it leads the picker; it's also the default.
     case islands
-    /// The original Shottr-style card: thumbnail + bar + toolbar in one glass slab.
+    /// The original card: thumbnail + bar + toolbar in one glass slab.
     case classic
 
     var id: Self { self }

@@ -36,7 +36,7 @@ eating your battery — just system frameworks, doing exactly what you asked.
   capture's *true* pixel dimensions, not the on-screen render size),
   rectangle, rounded rectangle, ellipse, pixelate/redact, step counter,
   text, a live eyedropper color picker, crop, and full undo/redo.
-- 🪟 **Shottr-style window backgrounds** — margins with a drop shadow, a
+- 🪟 **Window backgrounds** — margins with a drop shadow, a
   solid color, your actual desktop wallpaper, or a tight trim — for
   screenshots that already look presentation-ready.
 - 📌 **Pin to screen** — float any capture in an always-on-top window: drag
