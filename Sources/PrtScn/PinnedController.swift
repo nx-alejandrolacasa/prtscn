@@ -51,6 +51,45 @@ private final class FirstMouseHostingView<Content: View>: NSHostingView<Content>
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
+/// Transparent click target used for the pin close affordance. SwiftUI buttons
+/// can still lose the first click in a non-activating panel, so the close hit
+/// area uses AppKit's first-mouse path directly.
+final class FirstMouseClickTargetView: NSView {
+    var onClick: (() -> Void)?
+
+    private var armed = false
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        armed = bounds.contains(convert(event.locationInWindow, from: nil))
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        defer { armed = false }
+        guard armed, bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
+        onClick?()
+    }
+}
+
+private struct FirstMouseClickTarget: NSViewRepresentable {
+    let onClick: () -> Void
+
+    func makeNSView(context: Context) -> FirstMouseClickTargetView {
+        let view = FirstMouseClickTargetView()
+        view.onClick = onClick
+        return view
+    }
+
+    func updateNSView(_ nsView: FirstMouseClickTargetView, context: Context) {
+        nsView.onClick = onClick
+    }
+}
+
 /// Owns every pinned-screenshot window. `@Observable` so the menu-bar dropdown
 /// can offer "Close All Pins" only while pins exist.
 @MainActor
@@ -235,14 +274,15 @@ private struct PinnedCard: View {
     }
 
     private var closeButton: some View {
-        Button(action: onClose) {
+        ZStack {
             Image(systemName: "xmark")
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(.primary.opacity(0.85))
                 .frame(width: 22, height: 22)
                 .glassEffect(.regular, in: Circle())
+            FirstMouseClickTarget(onClick: onClose)
+                .frame(width: 22, height: 22)
         }
-        .buttonStyle(.plain)
         .padding(6)
         .opacity(hovering ? 1 : 0)
         .animation(.easeOut(duration: 0.12), value: hovering)
