@@ -1,4 +1,5 @@
 import Carbon
+import SwiftUI
 
 /// A keyboard shortcut as the Carbon hotkey API wants it: a virtual key code
 /// plus a Carbon modifier-flags bitmask (`cmdKey`, `optionKey`, …).
@@ -38,4 +39,39 @@ struct Shortcut: Codable, Equatable {
         122: "F1", 120: "F2", 99: "F3", 118: "F4", 96: "F5", 97: "F6",
         98: "F7", 100: "F8", 101: "F9", 109: "F10", 103: "F11", 111: "F12",
     ]
+
+    /// The SwiftUI equivalent, for displaying the hotkey on menu items.
+    /// `nil` when the key has no `KeyEquivalent` (e.g. function keys) — the
+    /// menu item then simply shows no shortcut.
+    var keyboardShortcut: KeyboardShortcut? {
+        guard let key = keyEquivalent else { return nil }
+        var eventModifiers: SwiftUI.EventModifiers = []   // Carbon has its own EventModifiers
+        if modifiers & UInt32(controlKey) != 0 { eventModifiers.insert(.control) }
+        if modifiers & UInt32(optionKey) != 0 { eventModifiers.insert(.option) }
+        if modifiers & UInt32(shiftKey) != 0 { eventModifiers.insert(.shift) }
+        if modifiers & UInt32(cmdKey) != 0 { eventModifiers.insert(.command) }
+        return KeyboardShortcut(key, modifiers: eventModifiers)
+    }
+
+    private var keyEquivalent: KeyEquivalent? {
+        switch Int(keyCode) {
+        case kVK_Space: .space
+        case kVK_Return: .return
+        case kVK_Tab: .tab
+        case kVK_Escape: .escape
+        case kVK_Delete: .delete
+        case kVK_ForwardDelete: .deleteForward
+        case kVK_LeftArrow: .leftArrow
+        case kVK_RightArrow: .rightArrow
+        case kVK_DownArrow: .downArrow
+        case kVK_UpArrow: .upArrow
+        default:
+            if let label = Self.keyLabels[keyCode], label.count == 1,
+               let character = label.lowercased().first {
+                KeyEquivalent(character)
+            } else {
+                nil
+            }
+        }
+    }
 }
