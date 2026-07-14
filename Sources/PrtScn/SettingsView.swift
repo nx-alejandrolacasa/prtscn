@@ -114,6 +114,23 @@ private struct CaptureSettingsView: View {
                 }
             }
 
+            Section {
+                Picker("Save as", selection: $settings.saveResolution) {
+                    ForEach(SaveResolution.allCases) { resolution in
+                        Text(resolution.label).tag(resolution)
+                    }
+                }
+                Picker("Copy as", selection: $settings.copyResolution) {
+                    ForEach(CopyResolution.allCases) { resolution in
+                        Text(resolution.label).tag(resolution)
+                    }
+                }
+            } header: {
+                Text("Resolution")
+            } footer: {
+                Text("Applies to captures from HiDPI (Retina) displays. Both saves the downscaled file alongside the native one.")
+            }
+
             Section("Options") {
                 Toggle("Include the mouse pointer (full-screen captures)",
                        isOn: $settings.includePointer)

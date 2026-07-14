@@ -171,8 +171,9 @@ private final class FixedSizeOverlayView: NSView {
     }
 
     /// `targetSize` in screen points. Pixel sizes divide by this screen's
-    /// scale, so on Retina a 1280 px frame is 640 pt on screen (and half-point
-    /// values are fine — screencapture accepts fractional rects).
+    /// scale, so on Retina a 1280 px frame is 640 pt on screen (half-point
+    /// values are fine — ScreenshotService captures the covering whole-point
+    /// rect and crops back to the exact pixels).
     private var pointSize: CGSize {
         switch unit {
         case .points: targetSize

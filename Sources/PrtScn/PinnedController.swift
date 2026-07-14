@@ -109,8 +109,8 @@ final class PinnedController {
 
         let card = PinnedCard(
             image: image,
-            onCopy: { ScreenshotService.shared.copyToClipboard(imageURL) },
-            onSave: { ScreenshotService.shared.save(imageURL) },
+            onCopy: { ScreenshotService.shared.copyToClipboard(imageURL, captureScale: captureScale) },
+            onSave: { ScreenshotService.shared.save(imageURL, captureScale: captureScale) },
             onEdit: { [weak self, weak panel] in
                 EditorController.shared.show(imageURL: imageURL, captureScale: captureScale)
                 // The editor owns the temp file now — close without deleting it.

@@ -96,6 +96,17 @@ final class SettingsStore {
         didSet { defaults.set(shutterSound, forKey: Keys.shutterSound) }
     }
 
+    /// Pixel density of saved captures from HiDPI displays: native, downscaled
+    /// to standard resolution, or both files (`name.png` + `name@2x.png`-style).
+    var saveResolution: SaveResolution {
+        didSet { defaults.set(saveResolution.rawValue, forKey: Keys.saveResolution) }
+    }
+
+    /// Pixel density of captures copied to the clipboard from HiDPI displays.
+    var copyResolution: CopyResolution {
+        didSet { defaults.set(copyResolution.rawValue, forKey: Keys.copyResolution) }
+    }
+
     /// Filename prefix for saved/shared captures ("PrtScn 2026-01-01 at ….png").
     var filenamePrefix: String {
         didSet { defaults.set(filenamePrefix, forKey: Keys.filenamePrefix) }
@@ -161,6 +172,8 @@ final class SettingsStore {
         static let measureLoupe = "measureLoupe"
         static let includePointer = "includePointer"
         static let shutterSound = "shutterSound"
+        static let saveResolution = "saveResolution"
+        static let copyResolution = "copyResolution"
         static let filenamePrefix = "filenamePrefix"
         static let rememberLastTool = "rememberLastTool"
         static let editorTool = "editorTool"
@@ -190,6 +203,8 @@ final class SettingsStore {
         measureLoupe = defaults.object(forKey: Keys.measureLoupe) as? Bool ?? true
         includePointer = defaults.object(forKey: Keys.includePointer) as? Bool ?? false
         shutterSound = defaults.object(forKey: Keys.shutterSound) as? Bool ?? true
+        saveResolution = SaveResolution(rawValue: defaults.string(forKey: Keys.saveResolution) ?? "") ?? .native
+        copyResolution = CopyResolution(rawValue: defaults.string(forKey: Keys.copyResolution) ?? "") ?? .native
         filenamePrefix = defaults.string(forKey: Keys.filenamePrefix) ?? "PrtScn"
         rememberLastTool = defaults.object(forKey: Keys.rememberLastTool) as? Bool ?? true
         editorTool = EditTool(rawValue: defaults.string(forKey: Keys.editorTool) ?? "") ?? .arrow

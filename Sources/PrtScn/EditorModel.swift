@@ -507,14 +507,14 @@ final class EditorModel {
     func copy() {
         finishTextEditing()
         prepareExport()
-        ScreenshotService.shared.copyToClipboard(workingURL)
+        ScreenshotService.shared.copyToClipboard(workingURL, captureScale: captureScale)
         completed("Copied")
     }
 
     func save() {
         finishTextEditing()
         prepareExport()
-        if ScreenshotService.shared.save(workingURL) != nil { completed("Saved") }
+        if ScreenshotService.shared.save(workingURL, captureScale: captureScale) != nil { completed("Saved") }
     }
 
     func copyText() {

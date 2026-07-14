@@ -74,7 +74,7 @@ final class PreviewModel {
             handled = true
             close(cleanup: false)           // the editor now owns the temp file
         case .copy:
-            ScreenshotService.shared.copyToClipboard(imageURL)
+            ScreenshotService.shared.copyToClipboard(imageURL, captureScale: captureScale)
             handled = true
             close(cleanup: true)
         case .ocr:
@@ -82,7 +82,7 @@ final class PreviewModel {
             handled = true
             close(cleanup: true)
         case .save:
-            ScreenshotService.shared.save(imageURL)
+            ScreenshotService.shared.save(imageURL, captureScale: captureScale)
             handled = true
             close(cleanup: true)
         case .pin:
@@ -106,10 +106,10 @@ final class PreviewModel {
         }
         switch SettingsStore.shared.defaultAction {
         case .save:
-            ScreenshotService.shared.save(imageURL)
+            ScreenshotService.shared.save(imageURL, captureScale: captureScale)
             close(cleanup: true)
         case .copy:
-            ScreenshotService.shared.copyToClipboard(imageURL)
+            ScreenshotService.shared.copyToClipboard(imageURL, captureScale: captureScale)
             close(cleanup: true)
         case .edit:
             EditorController.shared.show(imageURL: imageURL, captureScale: captureScale)
