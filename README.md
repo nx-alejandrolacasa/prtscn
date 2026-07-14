@@ -39,6 +39,8 @@ eating your battery — just system frameworks, doing exactly what you asked.
   capture's *true* pixel dimensions, not the on-screen render size),
   rectangle, rounded rectangle, ellipse, pixelate/redact, step counter,
   text, a live eyedropper color picker, crop, and full undo/redo.
+  Double-click any shape to label it: the text sits centered on the
+  shape with the stroke cleared away around it.
 - 🪟 **Window backgrounds** — margins with a drop shadow, a
   solid color, your actual desktop wallpaper, or a tight trim — for
   screenshots that already look presentation-ready.
