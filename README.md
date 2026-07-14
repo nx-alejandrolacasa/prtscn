@@ -29,6 +29,9 @@ eating your battery — just system frameworks, doing exactly what you asked.
 
 - 🖱️ **Capture Area, Window, or Full Screen**, bound to your own global
   shortcuts (Carbon hotkeys — no Accessibility permission required).
+- 📐 **Fixed-size capture** — pick exact dimensions (pixels or points, with
+  common presets), then a frame of that size follows your cursor: point and
+  click to shoot a pixel-perfect region.
 - 🪄 **Cursor-anchored preview** with Copy / Save / Edit / Copy Text (OCR),
   a hover-to-pause auto-dismiss countdown, and drag-to-export straight from
   the thumbnail.
