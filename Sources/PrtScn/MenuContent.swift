@@ -37,6 +37,12 @@ struct MenuContent: View {
             Label("Capture Full Screen", systemImage: "display")
         }
         .keyboardShortcut(hotkey(.fullScreen))
+        Button {
+            ScreenshotService.shared.capture(.fixedSize)
+        } label: {
+            Label("Capture Fixed Size…", systemImage: "aspectratio")
+        }
+        .keyboardShortcut(hotkey(.fixedSize))
 
         Divider()
 

@@ -41,7 +41,9 @@ Sources/PrtScn/
   MenuContent.swift            the menu-bar dropdown
   MenuBarState.swift           menu-bar icon "shot taken" flash state
   UpdateChecker.swift          GitHub Releases update check + DMG self-install
-  CaptureMode.swift            region/window/full → screencapture flags
+  CaptureMode.swift            region/window/full/fixed → screencapture flags
+  FixedSizePrompt.swift        width × height dialog for fixed-size capture
+  FixedSizeOverlay.swift       cursor-following fixed-size capture rectangle
   WindowBackground.swift       margins/solid/wallpaper/trim window-shot backgrounds
   ScreenshotService.swift      runs /usr/sbin/screencapture; composite, save/copy/OCR
   PreviewController.swift      floating NSPanel that hosts the card

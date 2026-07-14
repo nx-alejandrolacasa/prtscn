@@ -23,10 +23,32 @@ final class ScreenshotService {
     /// in an async task so we never block the main thread while the user is
     /// dragging out an interactive selection.
     func capture(_ mode: CaptureMode) {
+        // Fixed size runs its own prompt → overlay flow; the overlay calls
+        // back into `captureRect` with the clicked rectangle. Re-firing the
+        // hotkey while the overlay is up cancels it (acts as a toggle).
+        if mode == .fixedSize {
+            if FixedSizeOverlay.shared.isActive {
+                FixedSizeOverlay.shared.cancel()
+            } else {
+                FixedSizePrompt.shared.show()
+            }
+            return
+        }
         Task { await performCapture(mode) }
     }
 
-    private func performCapture(_ mode: CaptureMode) async {
+    /// Captures an exact screen rectangle, as reported by the fixed-size
+    /// overlay in Cocoa screen coordinates (bottom-left origin).
+    func captureRect(_ rect: CGRect) {
+        // screencapture -R wants top-left-origin global coordinates, measured
+        // down from the top of the primary display (`screens[0]`).
+        let primaryTop = NSScreen.screens.first?.frame.maxY ?? 0
+        let flipped = CGRect(x: rect.minX, y: primaryTop - rect.maxY,
+                             width: rect.width, height: rect.height)
+        Task { await performCapture(.fixedSize, rect: flipped) }
+    }
+
+    private func performCapture(_ mode: CaptureMode, rect: CGRect? = nil) async {
         let tmp = FileManager.default.temporaryDirectory
             .appendingPathComponent("prtscn-\(UUID().uuidString).png")
 
@@ -41,10 +63,18 @@ final class ScreenshotService {
         if mode == .window || mode == .region {
             arguments += windowBackground.extraCaptureArgs
         }
+        if let rect {
+            // Pixel-unit sizes produce half-point values on Retina, and
+            // screencapture parses fractional rects fine — keep the decimals.
+            let coordinates = [rect.minX, rect.minY, rect.width, rect.height]
+                .map { $0 == $0.rounded() ? String(Int($0)) : String(format: "%.2f", $0) }
+            arguments += ["-R", coordinates.joined(separator: ",")]
+        }
         if !SettingsStore.shared.shutterSound { arguments.append("-x") }
-        // Only non-interactive (full-screen) captures can include the pointer;
-        // the flag is ignored by the interactive modes.
-        if SettingsStore.shared.includePointer { arguments.append("-C") }
+        // Only full-screen captures include the pointer: the interactive modes
+        // ignore the flag anyway, and a fixed-size shot would always have the
+        // arrow dead center (it sits where the user just clicked).
+        if SettingsStore.shared.includePointer, mode == .fullScreen { arguments.append("-C") }
 
         let succeeded = await Self.runScreencapture(arguments: arguments + [tmp.path])
         let exists = FileManager.default.fileExists(atPath: tmp.path)

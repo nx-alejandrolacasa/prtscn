@@ -121,6 +121,20 @@ final class SettingsStore {
         didSet { defaults.set(editorTool.rawValue, forKey: Keys.editorTool) }
     }
 
+    /// Last-used fixed-size capture dimensions, in `fixedSizeUnit` units.
+    var fixedSizeWidth: Int {
+        didSet { defaults.set(fixedSizeWidth, forKey: Keys.fixedSizeWidth) }
+    }
+
+    var fixedSizeHeight: Int {
+        didSet { defaults.set(fixedSizeHeight, forKey: Keys.fixedSizeHeight) }
+    }
+
+    /// Whether the fixed-size dimensions mean output pixels or screen points.
+    var fixedSizeUnit: FixedSizeUnit {
+        didSet { defaults.set(fixedSizeUnit.rawValue, forKey: Keys.fixedSizeUnit) }
+    }
+
     /// Global capture shortcuts, per mode. Saving re-registers the hotkeys.
     var shortcuts: [CaptureMode: Shortcut] {
         didSet {
@@ -150,6 +164,9 @@ final class SettingsStore {
         static let filenamePrefix = "filenamePrefix"
         static let rememberLastTool = "rememberLastTool"
         static let editorTool = "editorTool"
+        static let fixedSizeWidth = "fixedSizeWidth"
+        static let fixedSizeHeight = "fixedSizeHeight"
+        static let fixedSizeUnit = "fixedSizeUnit"
     }
 
     /// Default annotation color — system red.
@@ -176,6 +193,9 @@ final class SettingsStore {
         filenamePrefix = defaults.string(forKey: Keys.filenamePrefix) ?? "PrtScn"
         rememberLastTool = defaults.object(forKey: Keys.rememberLastTool) as? Bool ?? true
         editorTool = EditTool(rawValue: defaults.string(forKey: Keys.editorTool) ?? "") ?? .arrow
+        fixedSizeWidth = defaults.object(forKey: Keys.fixedSizeWidth) as? Int ?? 1280
+        fixedSizeHeight = defaults.object(forKey: Keys.fixedSizeHeight) as? Int ?? 720
+        fixedSizeUnit = FixedSizeUnit(rawValue: defaults.string(forKey: Keys.fixedSizeUnit) ?? "") ?? .pixels
         shortcuts = Self.loadShortcuts(from: defaults) ?? Self.defaultShortcuts
         // Reflect the real system login-item state rather than a stored guess.
         launchAtLogin = (SMAppService.mainApp.status == .enabled)
@@ -183,8 +203,8 @@ final class SettingsStore {
 
     // MARK: - Shortcuts
 
-    /// ⌘⌥1 / ⌘⌥2 / ⌘⌥3 (avoiding macOS's ⌘⇧3/4/5). The dev build — its own
-    /// bundle id, run alongside the installed app — adds ⇧ so the two don't
+    /// ⌘⌥1 / ⌘⌥2 / ⌘⌥3 / ⌘⌥4 (avoiding macOS's ⌘⇧3/4/5). The dev build — its
+    /// own bundle id, run alongside the installed app — adds ⇧ so the two don't
     /// register the same global hotkeys. (Each variant persists its own
     /// shortcuts anyway; these are just the first-run defaults.)
     static let defaultShortcuts: [CaptureMode: Shortcut] = {
@@ -195,6 +215,7 @@ final class SettingsStore {
             .region: Shortcut(keyCode: UInt32(kVK_ANSI_1), modifiers: modifiers),
             .window: Shortcut(keyCode: UInt32(kVK_ANSI_2), modifiers: modifiers),
             .fullScreen: Shortcut(keyCode: UInt32(kVK_ANSI_3), modifiers: modifiers),
+            .fixedSize: Shortcut(keyCode: UInt32(kVK_ANSI_4), modifiers: modifiers),
         ]
     }()
 
