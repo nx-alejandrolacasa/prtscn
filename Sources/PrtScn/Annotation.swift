@@ -211,6 +211,46 @@ struct ArrowGeometry {
     let rightBarb: CGPoint
 }
 
+// MARK: - Shape labels
+
+extension Annotation {
+    /// Whether double-click can attach a centered text label to this annotation.
+    /// Measure has its own pixel-count label; pixelate/counter/text don't apply.
+    var supportsLabel: Bool {
+        switch kind {
+        case .arrow, .line, .rectangle, .roundedRect, .ellipse: return true
+        default: return false
+        }
+    }
+
+    /// True once the label has actual content.
+    var hasLabel: Bool {
+        supportsLabel && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Where the label sits (image coords): the midpoint of a line/arrow, the
+    /// center of a closed shape.
+    var labelCenter: CGPoint {
+        switch kind {
+        case .arrow, .line:
+            return CGPoint(x: (start.x + end.x) / 2, y: (start.y + end.y) / 2)
+        default:
+            return CGPoint(x: boundingRect.midX, y: boundingRect.midY)
+        }
+    }
+
+    /// The knockout rect around the label: the shape's stroke is clipped out of
+    /// it, so the text sits directly on the untouched capture with breathing
+    /// room on all sides. `displayText` overrides the stored text while editing
+    /// (live sizing, and a placeholder-sized hole while still empty).
+    func labelHoleRect(for displayText: String? = nil) -> CGRect {
+        let size = textRenderSize(displayText ?? text, fontSize: fontSize, design: fontDesign)
+        return CGRect(x: labelCenter.x - size.width / 2, y: labelCenter.y - size.height / 2,
+                      width: size.width, height: size.height)
+            .insetBy(dx: -fontSize * 0.4, dy: -fontSize * 0.2)
+    }
+}
+
 // MARK: - Selection & manipulation
 
 /// A draggable handle on a selected annotation.
@@ -258,6 +298,9 @@ extension Annotation {
     /// Whether `point` (image coords) is on this annotation's body, within
     /// `tolerance` — used to select/move it.
     func bodyContains(_ point: CGPoint, tolerance: CGFloat) -> Bool {
+        // The label counts as body: it can sit off the stroke (the middle of a
+        // shape, astride a thin line), yet must still select/move/re-edit.
+        if hasLabel, labelHoleRect().contains(point) { return true }
         switch kind {
         case .arrow, .line, .measure:
             return distanceFromPoint(point, toSegment: start, end) <= tolerance + lineWidth / 2

@@ -182,8 +182,16 @@ struct EditorCanvas: View {
         Canvas { context, _ in
             context.draw(Image(nsImage: model.baseImage), in: fit.imageRect)
 
-            for annotation in model.annotations where annotation.id != model.editingTextID {
-                draw(annotation, in: &context, fit: fit)
+            for annotation in model.annotations {
+                if annotation.id == model.editingTextID {
+                    // The editing TextField renders the text itself; a shape
+                    // stays visible while its label is edited — only the label
+                    // drawing is suppressed.
+                    guard annotation.kind != .text else { continue }
+                    draw(annotation, in: &context, fit: fit, editingLabel: true)
+                } else {
+                    draw(annotation, in: &context, fit: fit)
+                }
             }
             if let draft = model.draft {
                 draw(draft, in: &context, fit: fit)
@@ -201,12 +209,26 @@ struct EditorCanvas: View {
         .pointerStyle(model.isCropping ? .rectSelection : nil)
     }
 
-    private func draw(_ annotation: Annotation, in context: inout GraphicsContext, fit: CanvasFit) {
+    private func draw(_ annotation: Annotation, in context: inout GraphicsContext,
+                      fit: CanvasFit, editingLabel: Bool = false) {
         let width = annotation.lineWidth * fit.scale
         let style = StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round)
         let rect = CGRect(origin: fit.toView(annotation.boundingRect.origin),
                           size: CGSize(width: annotation.boundingRect.width * fit.scale,
                                        height: annotation.boundingRect.height * fit.scale))
+
+        // Shape label: the stroke goes through a copied context whose clip
+        // excludes the label's knockout rect, so the text sits on untouched
+        // pixels. While editing an empty label, the hole is placeholder-sized.
+        var shape = context
+        if annotation.supportsLabel, annotation.hasLabel || editingLabel {
+            let sizingText = annotation.text.isEmpty ? "Text" : annotation.text
+            let hole = annotation.labelHoleRect(for: sizingText)
+            let holeView = CGRect(origin: fit.toView(hole.origin),
+                                  size: CGSize(width: hole.width * fit.scale,
+                                               height: hole.height * fit.scale))
+            shape.clip(to: Path(holeView), options: .inverse)
+        }
 
         switch annotation.kind {
         case .arrow:
@@ -218,12 +240,12 @@ struct EditorCanvas: View {
             path.move(to: fit.toView(geometry.leftBarb))
             path.addLine(to: fit.toView(geometry.tip))
             path.addLine(to: fit.toView(geometry.rightBarb))
-            context.stroke(path, with: .color(annotation.color), style: style)
+            shape.stroke(path, with: .color(annotation.color), style: style)
         case .line:
             var path = Path()
             path.move(to: fit.toView(annotation.start))
             path.addLine(to: fit.toView(annotation.end))
-            context.stroke(path, with: .color(annotation.color), style: style)
+            shape.stroke(path, with: .color(annotation.color), style: style)
         case .measure:
             let geometry = measureGeometry(from: annotation.start, to: annotation.end,
                                            lineWidth: annotation.lineWidth)
@@ -238,13 +260,13 @@ struct EditorCanvas: View {
             drawMeasureLabel(geometry, in: &context, fit: fit, color: annotation.color,
                              fontSize: annotation.fontSize, captureScale: model.captureScale)
         case .rectangle:
-            context.stroke(Path(rect), with: .color(annotation.color), style: style)
+            shape.stroke(Path(rect), with: .color(annotation.color), style: style)
         case .roundedRect:
             let radius = annotation.cornerRadius * fit.scale
-            context.stroke(Path(roundedRect: rect, cornerRadius: radius, style: .continuous),
-                           with: .color(annotation.color), style: style)
+            shape.stroke(Path(roundedRect: rect, cornerRadius: radius, style: .continuous),
+                         with: .color(annotation.color), style: style)
         case .ellipse:
-            context.stroke(Path(ellipseIn: rect), with: .color(annotation.color), style: style)
+            shape.stroke(Path(ellipseIn: rect), with: .color(annotation.color), style: style)
         case .pixelate:
             if let mosaic = model.pixelatedRegion(annotation.boundingRect) {
                 context.draw(Image(decorative: mosaic, scale: 1), in: rect)
@@ -267,6 +289,26 @@ struct EditorCanvas: View {
                               design: annotation.fontDesign.swiftUIDesign))
                 .foregroundStyle(annotation.color)
             context.draw(text, at: fit.toView(annotation.start), anchor: .topLeading)
+        }
+
+        // The label itself, centered in the knockout (the TextField draws it
+        // while editing). Line by line, each centered, to match the editing
+        // field's center alignment on multi-line labels.
+        if annotation.hasLabel, !editingLabel {
+            let center = fit.toView(annotation.labelCenter)
+            let lines = annotation.text.components(separatedBy: .newlines)
+            let lineHeight = textRenderSize(" ", fontSize: annotation.fontSize,
+                                            design: annotation.fontDesign).height * fit.scale
+            let top = center.y - lineHeight * CGFloat(lines.count) / 2
+            for (index, line) in lines.enumerated() {
+                let label = Text(line)
+                    .font(.system(size: annotation.fontSize * fit.scale, weight: .semibold,
+                                  design: annotation.fontDesign.swiftUIDesign))
+                    .foregroundStyle(annotation.color)
+                context.draw(label, at: CGPoint(x: center.x,
+                                                y: top + (CGFloat(index) + 0.5) * lineHeight),
+                             anchor: .center)
+            }
         }
     }
 
@@ -542,7 +584,7 @@ struct EditorCanvas: View {
             : CGPoint(x: anchor.x, y: p.y)
     }
 
-    // MARK: - Double-click: edit text
+    // MARK: - Double-click: edit text / shape label
 
     private func doubleClickGesture(fit: CanvasFit) -> some Gesture {
         SpatialTapGesture(count: 2, coordinateSpace: .local)
@@ -551,7 +593,8 @@ struct EditorCanvas: View {
                 let point = fit.toImage(value.location, clampedTo: model.pixelSize)
                 let tolerance = bodyTolerance / fit.scale
                 if let hit = model.annotations.last(where: {
-                    $0.kind == .text && $0.bodyContains(point, tolerance: tolerance)
+                    ($0.kind == .text || $0.supportsLabel)
+                        && $0.bodyContains(point, tolerance: tolerance)
                 }) {
                     model.editText(id: hit.id)
                 }
@@ -657,43 +700,69 @@ struct EditorCanvas: View {
     private func textOverlay(fit: CanvasFit) -> some View {
         if let id = model.editingTextID,
            let annotation = model.annotations.first(where: { $0.id == id }) {
-            let origin = fit.toView(annotation.start)
             let font = Font.system(size: annotation.fontSize * fit.scale, weight: .semibold,
                                    design: annotation.fontDesign.swiftUIDesign)
-            TextField("", text: Binding(get: { model.editingText }, set: { model.setEditingText($0) }),
-                      axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(font)
-                .foregroundStyle(annotation.color)
-                // SwiftUI forces the system gray on a TextField prompt, so draw
-                // our own placeholder in the drawing color instead.
-                .overlay(alignment: .topLeading) {
-                    if model.editingText.isEmpty {
-                        Text("Text")
-                            .font(font)
-                            .foregroundStyle(annotation.color.opacity(0.7))
-                            .allowsHitTesting(false)
-                    }
-                }
-                .frame(maxWidth: max(fit.imageRect.maxX - origin.x, 80), alignment: .leading)
-                .fixedSize(horizontal: false, vertical: true)
-                .focused($textFieldFocused)
-                .offset(x: origin.x, y: origin.y)
-                // Focus once the field is actually in the hierarchy.
-                .task(id: id) { textFieldFocused = true }
-                .onSubmit { model.finishTextEditing() }
-                .onExitCommand { model.finishTextEditing() }   // Esc
-                .onChange(of: textFieldFocused) { _, focused in
-                    // The placing click (and palette taps) steal first responder
-                    // from the just-shown field. While still editing, reclaim it
-                    // rather than committing — commits happen via Esc, clicking
-                    // away on the canvas, or switching tools.
-                    guard !focused, model.editingTextID == id else { return }
-                    Task { @MainActor in
-                        if model.editingTextID == id { textFieldFocused = true }
-                    }
-                }
+            if annotation.kind == .text {
+                let origin = fit.toView(annotation.start)
+                editingField(annotation: annotation, id: id, font: font, centered: false)
+                    .frame(maxWidth: max(fit.imageRect.maxX - origin.x, 80), alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .offset(x: origin.x, y: origin.y)
+            } else {
+                // A shape label edits in place, centered on the label point.
+                // The field gets a wide, session-constant frame — AppKit's
+                // field editor doesn't reliably track a frame that grows while
+                // typing (the text wrapped or clipped at the stale size), so
+                // the frame must never need to grow. Center alignment keeps
+                // the text visually anchored on the label point, and the
+                // invisible surplus draws nothing. Only the vertical offset is
+                // live: it re-centers the block when a newline changes the
+                // line count.
+                let center = fit.toView(annotation.labelCenter)
+                let width = max(fit.imageRect.width, 300)
+                let lineHeight = textRenderSize(" ", fontSize: annotation.fontSize,
+                                                design: annotation.fontDesign).height * fit.scale
+                let lines = CGFloat(max(model.editingText.components(separatedBy: .newlines).count, 1))
+                editingField(annotation: annotation, id: id, font: font, centered: true)
+                    .frame(width: width)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .offset(x: center.x - width / 2, y: center.y - lines * lineHeight / 2)
+            }
         }
+    }
+
+    private func editingField(annotation: Annotation, id: UUID, font: Font, centered: Bool) -> some View {
+        TextField("", text: Binding(get: { model.editingText }, set: { model.setEditingText($0) }),
+                  axis: .vertical)
+            .textFieldStyle(.plain)
+            .font(font)
+            .foregroundStyle(annotation.color)
+            .multilineTextAlignment(centered ? .center : .leading)
+            // SwiftUI forces the system gray on a TextField prompt, so draw
+            // our own placeholder in the drawing color instead.
+            .overlay(alignment: centered ? .center : .topLeading) {
+                if model.editingText.isEmpty {
+                    Text("Text")
+                        .font(font)
+                        .foregroundStyle(annotation.color.opacity(0.7))
+                        .allowsHitTesting(false)
+                }
+            }
+            .focused($textFieldFocused)
+            // Focus once the field is actually in the hierarchy.
+            .task(id: id) { textFieldFocused = true }
+            .onSubmit { model.finishTextEditing() }
+            .onExitCommand { model.finishTextEditing() }   // Esc
+            .onChange(of: textFieldFocused) { _, focused in
+                // The placing click (and palette taps) steal first responder
+                // from the just-shown field. While still editing, reclaim it
+                // rather than committing — commits happen via Esc, clicking
+                // away on the canvas, or switching tools.
+                guard !focused, model.editingTextID == id else { return }
+                Task { @MainActor in
+                    if model.editingTextID == id { textFieldFocused = true }
+                }
+            }
     }
 }
 

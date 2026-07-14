@@ -495,6 +495,13 @@ final class EditorModel {
         let wasNew = editingIsNew
         editingIsNew = false
         guard let index = annotations.firstIndex(where: { $0.id == id }) else { return }
+        // A shape label is optional: whitespace-only means "no label"; the
+        // shape itself always survives the edit.
+        if annotations[index].kind != .text {
+            annotations[index].text = annotations[index].text
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return
+        }
         if !annotations[index].isMeaningful {
             annotations.remove(at: index)
             if wasNew, !undoStack.isEmpty { undoStack.removeLast() }
@@ -687,6 +694,18 @@ final class EditorModel {
             context.setFillColor(stroke)
             context.setLineWidth(annotation.lineWidth)
 
+            // Shape label: clip the stroke out of the label's knockout rect,
+            // then draw the text over the untouched pixels — mirroring the
+            // on-screen canvas.
+            let hasLabel = annotation.hasLabel
+            if hasLabel {
+                context.saveGState()
+                context.beginPath()
+                context.addRect(CGRect(x: 0, y: 0, width: CGFloat(width), height: h))
+                context.addRect(flippedRect(annotation.labelHoleRect(), in: h))
+                context.clip(using: .evenOdd)
+            }
+
             switch annotation.kind {
             case .arrow:
                 let geometry = arrowGeometry(from: annotation.start, to: annotation.end,
@@ -735,8 +754,38 @@ final class EditorModel {
             case .text:
                 drawText(annotation, in: context, imageHeight: h)
             }
+
+            if hasLabel {
+                context.restoreGState()
+                drawShapeLabel(annotation, in: context, imageHeight: h)
+            }
         }
         return context.makeImage()
+    }
+
+    /// A shape's centered label, drawn over its knockout hole — the same
+    /// image-based technique as `drawText`, anchored at the label center
+    /// instead of a top-left origin.
+    private func drawShapeLabel(_ annotation: Annotation, in context: CGContext, imageHeight: CGFloat) {
+        // Center-aligned so multi-line labels match the on-screen canvas;
+        // alignment only applies when drawing *in* a rect, not *at* a point.
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        let string = NSAttributedString(string: annotation.text, attributes: [
+            .font: annotationNSFont(size: annotation.fontSize, design: annotation.fontDesign),
+            .foregroundColor: NSColor(annotation.color),
+            .paragraphStyle: paragraph,
+        ])
+        let size = string.size()
+        guard size.width > 0, size.height > 0 else { return }
+        let label = NSImage(size: size)
+        label.lockFocus()
+        string.draw(in: CGRect(origin: .zero, size: size))
+        label.unlockFocus()
+        guard let labelImage = label.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
+        let center = CGPoint(x: annotation.labelCenter.x, y: imageHeight - annotation.labelCenter.y)
+        context.draw(labelImage, in: CGRect(x: center.x - size.width / 2, y: center.y - size.height / 2,
+                                            width: size.width, height: size.height))
     }
 
     /// A filled circle in the annotation color with the white step number,
