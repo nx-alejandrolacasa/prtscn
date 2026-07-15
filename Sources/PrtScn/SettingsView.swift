@@ -220,6 +220,7 @@ private struct FixedSizePresetsSection: View {
     @State private var newWidth: Int?
     @State private var newHeight: Int?
     @FocusState private var focusedField: Field?
+    @State private var dropTarget: FixedSizePreset?
 
     private enum Field { case width, height }
 
@@ -254,9 +255,23 @@ private struct FixedSizePresetsSection: View {
                     .accessibilityLabel("Remove \(preset.width) by \(preset.height) preset")
                 }
                 .accessibilityElement(children: .combine)
-            }
-            .onMove { indices, newOffset in
-                settings.fixedSizePresets.move(fromOffsets: indices, toOffset: newOffset)
+                .draggable(preset)
+                .dropDestination(for: FixedSizePreset.self) { dropped, _ in
+                    drop(dropped, on: preset)
+                } isTargeted: { targeted in
+                    if targeted {
+                        dropTarget = preset
+                    } else if dropTarget == preset {
+                        dropTarget = nil
+                    }
+                }
+                .overlay {
+                    if dropTarget == preset {
+                        RoundedRectangle(cornerRadius: 4)
+                            .stroke(Color.accentColor, lineWidth: 1.5)
+                            .padding(-4)
+                    }
+                }
             }
 
             if !atCapacity {
@@ -291,6 +306,24 @@ private struct FixedSizePresetsSection: View {
         newWidth = nil
         newHeight = nil
         focusedField = .width
+    }
+
+    /// Dropping a row on another moves it into the target's slot.
+    private func drop(_ items: [FixedSizePreset], on target: FixedSizePreset) -> Bool {
+        guard let item = items.first, item != target,
+              let from = settings.fixedSizePresets.firstIndex(of: item),
+              let to = settings.fixedSizePresets.firstIndex(of: target)
+        else { return false }
+        withAnimation {
+            var presets = settings.fixedSizePresets
+            presets.remove(at: from)
+            // With `from` removed, inserting at the target's ORIGINAL index
+            // lands the item in the target's slot whichever direction it came
+            // from (downward: right after the target; upward: right before).
+            presets.insert(item, at: to)
+            settings.fixedSizePresets = presets
+        }
+        return true
     }
 
     /// `.focused` registers the fields with the focus system explicitly —
