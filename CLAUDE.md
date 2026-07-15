@@ -63,7 +63,8 @@ Sources/PrtScn/
   EditorView.swift             editor window body + floating tool palette
   EditorController.swift       editor NSWindow + title-bar toolbar
   SettingsStore.swift          @Observable settings, persisted to UserDefaults
-  SettingsView.swift           General / Capture / Hotkeys tabs
+  SettingsWindow.swift         AppKit NSSplitViewController settings window (full-height sidebar)
+  SettingsView.swift           sidebar panes: General/Capture/Preview/Editor/Hotkeys/About
   Appearance.swift             Auto/Light/Dark
   Shortcut.swift                key code + modifiers + glyph display
   HotkeyManager.swift          Carbon global hotkey registration

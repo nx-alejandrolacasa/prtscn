@@ -5,9 +5,6 @@ import SwiftUI
 /// With `MenuBarExtra`'s `.menu` style, each `Button` becomes a native menu
 /// item and `Divider` a separator — no AppKit `NSMenu` wiring needed.
 struct MenuContent: View {
-    /// SwiftUI-provided action to open the `Settings` scene (macOS 14+).
-    @Environment(\.openSettings) private var openSettings
-
     private var updater: UpdateChecker { UpdateChecker.shared }
     private var pinned: PinnedController { PinnedController.shared }
 
@@ -73,11 +70,7 @@ struct MenuContent: View {
         }
 
         Button {
-            // Accessory (menu-bar) apps aren't active by default, so the
-            // Settings window would open behind everything — or appear not to
-            // open at all. Activate first, then open it.
-            NSApp.activate(ignoringOtherApps: true)
-            openSettings()
+            SettingsWindowController.shared.show()
         } label: {
             Label("Settings…", systemImage: "gearshape")
         }

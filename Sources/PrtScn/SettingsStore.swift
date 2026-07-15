@@ -146,6 +146,28 @@ final class SettingsStore {
         didSet { defaults.set(fixedSizeUnit.rawValue, forKey: Keys.fixedSizeUnit) }
     }
 
+    /// The size presets offered in the fixed-size capture dialog, editable in
+    /// Settings → Capture (up to `maxFixedSizePresets`).
+    var fixedSizePresets: [FixedSizePreset] {
+        didSet {
+            if let data = try? JSONEncoder().encode(fixedSizePresets) {
+                defaults.set(data, forKey: Keys.fixedSizePresets)
+            }
+        }
+    }
+
+    static let maxFixedSizePresets = 6
+
+    /// Common frames: classic 4:3s, HD sizes, social square, and OG image.
+    static let defaultFixedSizePresets: [FixedSizePreset] = [
+        FixedSizePreset(width: 640, height: 480),
+        FixedSizePreset(width: 800, height: 600),
+        FixedSizePreset(width: 1280, height: 720),
+        FixedSizePreset(width: 1920, height: 1080),
+        FixedSizePreset(width: 1080, height: 1080),
+        FixedSizePreset(width: 1200, height: 630),
+    ]
+
     /// Height cap for scrolling captures, in pixels. Clamped below Metal's
     /// 16,384-px maximum texture size: anything taller is silently
     /// downsampled by the display pipeline (editor, Quick Look, Preview)
@@ -198,6 +220,7 @@ final class SettingsStore {
         static let fixedSizeWidth = "fixedSizeWidth"
         static let fixedSizeHeight = "fixedSizeHeight"
         static let fixedSizeUnit = "fixedSizeUnit"
+        static let fixedSizePresets = "fixedSizePresets"
         static let scrollMaxHeight = "scrollMaxHeight"
         static let scrollingShortcutMigrated = "scrollingShortcutMigrated"
     }
@@ -231,6 +254,7 @@ final class SettingsStore {
         fixedSizeWidth = defaults.object(forKey: Keys.fixedSizeWidth) as? Int ?? 1280
         fixedSizeHeight = defaults.object(forKey: Keys.fixedSizeHeight) as? Int ?? 720
         fixedSizeUnit = FixedSizeUnit(rawValue: defaults.string(forKey: Keys.fixedSizeUnit) ?? "") ?? .pixels
+        fixedSizePresets = Self.loadFixedSizePresets(from: defaults) ?? Self.defaultFixedSizePresets
         scrollMaxHeight = Self.clampedScrollMaxHeight(
             defaults.object(forKey: Keys.scrollMaxHeight) as? Int ?? Self.defaultScrollMaxHeight)
         shortcuts = Self.loadShortcuts(from: defaults) ?? Self.defaultShortcuts
@@ -275,6 +299,11 @@ final class SettingsStore {
         if let data = try? JSONEncoder().encode(raw) {
             defaults.set(data, forKey: Keys.shortcuts)
         }
+    }
+
+    private static func loadFixedSizePresets(from defaults: UserDefaults) -> [FixedSizePreset]? {
+        guard let data = defaults.data(forKey: Keys.fixedSizePresets) else { return nil }
+        return try? JSONDecoder().decode([FixedSizePreset].self, from: data)
     }
 
     private static func loadShortcuts(from defaults: UserDefaults) -> [CaptureMode: Shortcut]? {

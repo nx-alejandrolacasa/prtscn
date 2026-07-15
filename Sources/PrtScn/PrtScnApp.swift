@@ -28,10 +28,9 @@ struct PrtScnApp: App {
         }
         .menuBarExtraStyle(.menu)
 
-        // The Settings window — gets ⌘, support and the standard chrome for free.
-        Settings {
-            SettingsView()
-        }
+        // The Settings window is NOT a SwiftUI scene: the System Settings
+        // look (full-height sidebar with the traffic lights floating over
+        // it) needs AppKit's NSSplitViewController — see SettingsWindow.swift.
     }
 }
 

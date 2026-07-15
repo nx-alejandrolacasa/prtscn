@@ -18,6 +18,19 @@ enum FixedSizeUnit: String, CaseIterable, Identifiable, Codable {
     }
 }
 
+/// A saved width × height pair offered in the fixed-size capture dialog's
+/// preset menu. The list is user-editable in Settings → Capture.
+struct FixedSizePreset: Codable, Hashable, Identifiable {
+    var width: Int
+    var height: Int
+
+    var id: String { "\(width)×\(height)" }
+
+    /// Plain interpolation on purpose: locale formatting would render
+    /// "1.080 × 1.080" with grouping separators.
+    var label: String { "\(width) × \(height)" }
+}
+
 /// The small "what size?" dialog shown before a fixed-size capture. On
 /// Capture it hands the chosen size to `FixedSizeOverlay` and remembers it
 /// for next time.
@@ -109,20 +122,18 @@ private struct FixedSizePromptView: View {
         self.onCancel = onCancel
     }
 
-    /// Common frames: classic 4:3s, HD sizes, social square, and OG image.
-    private static let presets: [(width: Int, height: Int)] = [
-        (640, 480), (800, 600), (1280, 720), (1920, 1080), (1080, 1080), (1200, 630),
-    ]
+    /// The user-editable preset list (Settings → Capture).
+    private var presets: [FixedSizePreset] { SettingsStore.shared.fixedSizePresets }
 
     /// The preset matching the current fields, or -1 ("Custom"). Editing a
     /// field deselects the preset automatically; picking one fills the fields.
     private var presetSelection: Binding<Int> {
         Binding(
-            get: { Self.presets.firstIndex { $0.width == width && $0.height == height } ?? -1 },
+            get: { presets.firstIndex { $0.width == width && $0.height == height } ?? -1 },
             set: { index in
-                guard Self.presets.indices.contains(index) else { return }
-                width = Self.presets[index].width
-                height = Self.presets[index].height
+                guard presets.indices.contains(index) else { return }
+                width = presets[index].width
+                height = presets[index].height
             }
         )
     }
@@ -133,17 +144,16 @@ private struct FixedSizePromptView: View {
             // in the left column, values right-aligned in one inset card.
             Form {
                 Section {
-                    Picker("Preset", selection: presetSelection) {
-                        Text("Custom").tag(-1)
-                        Divider()
-                        ForEach(Self.presets.indices, id: \.self) { index in
-                            let preset = Self.presets[index]
-                            // verbatim: locale-formatted interpolation would
-                            // render "1.080 × 1.080" with grouping separators.
-                            Text(verbatim: "\(preset.width) × \(preset.height)").tag(index)
+                    if !presets.isEmpty {
+                        Picker("Preset", selection: presetSelection) {
+                            Text("Custom").tag(-1)
+                            Divider()
+                            ForEach(presets.indices, id: \.self) { index in
+                                Text(presets[index].label).tag(index)
+                            }
                         }
+                        .pickerStyle(.menu)
                     }
-                    .pickerStyle(.menu)
 
                     LabeledContent("Size") {
                         HStack(spacing: 6) {
@@ -192,7 +202,7 @@ private struct FixedSizePromptView: View {
             .padding(.horizontal, 20)
             .padding(.bottom, 18)
         }
-        .frame(width: 330, height: 252)
+        .frame(width: 330, height: presets.isEmpty ? 218 : 252)
         .onAppear { focused = .width }
     }
 
