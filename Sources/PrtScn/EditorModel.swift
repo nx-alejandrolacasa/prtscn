@@ -574,6 +574,30 @@ final class EditorModel {
         flash(hex)
     }
 
+    /// The capture's pixel dimensions as "2560×1440" — the toolbar's size
+    /// readout, and what clicking it copies.
+    var pixelSizeText: String {
+        "\(Int(pixelSize.width))×\(Int(pixelSize.height))"
+    }
+
+    /// What the title-bar size readout shows: the pending crop's dimensions
+    /// (matching what `applyCrop` would produce) while one is selected,
+    /// otherwise the capture's.
+    var sizeReadout: (value: String, caption: String) {
+        if isCropping, let rect = cropRect?.integral, rect.width >= 1, rect.height >= 1 {
+            return ("\(Int(rect.width))×\(Int(rect.height))", "Crop size")
+        }
+        return (pixelSizeText, "Image size")
+    }
+
+    /// Copies the readout's dimensions to the clipboard — the title-bar size
+    /// readout doubles as a button.
+    func copySize() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(sizeReadout.value, forType: .string)
+        flash("Size copied")
+    }
+
     /// Samples the base image at a pixel coordinate (top-left origin, matching
     /// the annotation pixel space) — not the canvas's rendered annotations, so
     /// this reads the capture's real content regardless of what's drawn atop it.

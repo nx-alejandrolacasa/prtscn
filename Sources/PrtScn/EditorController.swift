@@ -10,6 +10,10 @@ final class EditorController: NSObject, NSWindowDelegate {
 
     private var window: NSWindow?
     private var model: EditorModel?
+    /// The size readout's two lines, kept to live-update while a crop is
+    /// selected and after one is applied.
+    private weak var sizeLabel: NSTextField?
+    private weak var sizeCaption: NSTextField?
     /// Retained because `NSToolbar.delegate` is weak.
     private var toolbarDelegate: EditorToolbarDelegate?
     /// Local right-mouse event monitor that pans the zoomed capture.
@@ -117,6 +121,14 @@ final class EditorController: NSObject, NSWindowDelegate {
         // window to come forward and accept keyboard focus.
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+
+        // Deferred a runloop turn: the readout anchors to the zoom control's
+        // view, which AppKit only installs in the window hierarchy once the
+        // title bar has been laid out — synchronously it isn't there yet.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let window = self.window, let model = self.model else { return }
+            self.installSizeReadout(in: window, model: model)
+        }
     }
 
     /// Consumes right-mouse events over the editor's content while zoomed in,
@@ -168,6 +180,85 @@ final class EditorController: NSObject, NSWindowDelegate {
         return true
     }
 
+    /// The image-size readout: the capture's pixel dimensions over a small
+    /// "Image size" caption, sitting right after the zoom group. Plain text
+    /// added straight to the title-bar view and anchored to the zoom control —
+    /// as a toolbar item macOS 26 would wrap it in its own glass capsule,
+    /// exactly the chrome plain text shouldn't have. Clicking it copies the
+    /// dimensions as text.
+    private func installSizeReadout(in window: NSWindow, model: EditorModel) {
+        // Hosted on the title-bar view (the traffic-light buttons' superview):
+        // inside the title bar's visual-effect hierarchy, so the text gets the
+        // same vibrant rendering as the toolbar's own labels — on the plain
+        // window frame view it draws flat and reads heavier. Skip (no readout)
+        // if either lookup isn't in this window's hierarchy.
+        guard let titlebar = window.standardWindowButton(.closeButton)?.superview,
+              let zoomView = toolbarDelegate?.zoomView, zoomView.window === window
+        else { return }
+
+        let readout = model.sizeReadout
+        let value = NSTextField(labelWithString: readout.value)
+        value.font = .monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+        let caption = NSTextField(labelWithString: readout.caption)
+        caption.font = .systemFont(ofSize: 9)
+        caption.textColor = .secondaryLabelColor
+
+        let stack = NSStackView(views: [value, caption])
+        stack.orientation = .vertical
+        stack.alignment = .centerX
+        stack.spacing = 1
+        stack.toolTip = "Image size in pixels — click to copy"
+        stack.addGestureRecognizer(
+            NSClickGestureRecognizer(target: self, action: #selector(copySizeAction)))
+
+        // Toolbar item views live in their own layout-engine domain (macOS 26)
+        // — constraining an outside view to the zoom control throws — so the
+        // readout is placed by frame: just after the zoom group, vertically
+        // centered on it. The leading toolbar items are pinned to the left
+        // edge, so the spot is stable; the autoresizing margins keep it
+        // anchored to the window's top-left through resizes.
+        let zoomFrame = zoomView.convert(zoomView.bounds, to: titlebar)
+        let size = stack.fittingSize
+        stack.setFrameSize(size)
+        stack.setFrameOrigin(NSPoint(x: zoomFrame.maxX + 14,
+                                     y: zoomFrame.midY - size.height / 2))
+        stack.autoresizingMask = titlebar.isFlipped
+            ? [.maxXMargin, .maxYMargin] : [.maxXMargin, .minYMargin]
+        titlebar.addSubview(stack)
+        sizeLabel = value
+        sizeCaption = caption
+        observeSize()
+    }
+
+    private func updateSizeReadout() {
+        guard let model, let sizeLabel, let sizeCaption else { return }
+        let readout = model.sizeReadout
+        sizeLabel.stringValue = readout.value
+        sizeCaption.stringValue = readout.caption
+        // The digit count changes as a crop is dragged or applied; re-fit
+        // (the origin stays put).
+        if let stack = sizeLabel.superview as? NSStackView {
+            stack.setFrameSize(stack.fittingSize)
+        }
+    }
+
+    /// Re-renders the readout when what it shows changes (a crop selection
+    /// being dragged, or the pixel dimensions after one is applied) — the
+    /// same Observation pattern the toolbar's zoom percentage uses.
+    private func observeSize() {
+        withObservationTracking {
+            _ = model?.sizeReadout
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self, self.sizeLabel != nil else { return }
+                self.updateSizeReadout()
+                self.observeSize()
+            }
+        }
+    }
+
+    @objc private func copySizeAction() { model?.copySize() }
+
     func close() {
         model?.close()      // cleans up the temp file (guarded against re-entry)
         window?.orderOut(nil)
@@ -218,12 +309,13 @@ final class EditorController: NSObject, NSWindowDelegate {
 
     /// The smallest content area: wide enough that every title-bar toolbar
     /// item (crop/pixelate/eyedropper, the −/%/+ zoom group, and the export
-    /// buttons) stays visible without collapsing into the overflow chevron —
+    /// buttons) plus the image-size readout after zoom stays visible without
+    /// the toolbar collapsing into the overflow chevron —
     /// and for the full tool palette; tall enough for the palette band plus a
     /// canvas that can still fit the measure loupe. The window otherwise hugs
     /// the capture's 1:1 size plus margins, capped to the screen. (The title
     /// text is hidden, so the width only has to cover the tool groups.)
-    static let minContentSize = NSSize(width: 680, height: 280)
+    static let minContentSize = NSSize(width: 760, height: 280)
 
     /// Sizes the window so the capture opens at full resolution: its true pixel
     /// dimensions mapped 1:1 to the screen's device pixels (pixels ÷ backing
@@ -263,6 +355,9 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
     private let model: EditorModel
     /// The ( − | % | + ) control, kept to live-update its percentage segment.
     private weak var zoomControl: NSSegmentedControl?
+    /// The zoom control's view, exposed so the controller can anchor the
+    /// image-size readout right after it in the title bar.
+    var zoomView: NSView? { zoomControl }
 
     private static let crop = NSToolbarItem.Identifier("PrtScn.crop")
     private static let pixelate = NSToolbarItem.Identifier("PrtScn.pixelate")

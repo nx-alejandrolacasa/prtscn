@@ -46,7 +46,9 @@ eating your battery — just system frameworks, doing exactly what you asked.
   rectangle, rounded rectangle, ellipse, pixelate/redact, step counter,
   text, a live eyedropper color picker, crop, and full undo/redo.
   Double-click any shape to label it: the text sits centered on the
-  shape with the stroke cleared away around it.
+  shape with the stroke cleared away around it. The title bar always
+  shows the image's pixel size — while cropping it previews the crop's
+  size instead, and a click copies the dimensions.
 - 🪟 **Window backgrounds** — margins with a drop shadow, a
   solid color, your actual desktop wallpaper, or a tight trim — for
   screenshots that already look presentation-ready.
