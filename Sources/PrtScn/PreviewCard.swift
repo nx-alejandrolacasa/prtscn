@@ -88,7 +88,11 @@ struct PreviewThumbnail: View {
             Image(nsImage: model.image)
                 .resizable()
                 .aspectRatio(contentMode: .fill)
-                .frame(width: width, height: Self.height(for: model.image, width: width))
+                // Top-aligned so extreme aspect ratios (a tall scrolling
+                // capture) crop from the bottom and show the top of the shot
+                // rather than a mid-image sliver.
+                .frame(width: width, height: Self.height(for: model.image, width: width),
+                       alignment: .top)
                 .clipped()
                 .background(Color.black.opacity(0.04))
                 .clipShape(shape)

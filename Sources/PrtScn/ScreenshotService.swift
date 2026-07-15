@@ -34,6 +34,16 @@ final class ScreenshotService {
             }
             return
         }
+        // Scrolling runs its own overlay → scroll-and-stitch flow; same
+        // toggle semantics as fixed size.
+        if mode == .scrolling {
+            if ScrollCaptureController.shared.isActive {
+                ScrollCaptureController.shared.cancel()
+            } else {
+                ScrollCaptureController.shared.begin()
+            }
+            return
+        }
         Task { await performCapture(mode) }
     }
 

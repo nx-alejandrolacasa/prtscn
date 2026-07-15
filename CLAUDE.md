@@ -44,6 +44,9 @@ Sources/PrtScn/
   CaptureMode.swift            region/window/full/fixed → screencapture flags
   FixedSizePrompt.swift        width × height dialog for fixed-size capture
   FixedSizeOverlay.swift       cursor-following fixed-size capture rectangle
+  ScrollCaptureOverlay.swift   drag-select region overlay for scrolling capture
+  ScrollCaptureController.swift scrolling capture: AX pre-flight, scroll loop, HUD
+  ScrollStitcher.swift         aligns + composites scroll frames into one tall image
   WindowBackground.swift       margins/solid/wallpaper/trim window-shot backgrounds
   ScreenshotService.swift      runs /usr/sbin/screencapture; composite, save/copy/OCR
   PreviewController.swift      floating NSPanel that hosts the card
@@ -90,6 +93,9 @@ only `Resources/AppIcon.icns` and the assets PNG are committed.
 
 - Pure native, **no third-party dependencies** — system frameworks only. Global
   hotkeys use Carbon `RegisterEventHotKey` (no Accessibility permission needed).
+  The one Accessibility-gated feature is **scrolling capture** (it posts
+  synthetic scroll-wheel events); `ScrollCaptureController` pre-flights the
+  grant and sends the user to System Settings when missing.
 - Settings persist to `UserDefaults` via `SettingsStore` (`@MainActor @Observable`).
 - The floating preview is a borderless `NSPanel` (`canBecomeKey`) hosting a SwiftUI
   card; it's activated on show so hover + keyboard shortcuts work immediately.

@@ -80,22 +80,35 @@ final class EditorController: NSObject, NSWindowDelegate {
         self.model = model
         self.toolbarDelegate = toolbarDelegate
 
-        // Right-click drag pans the capture while zoomed in. A local monitor
-        // (scoped to this window's content area) sees the events no matter
-        // which SwiftUI view sits under the cursor; left-clicks are untouched,
-        // so drawing/selecting keeps working while zoomed. Monitors deliver on
-        // the main thread (hence `assumeIsolated`), but NSEvent isn't
-        // Sendable, so its payload is unpacked before crossing in.
+        // Right-click drag and scrolling pan the capture while zoomed in, and
+        // ⌘-scroll zooms. A local monitor (scoped to this window's content
+        // area) sees the events no matter which SwiftUI view sits under the
+        // cursor; left-clicks are untouched, so drawing/selecting keeps
+        // working while zoomed. Monitors deliver on the main thread (hence
+        // `assumeIsolated`), but NSEvent isn't Sendable, so its payload is
+        // unpacked before crossing in.
         panMonitor = NSEvent.addLocalMonitorForEvents(
-            matching: [.rightMouseDown, .rightMouseDragged, .rightMouseUp]
+            matching: [.rightMouseDown, .rightMouseDragged, .rightMouseUp, .scrollWheel]
         ) { event in
-            let type = event.type
             let windowID = event.window.map(ObjectIdentifier.init)
             let location = event.locationInWindow
-            let dx = event.deltaX, dy = event.deltaY
-            let consumed = MainActor.assumeIsolated {
-                Self.shared.handlePan(type: type, windowID: windowID,
-                                      location: location, dx: dx, dy: dy)
+            let consumed: Bool
+            if event.type == .scrollWheel {
+                let dx = event.scrollingDeltaX, dy = event.scrollingDeltaY
+                let precise = event.hasPreciseScrollingDeltas
+                let zooming = event.modifierFlags.contains(.command)
+                consumed = MainActor.assumeIsolated {
+                    Self.shared.handleScroll(windowID: windowID, location: location,
+                                             dx: dx, dy: dy, precise: precise,
+                                             zooming: zooming)
+                }
+            } else {
+                let type = event.type
+                let dx = event.deltaX, dy = event.deltaY
+                consumed = MainActor.assumeIsolated {
+                    Self.shared.handlePan(type: type, windowID: windowID,
+                                          location: location, dx: dx, dy: dy)
+                }
             }
             return consumed ? nil : event
         }
@@ -128,6 +141,30 @@ final class EditorController: NSObject, NSWindowDelegate {
             isPanning = false
             NSCursor.arrow.set()
         }
+        return true
+    }
+
+    /// Scrolling moves the capture (image tracks the gesture, like the
+    /// right-click drag — `scrollingDelta` already honors the user's natural-
+    /// scrolling preference, and momentum events keep flowing through for
+    /// free inertia); ⌘-scrolling zooms about the canvas center, the same
+    /// clamped path the pinch uses. Returns whether the event was consumed.
+    private func handleScroll(windowID: ObjectIdentifier?, location: NSPoint,
+                              dx: CGFloat, dy: CGFloat, precise: Bool,
+                              zooming: Bool) -> Bool {
+        guard let window, let model, windowID == ObjectIdentifier(window),
+              let content = window.contentView,
+              content.bounds.contains(content.convert(location, from: nil))
+        else { return false }
+        if zooming {
+            // Trackpads report pixel deltas; a wheel notch reports whole
+            // "lines" and needs amplifying to feel comparable.
+            let step = precise ? dy : dy * 12
+            model.setZoom(model.zoom * pow(1.004, step))
+            return true
+        }
+        guard model.canZoomOut else { return false }   // fitted — nothing to pan
+        model.panBy(dx: dx, dy: dy)
         return true
     }
 

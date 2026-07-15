@@ -146,6 +146,24 @@ final class SettingsStore {
         didSet { defaults.set(fixedSizeUnit.rawValue, forKey: Keys.fixedSizeUnit) }
     }
 
+    /// Height cap for scrolling captures, in pixels. Clamped below Metal's
+    /// 16,384-px maximum texture size: anything taller is silently
+    /// downsampled by the display pipeline (editor, Quick Look, Preview)
+    /// and looks blurry at every zoom even though the file is sharp.
+    /// Assigning inside `didSet` doesn't re-trigger it.
+    var scrollMaxHeight: Int {
+        didSet {
+            scrollMaxHeight = Self.clampedScrollMaxHeight(scrollMaxHeight)
+            defaults.set(scrollMaxHeight, forKey: Keys.scrollMaxHeight)
+        }
+    }
+
+    static let defaultScrollMaxHeight = 15_000
+
+    static func clampedScrollMaxHeight(_ value: Int) -> Int {
+        min(max(value, 2_000), 16_000)
+    }
+
     /// Global capture shortcuts, per mode. Saving re-registers the hotkeys.
     var shortcuts: [CaptureMode: Shortcut] {
         didSet {
@@ -180,6 +198,8 @@ final class SettingsStore {
         static let fixedSizeWidth = "fixedSizeWidth"
         static let fixedSizeHeight = "fixedSizeHeight"
         static let fixedSizeUnit = "fixedSizeUnit"
+        static let scrollMaxHeight = "scrollMaxHeight"
+        static let scrollingShortcutMigrated = "scrollingShortcutMigrated"
     }
 
     /// Default annotation color — system red.
@@ -211,9 +231,24 @@ final class SettingsStore {
         fixedSizeWidth = defaults.object(forKey: Keys.fixedSizeWidth) as? Int ?? 1280
         fixedSizeHeight = defaults.object(forKey: Keys.fixedSizeHeight) as? Int ?? 720
         fixedSizeUnit = FixedSizeUnit(rawValue: defaults.string(forKey: Keys.fixedSizeUnit) ?? "") ?? .pixels
+        scrollMaxHeight = Self.clampedScrollMaxHeight(
+            defaults.object(forKey: Keys.scrollMaxHeight) as? Int ?? Self.defaultScrollMaxHeight)
         shortcuts = Self.loadShortcuts(from: defaults) ?? Self.defaultShortcuts
         // Reflect the real system login-item state rather than a stored guess.
         launchAtLogin = (SMAppService.mainApp.status == .enabled)
+
+        // Shortcuts persisted before scrolling capture existed lack its
+        // default hotkey — back-fill it exactly once, so users who later
+        // clear it (Delete in the recorder) aren't fighting a resurrection
+        // on every launch. `didSet` doesn't fire during init, so persist by
+        // hand; hotkey registration happens at app startup regardless.
+        if !defaults.bool(forKey: Keys.scrollingShortcutMigrated) {
+            defaults.set(true, forKey: Keys.scrollingShortcutMigrated)
+            if shortcuts[.scrolling] == nil, let shortcut = Self.defaultShortcuts[.scrolling] {
+                shortcuts[.scrolling] = shortcut
+                persistShortcuts()
+            }
+        }
     }
 
     // MARK: - Shortcuts
@@ -231,6 +266,7 @@ final class SettingsStore {
             .window: Shortcut(keyCode: UInt32(kVK_ANSI_2), modifiers: modifiers),
             .fullScreen: Shortcut(keyCode: UInt32(kVK_ANSI_3), modifiers: modifiers),
             .fixedSize: Shortcut(keyCode: UInt32(kVK_ANSI_4), modifiers: modifiers),
+            .scrolling: Shortcut(keyCode: UInt32(kVK_ANSI_5), modifiers: modifiers),
         ]
     }()
 

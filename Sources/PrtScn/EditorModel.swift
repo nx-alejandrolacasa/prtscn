@@ -88,7 +88,7 @@ final class EditorModel {
     func setZoom(_ value: CGFloat) {
         let new = min(max(value, 1), Self.maxZoom)
         guard new != zoom else { return }
-        if zoom == 1, new > 1 { showTip("Right-click and drag to move around") }
+        if zoom == 1, new > 1 { showTip("Scroll to move around · ⌘-scroll to zoom") }
         // Scale the pan proportionally so the point at the anchor stays put
         // while zooming.
         pan = CGSize(width: pan.width * new / zoom, height: pan.height * new / zoom)
@@ -239,6 +239,14 @@ final class EditorModel {
         }
         let w = cg.width, h = cg.height
         guard w > 0, h > 0 else { return NSEdgeInsets() }
+        // No alpha channel → nothing transparent to inset. Scrolling captures
+        // are stitched onto an alpha-less canvas precisely so their huge
+        // bitmaps skip this scan (which allocates w·h·4 bytes); window shots
+        // keep their alpha and still get the shadow trim.
+        switch cg.alphaInfo {
+        case .none, .noneSkipLast, .noneSkipFirst: return NSEdgeInsets()
+        default: break
+        }
         var data = [UInt8](repeating: 0, count: w * h * 4)
         guard let context = CGContext(
             data: &data, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,

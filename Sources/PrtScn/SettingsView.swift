@@ -131,6 +131,28 @@ private struct CaptureSettingsView: View {
                 Text("Applies to captures from HiDPI (Retina) displays. Both saves the downscaled file alongside the native one.")
             }
 
+            Section {
+                LabeledContent("Maximum height") {
+                    HStack(spacing: 8) {
+                        TextField("", value: $settings.scrollMaxHeight,
+                                  format: .number.grouping(.never))
+                            .labelsHidden()
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 72)
+                        Text("px")
+                            .foregroundStyle(.secondary)
+                        Button("Reset") {
+                            settings.scrollMaxHeight = SettingsStore.defaultScrollMaxHeight
+                        }
+                        .disabled(settings.scrollMaxHeight == SettingsStore.defaultScrollMaxHeight)
+                    }
+                }
+            } header: {
+                Text("Scrolling screenshots")
+            } footer: {
+                Text("The capture stops once the stitched image reaches this height, in image pixels (a Retina capture packs 2 px per screen point). Capped at 16,000 px — macOS can't display taller images at full resolution.")
+            }
+
             Section("Options") {
                 Toggle("Include the mouse pointer (full-screen captures)",
                        isOn: $settings.includePointer)

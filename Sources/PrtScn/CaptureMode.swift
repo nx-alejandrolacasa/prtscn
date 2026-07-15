@@ -8,6 +8,7 @@ enum CaptureMode: String, CaseIterable, Codable {
     case window
     case fullScreen
     case fixedSize
+    case scrolling
 
     /// Human-readable name for settings rows and menus.
     var title: String {
@@ -16,6 +17,7 @@ enum CaptureMode: String, CaseIterable, Codable {
         case .window: "Window"
         case .fullScreen: "Full Screen"
         case .fixedSize: "Fixed Size"
+        case .scrolling: "Scrolling Area"
         }
     }
 
@@ -28,12 +30,15 @@ enum CaptureMode: String, CaseIterable, Codable {
     /// - `full`:    (no flags)  capture all displays immediately.
     /// - `fixed`:   (no flags)  the `-R x,y,w,h` rect is appended by
     ///                          `ScreenshotService` once the overlay is clicked.
+    /// - `scrolling`: (no flags) never shells out — `ScrollCaptureController`
+    ///                          captures frames itself via ScreenCaptureKit.
     var screencaptureArgs: [String] {
         switch self {
         case .region: return ["-i"]
         case .window: return ["-i", "-W"]
         case .fullScreen: return []
         case .fixedSize: return []
+        case .scrolling: return []
         }
     }
 }

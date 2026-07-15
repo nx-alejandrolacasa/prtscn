@@ -43,6 +43,12 @@ struct MenuContent: View {
             Label("Capture Fixed Size…", systemImage: "aspectratio")
         }
         .keyboardShortcut(hotkey(.fixedSize))
+        Button {
+            ScreenshotService.shared.capture(.scrolling)
+        } label: {
+            Label("Capture Scrolling Area", systemImage: "rectangle.expand.vertical")
+        }
+        .keyboardShortcut(hotkey(.scrolling))
 
         Divider()
 

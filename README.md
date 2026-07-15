@@ -32,6 +32,12 @@ eating your battery — just system frameworks, doing exactly what you asked.
 - 📐 **Fixed-size capture** — pick exact dimensions (pixels or points, with
   common presets), then a frame of that size follows your cursor: point and
   click to shoot a pixel-perfect region.
+- 📜 **Scrolling capture** — drag over any scrollable content and PrtScn
+  scrolls it for you, stitching the frames into one tall screenshot (this
+  one mode needs the Accessibility permission, to send the scroll events).
+  Hold **⌘** while dragging to capture *upward* instead — perfect for chat
+  history. Click or ⏎ finishes early, Esc cancels; it stops on its own at
+  the end of the content (max height configurable in Settings → Capture).
 - 🪄 **Cursor-anchored preview** with Copy / Save / Edit / Copy Text (OCR),
   a hover-to-pause auto-dismiss countdown, and drag-to-export straight from
   the thumbnail.
