@@ -10,7 +10,7 @@ been removed — this is now a pure native Swift app.)
 
 - **No full Xcode** here — Command Line Tools only. Use **Swift Package Manager**.
 - `./build.sh` — compile + assemble the **dev** app, `build/PrtScn Dev.app`
-  (bundle id `…prtscn.dev`, camera-with-ellipsis menu-bar icon, ⌘⌥⇧ default
+  (bundle id `…prtscn.dev`, warning-badged photo menu-bar icon, ⌘⌥⇧ default
   hotkeys) so it coexists with an installed stable copy — separate Screen
   Recording grant, settings, and login item.
 - `./build.sh run` — also (re)launch it (kills only the dev instance).

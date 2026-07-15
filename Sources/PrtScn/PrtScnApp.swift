@@ -24,7 +24,7 @@ struct PrtScnApp: App {
         MenuBarExtra {
             MenuContent()
         } label: {
-            MenuBarIcon(restingIcon: isDevBuild ? "camera.badge.ellipsis" : "camera.viewfinder")
+            MenuBarIcon(restingIcon: isDevBuild ? "photo.trianglebadge.exclamationmark" : "photo.on.rectangle.angled")
         }
         .menuBarExtraStyle(.menu)
 
@@ -35,7 +35,7 @@ struct PrtScnApp: App {
     }
 }
 
-/// The menu-bar icon, briefly swapped to a filled camera right after a
+/// The menu-bar icon, briefly swapped to a checkmark-badged photo right after a
 /// capture so even silent captures (shutter sound off, eyes away from the
 /// preview) get visible feedback.
 private struct MenuBarIcon: View {
@@ -43,6 +43,6 @@ private struct MenuBarIcon: View {
     private let state = MenuBarState.shared
 
     var body: some View {
-        Image(systemName: state.flashingCapture ? "camera.fill" : restingIcon)
+        Image(systemName: state.flashingCapture ? "photo.badge.checkmark" : restingIcon)
     }
 }
