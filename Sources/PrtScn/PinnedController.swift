@@ -65,10 +65,9 @@ final class PinnedController {
 
     private var pins: [Pin] = []
 
-    /// Mirror of `pins.count` for observation (drives the menu item).
-    private(set) var count = 0
-
-    var hasPins: Bool { count > 0 }
+    /// Whether any pins are open — drives the menu-bar "Close All Pins" item.
+    /// (`pins` is a stored property, so `@Observable` tracks it.)
+    var hasPins: Bool { !pins.isEmpty }
 
     private init() {}
 
@@ -76,7 +75,7 @@ final class PinnedController {
     /// The pin takes ownership of the temp file at `imageURL` — its context
     /// menu still needs it for Copy/Save/Edit — and deletes it on close.
     func pin(image rawImage: NSImage, imageURL: URL, captureScale: CGFloat) {
-        let image = Self.trimmedToOpaqueBounds(rawImage)
+        let (image, windowCornerRadius) = Self.trimmedToOpaqueBounds(rawImage)
         let mouse = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) }
             ?? NSScreen.main ?? NSScreen.screens.first
@@ -109,6 +108,7 @@ final class PinnedController {
 
         let card = PinnedCard(
             image: image,
+            windowCornerRadius: windowCornerRadius,
             onCopy: { ScreenshotService.shared.copyToClipboard(imageURL, captureScale: captureScale) },
             onSave: { ScreenshotService.shared.save(imageURL, captureScale: captureScale) },
             onEdit: { [weak self, weak panel] in
@@ -133,7 +133,6 @@ final class PinnedController {
 
         panel.orderFront(nil)   // no makeKey — pinning shouldn't steal focus
         pins.append(Pin(panel: panel, url: imageURL))
-        count = pins.count
     }
 
     func closeAll() {
@@ -143,7 +142,6 @@ final class PinnedController {
     private func close(_ panel: PinnedPanel, cleanup: Bool) {
         guard let index = pins.firstIndex(where: { $0.panel === panel }) else { return }
         let pin = pins.remove(at: index)
-        count = pins.count
         pin.panel.orderOut(nil)
         if cleanup { ScreenshotService.shared.cleanup(pin.url) }
     }
@@ -152,18 +150,30 @@ final class PinnedController {
     /// macOS's baked drop shadow — pinned as-is it reads as a huge fuzzy halo.
     /// Trim to the (nearly) opaque pixels so every pin is a tight rectangle
     /// that gets the same frame chrome. Opaque captures come back unchanged.
-    private static func trimmedToOpaqueBounds(_ image: NSImage) -> NSImage {
+    ///
+    /// Also measures the window's own corner radius (in points) from the alpha
+    /// map: the trim box is a rectangle, but macOS 26 windows are rounded well
+    /// beyond the card's 8 pt chrome, and clipping at the wrong radius leaves
+    /// see-through notches at the pin's corners. 0 = opaque capture, no curve.
+    private static func trimmedToOpaqueBounds(_ image: NSImage) -> (image: NSImage, cornerRadius: CGFloat) {
         guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
-              cg.width > 0, cg.height > 0 else { return image }
+              cg.width > 0, cg.height > 0 else { return (image, 0) }
 
         let width = cg.width, height = cg.height
         var pixels = [UInt8](repeating: 0, count: width * height * 4)
-        guard let context = CGContext(data: &pixels, width: width, height: height,
-                                      bitsPerComponent: 8, bytesPerRow: width * 4,
-                                      space: CGColorSpaceCreateDeviceRGB(),
-                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
-        else { return image }
-        context.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+        // The context writes through the buffer pointer, so both it and the
+        // draw must stay inside the withUnsafeMutableBytes scope — an
+        // `&pixels` inout-to-pointer is only valid for the initializer call.
+        let drawn = pixels.withUnsafeMutableBytes { buffer in
+            guard let context = CGContext(data: buffer.baseAddress, width: width, height: height,
+                                          bitsPerComponent: 8, bytesPerRow: width * 4,
+                                          space: CGColorSpaceCreateDeviceRGB(),
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            else { return false }
+            context.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard drawn else { return (image, 0) }
 
         // The window body is fully opaque; the baked shadow tops out well
         // below this, so a high threshold separates them cleanly.
@@ -185,13 +195,30 @@ final class PinnedController {
               let cropped = cg.cropping(to: CGRect(x: minX, y: minY,
                                                    width: maxX - minX + 1,
                                                    height: maxY - minY + 1))
-        else { return image }
+        else { return (image, 0) }
+
+        // Corner radius: walk down from the box's top edge — the curve ends at
+        // the first row whose leftmost opaque pixel sits flush with the box.
+        // "Flush" tolerates a 1 px inset: the straight edge keeps a faint
+        // anti-aliased fringe (alpha just under the threshold) for dozens of
+        // rows past the visible curve, which otherwise near-doubles the
+        // measurement and clips visibly into the window.
+        var radiusPx = 0
+        for dy in 0..<min(80, maxY - minY) {
+            let row = (minY + dy) * width * 4
+            var inset = 0
+            while minX + inset <= maxX, pixels[row + (minX + inset) * 4 + 3] < threshold {
+                inset += 1
+            }
+            if inset <= 1 { radiusPx = dy; break }
+        }
 
         // Preserve the point size ↔ pixel size relationship (Retina scale).
         let scale = CGFloat(width) / max(image.size.width, 1)
-        return NSImage(cgImage: cropped,
-                       size: NSSize(width: CGFloat(cropped.width) / scale,
-                                    height: CGFloat(cropped.height) / scale))
+        return (NSImage(cgImage: cropped,
+                        size: NSSize(width: CGFloat(cropped.width) / scale,
+                                     height: CGFloat(cropped.height) / scale)),
+                CGFloat(radiusPx) / scale)
     }
 }
 
@@ -199,6 +226,11 @@ final class PinnedController {
 /// close button, and a right-click menu carrying the capture actions.
 private struct PinnedCard: View {
     let image: NSImage
+    /// The captured window's own corner radius in image points (0 for opaque
+    /// region/full-screen captures). The trim box is rectangular, so clipping
+    /// at anything smaller leaves see-through notches where the macOS 26
+    /// window's large rounding curves inside the box.
+    let windowCornerRadius: CGFloat
     let onCopy: () -> Void
     let onSave: () -> Void
     let onEdit: () -> Void
@@ -206,9 +238,13 @@ private struct PinnedCard: View {
     let onResetSize: () -> Void
 
     @State private var hovering = false
+    @State private var displayedWidth: CGFloat = 0
 
     private var shape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
+        // Track the window's rounding as the pin is scaled; never dip below
+        // the 8 pt chrome the (radius-less) opaque captures get.
+        let scaled = windowCornerRadius * displayedWidth / max(image.size.width, 1)
+        return RoundedRectangle(cornerRadius: max(8, scaled), style: .continuous)
     }
 
     var body: some View {
@@ -229,6 +265,7 @@ private struct PinnedCard: View {
         Image(nsImage: image)
             .resizable()
             .scaledToFill()   // window aspect always matches the image, so no crop
+            .onGeometryChange(for: CGFloat.self, of: \.size.width) { displayedWidth = $0 }
             .clipShape(shape)
             .overlay(shape.inset(by: 0.5).strokeBorder(.white.opacity(0.35), lineWidth: 1))
             .overlay(shape.strokeBorder(Color.black.opacity(0.25), lineWidth: 0.5))
