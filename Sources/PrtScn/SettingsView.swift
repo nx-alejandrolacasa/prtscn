@@ -274,7 +274,11 @@ private struct FixedSizePresetsSection: View {
                     return NSItemProvider(object: preset.id as NSString)
                 }
                 .onDrop(of: [.text],
-                        delegate: PresetReorderDelegate(item: preset, dragged: $draggedPreset))
+                        delegate: ReorderDelegate(item: preset, dragged: $draggedPreset) { dragged, target in
+                            withAnimation {
+                                SettingsStore.shared.fixedSizePresets.slide(dragged, to: target)
+                            }
+                        })
             }
 
             if !atCapacity {
@@ -354,13 +358,16 @@ private struct FixedSizePresetsSection: View {
     }
 }
 
-/// Reorders presets live while dragging: entering a row slides the dragged
-/// preset into that slot, and the drop just finalizes. `DropDelegate` (vs
-/// `.dropDestination`) is what lets the proposal be `.move` — otherwise the
-/// cursor shows the green "+" copy badge.
-private struct PresetReorderDelegate: DropDelegate {
-    let item: FixedSizePreset
-    @Binding var dragged: FixedSizePreset?
+/// Reorders a settings list live while dragging (fixed-size presets, preview
+/// actions): entering a row slides the dragged item into that slot, and the
+/// drop just finalizes. `DropDelegate` (vs `.dropDestination`) is what lets
+/// the proposal be `.move` — otherwise the cursor shows the green "+" copy
+/// badge.
+private struct ReorderDelegate<Item: Equatable>: DropDelegate {
+    let item: Item
+    @Binding var dragged: Item?
+    /// Slides the dragged item into the target's slot in the backing array.
+    let move: @MainActor (_ dragged: Item, _ target: Item) -> Void
 
     func validateDrop(info: DropInfo) -> Bool {
         MainActor.assumeIsolated { dragged != nil }
@@ -373,15 +380,7 @@ private struct PresetReorderDelegate: DropDelegate {
     func dropEntered(info: DropInfo) {
         MainActor.assumeIsolated {
             guard let dragged, dragged != item else { return }
-            let settings = SettingsStore.shared
-            guard let from = settings.fixedSizePresets.firstIndex(of: dragged),
-                  let to = settings.fixedSizePresets.firstIndex(of: item)
-            else { return }
-            withAnimation {
-                settings.fixedSizePresets.move(
-                    fromOffsets: IndexSet(integer: from),
-                    toOffset: to > from ? to + 1 : to)
-            }
+            move(dragged, item)
         }
     }
 
@@ -391,10 +390,20 @@ private struct PresetReorderDelegate: DropDelegate {
     }
 }
 
+extension Array where Element: Equatable {
+    /// Slides `dragged` into `target`'s slot (`ReorderDelegate` move handler).
+    mutating func slide(_ dragged: Element, to target: Element) {
+        guard let from = firstIndex(of: dragged),
+              let to = firstIndex(of: target) else { return }
+        move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
+    }
+}
+
 // MARK: - Preview
 
 private struct PreviewSettingsView: View {
     @Bindable var settings = SettingsStore.shared
+    @State private var draggedAction: PreviewAction?
 
     var body: some View {
         Form {
@@ -404,6 +413,16 @@ private struct PreviewSettingsView: View {
                         Text(style.label).tag(style)
                     }
                 }
+            }
+
+            Section {
+                ForEach(settings.previewActionOrder) { action in
+                    actionRow(action)
+                }
+            } header: {
+                Text("Actions")
+            } footer: {
+                Text("The buttons on the preview card. Drag to reorder; at least \(SettingsStore.minVisiblePreviewActions) stay visible. Hidden actions keep their keyboard shortcuts.")
             }
 
             Section("Dismissal") {
@@ -422,6 +441,64 @@ private struct PreviewSettingsView: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    /// One preview action: grip + icon + label + shortcut, and an eye that
+    /// shows/hides it on the card. Hidden rows dim but keep their slot, so
+    /// re-showing restores the same position. The eye disables once hiding
+    /// would drop the card below the visible minimum.
+    private func actionRow(_ action: PreviewAction) -> some View {
+        let hidden = settings.hiddenPreviewActions.contains(action)
+        let atFloor = settings.visiblePreviewActions.count <= SettingsStore.minVisiblePreviewActions
+
+        return HStack(spacing: 8) {
+            Image(systemName: "line.3.horizontal")
+                .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
+
+            Label {
+                Text(action.label)
+            } icon: {
+                Image(systemName: action.systemImage)
+            }
+            .opacity(hidden ? 0.4 : 1)
+
+            Spacer()
+
+            Text(action.shortcutHint)
+                .foregroundStyle(.secondary)
+                .opacity(hidden ? 0.4 : 1)
+
+            Button {
+                if hidden {
+                    settings.hiddenPreviewActions.remove(action)
+                } else {
+                    settings.hiddenPreviewActions.insert(action)
+                }
+            } label: {
+                Image(systemName: hidden ? "eye.slash" : "eye")
+                    .frame(width: 20)
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+            .disabled(!hidden && atFloor)
+            .help(hidden ? "Show on the preview card" : "Hide from the preview card")
+            .accessibilityLabel(hidden ? "Show \(action.label)" : "Hide \(action.label)")
+        }
+        .accessibilityElement(children: .combine)
+        // The whole row is the drag surface — without an explicit content
+        // shape only the rendered text/icons would start a drag.
+        .contentShape(Rectangle())
+        .onDrag {
+            draggedAction = action
+            return NSItemProvider(object: action.rawValue as NSString)
+        }
+        .onDrop(of: [.text],
+                delegate: ReorderDelegate(item: action, dragged: $draggedAction) { dragged, target in
+                    withAnimation {
+                        SettingsStore.shared.previewActionOrder.slide(dragged, to: target)
+                    }
+                })
     }
 }
 

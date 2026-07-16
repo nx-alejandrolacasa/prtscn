@@ -158,8 +158,9 @@ struct PreviewToolbar: View {
     var circularButtons = false
 
     var body: some View {
+        let settings = SettingsStore.shared
         HStack(spacing: 8) {
-            ForEach(PreviewAction.allCases) { action in
+            ForEach(settings.visiblePreviewActions) { action in
                 ToolbarButton(
                     action: action,
                     circular: circularButtons,
@@ -172,6 +173,21 @@ struct PreviewToolbar: View {
                     },
                     perform: { model.perform(action) }
                 )
+            }
+        }
+        // Hidden actions keep their keyboard shortcuts: `.keyboardShortcut`
+        // needs a live button in the hierarchy, so park zero-size invisible
+        // ones behind the row. `allowsHitTesting(false)` matters — an
+        // opacity(0) button still hit-tests.
+        .background {
+            ForEach(settings.previewActionOrder.filter(settings.hiddenPreviewActions.contains)) { action in
+                Button(action.label) { model.perform(action) }
+                    .buttonStyle(.plain)
+                    .keyboardShortcut(action.keyboardShortcut)
+                    .frame(width: 0, height: 0)
+                    .opacity(0)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
             }
         }
     }

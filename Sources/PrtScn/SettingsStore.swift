@@ -47,6 +47,27 @@ final class SettingsStore {
         didSet { defaults.set(defaultAction.rawValue, forKey: Keys.defaultAction) }
     }
 
+    /// Every preview-card action in display order; `hiddenPreviewActions`
+    /// says which of them the card actually shows. Kept separate so a hidden
+    /// action remembers its slot.
+    var previewActionOrder: [PreviewAction] {
+        didSet { defaults.set(previewActionOrder.map(\.rawValue), forKey: Keys.previewActionOrder) }
+    }
+
+    /// Actions without a button on the preview card. Their keyboard
+    /// shortcuts keep working — hiding is visual decluttering only.
+    var hiddenPreviewActions: Set<PreviewAction> {
+        didSet { defaults.set(hiddenPreviewActions.map(\.rawValue), forKey: Keys.hiddenPreviewActions) }
+    }
+
+    /// The card never drops below this many visible actions.
+    static let minVisiblePreviewActions = 3
+
+    /// The actions the preview card shows, in order.
+    var visiblePreviewActions: [PreviewAction] {
+        previewActionOrder.filter { !hiddenPreviewActions.contains($0) }
+    }
+
     /// Folder where captures are saved.
     var saveFolderPath: String {
         didSet { defaults.set(saveFolderPath, forKey: Keys.saveFolder) }
@@ -175,10 +196,17 @@ final class SettingsStore {
     /// 16,384-px maximum texture size: anything taller is silently
     /// downsampled by the display pipeline (editor, Quick Look, Preview)
     /// and looks blurry at every zoom even though the file is sharp.
-    /// Assigning inside `didSet` doesn't re-trigger it.
+    /// Under `@Observable` this is a computed property, so a self-assignment
+    /// inside `didSet` re-enters it (the plain-stored-property exemption
+    /// doesn't apply) — only re-assign when clamping changes the value, and
+    /// let that inner pass do the persisting.
     var scrollMaxHeight: Int {
         didSet {
-            scrollMaxHeight = Self.clampedScrollMaxHeight(scrollMaxHeight)
+            let clamped = Self.clampedScrollMaxHeight(scrollMaxHeight)
+            if clamped != scrollMaxHeight {
+                scrollMaxHeight = clamped
+                return
+            }
             defaults.set(scrollMaxHeight, forKey: Keys.scrollMaxHeight)
         }
     }
@@ -204,6 +232,8 @@ final class SettingsStore {
         static let previewTimeout = "previewTimeout"
         static let previewStyle = "previewStyle"
         static let defaultAction = "defaultAction"
+        static let previewActionOrder = "previewActionOrder"
+        static let hiddenPreviewActions = "hiddenPreviewActions"
         static let saveFolder = "saveFolder"
         static let shortcuts = "shortcuts"
         static let windowBackground = "windowBackground"
@@ -240,6 +270,9 @@ final class SettingsStore {
         previewTimeout = defaults.object(forKey: Keys.previewTimeout) as? Double ?? 5.0
         previewStyle = PreviewStyle(rawValue: defaults.string(forKey: Keys.previewStyle) ?? "") ?? .islands
         defaultAction = DefaultAction(rawValue: defaults.string(forKey: Keys.defaultAction) ?? "") ?? .save
+        let actionOrder = Self.loadPreviewActionOrder(from: defaults)
+        previewActionOrder = actionOrder
+        hiddenPreviewActions = Self.loadHiddenPreviewActions(from: defaults, order: actionOrder)
         saveFolderPath = defaults.string(forKey: Keys.saveFolder) ?? Self.defaultSaveFolder
         windowBackground = WindowBackground(rawValue: defaults.string(forKey: Keys.windowBackground) ?? "") ?? .margins
         windowBackgroundColor = Color(hex: defaults.string(forKey: Keys.windowBackgroundColor) ?? Self.defaultWindowBackgroundColor)
@@ -330,6 +363,33 @@ final class SettingsStore {
         if let data = try? JSONEncoder().encode(raw) {
             defaults.set(data, forKey: Keys.shortcuts)
         }
+    }
+
+    /// Stored order merged with the current action set: unknown raw values
+    /// are dropped, duplicates collapse, and actions added in later versions
+    /// are appended — so they show up (visible) instead of never appearing
+    /// for users with a saved layout.
+    private static func loadPreviewActionOrder(from defaults: UserDefaults) -> [PreviewAction] {
+        let stored = (defaults.stringArray(forKey: Keys.previewActionOrder) ?? [])
+            .compactMap(PreviewAction.init(rawValue:))
+        var seen = Set<PreviewAction>()
+        var order = stored.filter { seen.insert($0).inserted }
+        order.append(contentsOf: PreviewAction.allCases.filter { !seen.contains($0) })
+        return order
+    }
+
+    /// Stored hidden set, clamped so at least `minVisiblePreviewActions`
+    /// stay visible even if the defaults were tampered with.
+    private static func loadHiddenPreviewActions(
+        from defaults: UserDefaults, order: [PreviewAction]
+    ) -> Set<PreviewAction> {
+        var hidden = Set(
+            (defaults.stringArray(forKey: Keys.hiddenPreviewActions) ?? [])
+                .compactMap(PreviewAction.init(rawValue:)))
+        for action in order where order.count - hidden.count < minVisiblePreviewActions {
+            hidden.remove(action)
+        }
+        return hidden
     }
 
     private static func loadFixedSizePresets(from defaults: UserDefaults) -> [FixedSizePreset]? {

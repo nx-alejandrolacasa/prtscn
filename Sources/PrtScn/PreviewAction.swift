@@ -1,8 +1,9 @@
 import SwiftUI
 
 /// The actions offered on the preview card, plus their icon, label, and
-/// keyboard shortcut.
-enum PreviewAction: CaseIterable, Identifiable {
+/// keyboard shortcut. Raw values persist the user's toolbar layout
+/// (order + hidden set) in Settings → Preview.
+enum PreviewAction: String, CaseIterable, Identifiable {
     case edit
     case copy
     case save
