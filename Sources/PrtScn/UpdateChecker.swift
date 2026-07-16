@@ -1,5 +1,8 @@
 import AppKit
 import Observation
+import os
+
+private let log = Logger(subsystem: "com.alejandrolacasa.prtscn", category: "UpdateChecker")
 
 /// Checks GitHub Releases for a newer version and, on request, installs it —
 /// download the DMG, mount it, replace the app bundle, relaunch. No Sparkle,
@@ -60,14 +63,19 @@ final class UpdateChecker {
     /// surfacing a failure the user never asked about.
     func check(quietly: Bool = false) async {
         if !quietly { phase = .checking }
-        UserDefaults.standard.set(Date.now.timeIntervalSince1970, forKey: "lastUpdateCheck")
         do {
             var request = URLRequest(url: Self.latestReleaseAPI)
             request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-            let (data, _) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+                throw UpdateError.httpStatus(http.statusCode)
+            }
             let decoder = JSONDecoder()
             decoder.keyDecodingStrategy = .convertFromSnakeCase
             let release = try decoder.decode(APIRelease.self, from: data)
+            // Stamp only after a successful fetch, so a failed launch-time
+            // check (offline, rate-limited) doesn't suppress retries for 20 h.
+            UserDefaults.standard.set(Date.now.timeIntervalSince1970, forKey: "lastUpdateCheck")
 
             let version = release.tagName.hasPrefix("v")
                 ? String(release.tagName.dropFirst()) : release.tagName
@@ -82,7 +90,7 @@ final class UpdateChecker {
                 if !quietly { phase = .upToDate }
             }
         } catch {
-            NSLog("[PrtScn] update check failed: \(error)")
+            log.error("update check failed: \(String(describing: error), privacy: .public)")
             if !quietly { phase = .failed("Couldn't check for updates.") }
         }
     }
@@ -130,7 +138,7 @@ final class UpdateChecker {
             try await Self.install(dmg: dmg)
             relaunch()
         } catch {
-            NSLog("[PrtScn] update install failed: \(error)")
+            log.error("update install failed: \(String(describing: error), privacy: .public)")
             phase = .failed("Update failed — install manually from GitHub.")
         }
     }
@@ -157,9 +165,21 @@ final class UpdateChecker {
         // Replacing a running app's bundle is safe on macOS — the running
         // process keeps its open files; the new bundle is picked up on
         // relaunch. `ditto` preserves the code signature, like build.sh.
+        // Stage the copy next to the destination first (same volume, so the
+        // final move is an atomic rename) — the old bundle is only removed
+        // once the copy from the DMG has fully succeeded.
         let destination = Bundle.main.bundleURL
-        try FileManager.default.removeItem(at: destination)
-        try await run("/usr/bin/ditto", app.path, destination.path)
+        let staging = destination.deletingLastPathComponent()
+            .appendingPathComponent(".\(destination.lastPathComponent).update")
+        try? FileManager.default.removeItem(at: staging)
+        do {
+            try await run("/usr/bin/ditto", app.path, staging.path)
+            try FileManager.default.removeItem(at: destination)
+            try FileManager.default.moveItem(at: staging, to: destination)
+        } catch {
+            try? FileManager.default.removeItem(at: staging)
+            throw error
+        }
     }
 
     /// Launches the freshly installed bundle after this process exits. The
@@ -168,7 +188,8 @@ final class UpdateChecker {
     private func relaunch() {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", "sleep 1; /usr/bin/open \"\(Bundle.main.bundlePath)\""]
+        // The path travels as $0, not interpolated into the script string.
+        process.arguments = ["-c", "sleep 1; /usr/bin/open \"$0\"", Bundle.main.bundlePath]
         try? process.run()
         NSApp.terminate(nil)
     }
@@ -176,6 +197,7 @@ final class UpdateChecker {
     private enum UpdateError: Error {
         case noAppInDMG
         case processFailed(String)
+        case httpStatus(Int)
     }
 
     /// Runs a CLI tool, throwing if it exits non-zero. Continuation-based so
@@ -190,7 +212,7 @@ final class UpdateChecker {
             do {
                 try process.run()
             } catch {
-                NSLog("[PrtScn] \(executable) failed to launch: \(error)")
+                log.error("\(executable, privacy: .public) failed to launch: \(String(describing: error), privacy: .public)")
                 continuation.resume(returning: -1)
             }
         }

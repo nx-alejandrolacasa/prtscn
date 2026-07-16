@@ -3,6 +3,9 @@ import Carbon
 import Observation
 import ServiceManagement
 import SwiftUI
+import os
+
+private let log = Logger(subsystem: "com.alejandrolacasa.prtscn", category: "SettingsStore")
 
 /// App-wide settings, persisted to `UserDefaults` and observable by SwiftUI.
 ///
@@ -223,6 +226,7 @@ final class SettingsStore {
         static let fixedSizePresets = "fixedSizePresets"
         static let scrollMaxHeight = "scrollMaxHeight"
         static let scrollingShortcutMigrated = "scrollingShortcutMigrated"
+        static let fixedSizeShortcutMigrated = "fixedSizeShortcutMigrated"
     }
 
     /// Default annotation color — system red.
@@ -273,6 +277,17 @@ final class SettingsStore {
                 persistShortcuts()
             }
         }
+        // Same back-fill for fixed-size capture (its ⌘⌥4-slot default likewise
+        // postdates early installs). Skipped if the user meanwhile assigned
+        // that combo to another mode — duplicates are rejected everywhere else.
+        if !defaults.bool(forKey: Keys.fixedSizeShortcutMigrated) {
+            defaults.set(true, forKey: Keys.fixedSizeShortcutMigrated)
+            if shortcuts[.fixedSize] == nil, let shortcut = Self.defaultShortcuts[.fixedSize],
+               !shortcuts.values.contains(shortcut) {
+                shortcuts[.fixedSize] = shortcut
+                persistShortcuts()
+            }
+        }
     }
 
     // MARK: - Shortcuts
@@ -281,6 +296,22 @@ final class SettingsStore {
     /// own bundle id, run alongside the installed app — adds ⇧ so the two don't
     /// register the same global hotkeys. (Each variant persists its own
     /// shortcuts anyway; these are just the first-run defaults.)
+    /// macOS's own screenshot combos (⇧⌘3 full screen, ⇧⌘4 area, ⇧⌘5 window,
+    /// continuing the ladder for the app's extra modes). Offered as a one-click
+    /// set for users who disable the system's Screenshots shortcuts — the
+    /// system wins while they're still enabled, so registration would silently
+    /// fail until then.
+    static let systemShortcuts: [CaptureMode: Shortcut] = {
+        let modifiers = UInt32(cmdKey | shiftKey)
+        return [
+            .fullScreen: Shortcut(keyCode: UInt32(kVK_ANSI_3), modifiers: modifiers),
+            .region: Shortcut(keyCode: UInt32(kVK_ANSI_4), modifiers: modifiers),
+            .window: Shortcut(keyCode: UInt32(kVK_ANSI_5), modifiers: modifiers),
+            .fixedSize: Shortcut(keyCode: UInt32(kVK_ANSI_6), modifiers: modifiers),
+            .scrolling: Shortcut(keyCode: UInt32(kVK_ANSI_7), modifiers: modifiers),
+        ]
+    }()
+
     static let defaultShortcuts: [CaptureMode: Shortcut] = {
         let modifiers = Bundle.main.bundleIdentifier?.hasSuffix(".dev") == true
             ? UInt32(cmdKey | optionKey | shiftKey)
@@ -342,7 +373,7 @@ final class SettingsStore {
                 try SMAppService.mainApp.unregister()
             }
         } catch {
-            NSLog("[PrtScn] launch-at-login change failed: \(error)")
+            log.error("launch-at-login change failed: \(String(describing: error), privacy: .public)")
         }
     }
 }

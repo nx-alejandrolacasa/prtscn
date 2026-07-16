@@ -29,7 +29,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     func show() {
         // Accessory app: activate first or the window opens behind everything.
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
 
         if let window {
             window.makeKeyAndOrderFront(nil)

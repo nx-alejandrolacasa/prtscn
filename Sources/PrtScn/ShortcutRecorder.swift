@@ -105,8 +105,17 @@ final class RecorderView: NSView {
             label.stringValue = "Click to record"
             label.textColor = .secondaryLabelColor
         }
-        layer?.borderColor = (recording ? NSColor.controlAccentColor : NSColor.separatorColor).cgColor
-        layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        // Resolve the dynamic colors for the current appearance — a bare
+        // `.cgColor` snapshots whatever appearance happens to be current.
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.borderColor = (recording ? NSColor.controlAccentColor : NSColor.separatorColor).cgColor
+            layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        }
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        refresh()   // re-resolve the layer colors for light/dark flips
     }
 
     /// Translate AppKit modifier flags into Carbon hotkey modifier flags.

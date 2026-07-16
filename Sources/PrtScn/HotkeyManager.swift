@@ -1,5 +1,8 @@
 import AppKit
 import Carbon
+import os
+
+private let log = Logger(subsystem: "com.alejandrolacasa.prtscn", category: "HotkeyManager")
 
 /// Registers system-wide capture shortcuts via Carbon's `RegisterEventHotKey`.
 ///
@@ -11,7 +14,7 @@ final class HotkeyManager {
     static let shared = HotkeyManager()
 
     /// Four-char signature ("PTSC") tagging our hotkeys.
-    static let signature: OSType = 0x5054_5343
+    nonisolated static let signature: OSType = 0x5054_5343
 
     private var registrations: [(ref: EventHotKeyRef, id: UInt32)] = []
     private var idToMode: [UInt32: CaptureMode] = [:]
@@ -59,7 +62,7 @@ final class HotkeyManager {
         } else {
             // Most common cause: the combo is already taken (by the system or
             // another app). We log rather than fail loudly.
-            NSLog("[PrtScn] could not register \(shortcut.displayString) for \(mode.rawValue) (status \(status))")
+            log.error("could not register \(shortcut.displayString, privacy: .public) for \(mode.rawValue, privacy: .public) (status \(status))")
         }
     }
 
@@ -100,9 +103,14 @@ private func hotKeyEventHandler(
         &hotKeyID
     )
     guard status == noErr else { return status }
+    guard hotKeyID.signature == HotkeyManager.signature else {
+        return OSStatus(eventNotHandledErr)
+    }
 
+    // Carbon delivers application-target events on the main thread, so we can
+    // dispatch synchronously instead of hopping through a Task.
     let id = hotKeyID.id
-    Task { @MainActor in
+    MainActor.assumeIsolated {
         HotkeyManager.shared.handleHotKey(id: id)
     }
     return noErr

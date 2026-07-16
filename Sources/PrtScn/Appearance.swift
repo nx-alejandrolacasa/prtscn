@@ -1,6 +1,6 @@
 import AppKit
 
-/// App appearance preference, mirroring the Glaze app's Auto / Light / Dark.
+/// App appearance preference: Auto / Light / Dark.
 enum Appearance: String, CaseIterable, Identifiable {
     case auto
     case light

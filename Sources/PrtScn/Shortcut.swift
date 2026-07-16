@@ -14,12 +14,33 @@ struct Shortcut: Codable, Equatable {
         if modifiers & UInt32(optionKey) != 0 { result += "⌥" }
         if modifiers & UInt32(shiftKey) != 0 { result += "⇧" }
         if modifiers & UInt32(cmdKey) != 0 { result += "⌘" }
-        result += Self.keyLabels[keyCode] ?? "·"
+        result += Self.keyLabel(for: keyCode)
         return result
     }
 
-    /// Virtual-key-code → display label for common keys. (Carbon `kVK_*`.)
-    static let keyLabels: [UInt32: String] = [
+    /// Display label for a virtual key code: special keys get their fixed
+    /// glyph; character keys are translated through the *current* keyboard
+    /// layout (an AZERTY user sees "A" where a US layout has "Q"). Computed
+    /// per call so labels follow layout switches.
+    static func keyLabel(for keyCode: UInt32) -> String {
+        Self.specialKeyLabels[keyCode] ?? Self.characterKeyLabel(for: keyCode) ?? "·"
+    }
+
+    /// Keys whose label is a glyph or name, not a layout-dependent character.
+    /// (Carbon `kVK_*`.)
+    static let specialKeyLabels: [UInt32: String] = [
+        // Editing / whitespace
+        49: "Space", 36: "↩", 48: "⇥", 53: "⎋", 51: "⌫", 117: "⌦",
+        // Arrows
+        123: "←", 124: "→", 125: "↓", 126: "↑",
+        // Function keys
+        122: "F1", 120: "F2", 99: "F3", 118: "F4", 96: "F5", 97: "F6",
+        98: "F7", 100: "F8", 101: "F9", 109: "F10", 103: "F11", 111: "F12",
+    ]
+
+    /// US-ANSI fallback for character keys, used only when `UCKeyTranslate`
+    /// can't produce a character (e.g. a layout without Unicode data).
+    static let fallbackKeyLabels: [UInt32: String] = [
         // Digits
         18: "1", 19: "2", 20: "3", 21: "4", 23: "5",
         22: "6", 26: "7", 28: "8", 25: "9", 29: "0",
@@ -31,14 +52,43 @@ struct Shortcut: Codable, Equatable {
         // Punctuation
         27: "-", 24: "=", 33: "[", 30: "]", 41: ";", 39: "'",
         43: ",", 47: ".", 44: "/", 42: "\\", 50: "`",
-        // Editing / whitespace
-        49: "Space", 36: "↩", 48: "⇥", 53: "⎋", 51: "⌫", 117: "⌦",
-        // Arrows
-        123: "←", 124: "→", 125: "↓", 126: "↑",
-        // Function keys
-        122: "F1", 120: "F2", 99: "F3", 118: "F4", 96: "F5", 97: "F6",
-        98: "F7", 100: "F8", 101: "F9", 109: "F10", 103: "F11", 111: "F12",
     ]
+
+    private static func characterKeyLabel(for keyCode: UInt32) -> String? {
+        layoutKeyLabel(for: keyCode) ?? fallbackKeyLabels[keyCode]
+    }
+
+    /// The character the current keyboard layout produces for a bare press of
+    /// `keyCode` (no modifiers), uppercased for display. `nil` when the layout
+    /// has no Unicode data or the key yields no printable character.
+    private static func layoutKeyLabel(for keyCode: UInt32) -> String? {
+        guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
+              let rawLayoutData = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData)
+        else { return nil }
+        let layoutData = Unmanaged<CFData>.fromOpaque(rawLayoutData).takeUnretainedValue()
+        guard let layoutPtr = CFDataGetBytePtr(layoutData) else { return nil }
+
+        var deadKeyState: UInt32 = 0
+        var chars = [UniChar](repeating: 0, count: 4)
+        var length = 0   // UniCharCount (not exported to Swift on the CLT SDK)
+        let status = layoutPtr.withMemoryRebound(to: UCKeyboardLayout.self, capacity: 1) { layout in
+            UCKeyTranslate(layout,
+                           UInt16(keyCode),
+                           UInt16(kUCKeyActionDisplay),
+                           0,   // no modifiers: the raw key
+                           UInt32(LMGetKbdType()),
+                           OptionBits(kUCKeyTranslateNoDeadKeysMask),
+                           &deadKeyState,
+                           chars.count,
+                           &length,
+                           &chars)
+        }
+        guard status == noErr, length > 0 else { return nil }
+        let label = String(utf16CodeUnits: chars, count: Int(length))
+            .uppercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return label.isEmpty ? nil : label
+    }
 
     /// The SwiftUI equivalent, for displaying the hotkey on menu items.
     /// `nil` when the key has no `KeyEquivalent` (e.g. function keys) — the
@@ -66,7 +116,7 @@ struct Shortcut: Codable, Equatable {
         case kVK_DownArrow: .downArrow
         case kVK_UpArrow: .upArrow
         default:
-            if let label = Self.keyLabels[keyCode], label.count == 1,
+            if let label = Self.characterKeyLabel(for: keyCode), label.count == 1,
                let character = label.lowercased().first {
                 KeyEquivalent(character)
             } else {

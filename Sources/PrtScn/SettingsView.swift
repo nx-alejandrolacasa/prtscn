@@ -308,10 +308,15 @@ private struct FixedSizePresetsSection: View {
         // programmatic focus does work. Only Tab presses with one of the two
         // fields focused are consumed; everything else passes through.
         .onAppear {
+            // onAppear can re-fire without a matching onDisappear (container
+            // transitions) — don't stack a second monitor over the first.
+            guard tabKeyMonitor == nil else { return }
             tabKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
                 guard event.keyCode == kVK_Tab else { return event }
                 let handled = MainActor.assumeIsolated {
                     guard let current = focusedField else { return false }
+                    // With exactly two fields, Tab and Shift-Tab both flip to
+                    // the other one.
                     focusedField = current == .width ? .height : .width
                     return true
                 }
@@ -461,9 +466,35 @@ private struct HotkeySettingsView: View {
             }
 
             Section {
-                Button("Restore Defaults") {
-                    settings.shortcuts = SettingsStore.defaultShortcuts
+                HStack(spacing: 12) {
+                    Button("Restore Defaults") {
+                        settings.shortcuts = SettingsStore.defaultShortcuts
+                    }
+                    Button("Use System Shortcuts") {
+                        settings.shortcuts = SettingsStore.systemShortcuts
+                    }
+                    .help("⇧⌘3 full screen, ⇧⌘4 area, ⇧⌘5 window, ⇧⌘6 fixed size, ⇧⌘7 scrolling")
                 }
+            } footer: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("""
+                    “Use System Shortcuts” takes over macOS's own screenshot combos \
+                    (⇧⌘3, ⇧⌘4, …). Disable the built-in ones first under \
+                    System Settings → Keyboard → Keyboard Shortcuts → Screenshots, \
+                    or the system keeps them.
+                    """)
+                    Button("Open Keyboard Settings…") {
+                        // Deep link to the Keyboard pane; the Shortcuts sheet
+                        // itself has no public anchor on modern macOS.
+                        if let url = URL(string:
+                            "x-apple.systempreferences:com.apple.Keyboard-Settings.extension?Shortcuts") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                    .buttonStyle(.link)
+                }
+                .font(.callout)
+                .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -496,6 +527,13 @@ private struct HotkeySettingsView: View {
     }
 
     private func setShortcut(_ value: Shortcut?, for mode: CaptureMode) {
+        // Reject a combo already assigned to another capture mode — the old
+        // value stays, and the beep mirrors the recorder's modifier-less
+        // rejection. (Registering the same combo twice would silently fail.)
+        if let value, settings.shortcuts.contains(where: { $0.key != mode && $0.value == value }) {
+            NSSound.beep()
+            return
+        }
         var updated = settings.shortcuts
         updated[mode] = value
         settings.shortcuts = updated
