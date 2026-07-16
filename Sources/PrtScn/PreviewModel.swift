@@ -35,7 +35,7 @@ final class PreviewModel {
     private var handled = false
     private var closed = false
 
-    init(image: NSImage, imageURL: URL, timeout: Double = 5.0, captureScale: CGFloat,
+    init(image: NSImage, imageURL: URL, timeout: Double, captureScale: CGFloat,
          pristineImage: NSImage? = nil) {
         self.image = image
         self.imageURL = imageURL
@@ -82,9 +82,10 @@ final class PreviewModel {
             handled = true
             close(cleanup: true)
         case .save:
-            ScreenshotService.shared.save(imageURL, captureScale: captureScale)
+            let saved = ScreenshotService.shared.save(imageURL, captureScale: captureScale)
             handled = true
-            close(cleanup: true)
+            // If the save failed, the temp file is the only copy — keep it.
+            close(cleanup: saved != nil)
         case .pin:
             PinnedController.shared.pin(image: pristineImage ?? image, imageURL: imageURL,
                                         captureScale: captureScale)
@@ -106,8 +107,9 @@ final class PreviewModel {
         }
         switch SettingsStore.shared.defaultAction {
         case .save:
-            ScreenshotService.shared.save(imageURL, captureScale: captureScale)
-            close(cleanup: true)
+            let saved = ScreenshotService.shared.save(imageURL, captureScale: captureScale)
+            // If the save failed, the temp file is the only copy — keep it.
+            close(cleanup: saved != nil)
         case .copy:
             ScreenshotService.shared.copyToClipboard(imageURL, captureScale: captureScale)
             close(cleanup: true)

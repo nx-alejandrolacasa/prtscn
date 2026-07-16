@@ -1,5 +1,8 @@
 import AppKit
 import SwiftUI
+import os
+
+private let log = Logger(subsystem: "com.alejandrolacasa.prtscn", category: "PreviewController")
 
 /// A borderless panel that can become key (so hover + keyboard shortcuts work).
 ///
@@ -64,10 +67,10 @@ final class PreviewController {
         // Activate so the panel becomes key — required on macOS for hover states
         // and keyboard shortcuts to fire without a preceding click. Focus
         // returns to the previous app once the panel closes.
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         panel.makeKeyAndOrderFront(nil)
 
-        NSLog("[PrtScn] preview shown — size=\(size), origin=\(panel.frame.origin)")
+        log.debug("preview shown — size=\(String(describing: size), privacy: .public), origin=\(String(describing: panel.frame.origin), privacy: .public)")
     }
 
     func close() {

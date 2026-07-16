@@ -5,6 +5,9 @@ import AppKit
 // so downgrade those errors to warnings.
 @preconcurrency import ScreenCaptureKit
 import Vision
+import os
+
+private let log = Logger(subsystem: "com.alejandrolacasa.prtscn", category: "ScreenshotService")
 
 /// Runs captures via the macOS `screencapture` CLI and performs the
 /// post-capture actions (save / copy / edit).
@@ -16,6 +19,11 @@ final class ScreenshotService {
     static let shared = ScreenshotService()
 
     private init() {}
+
+    /// True while a `screencapture` invocation is running. Region/window
+    /// selections stay up until the user clicks or Escapes, so a re-fired
+    /// hotkey would stack a second crosshair on top of the first.
+    private var captureInFlight = false
 
     // MARK: - Capture
 
@@ -44,7 +52,14 @@ final class ScreenshotService {
             }
             return
         }
-        Task { await performCapture(mode) }
+        // Region/window/full-screen shell out to `screencapture` directly;
+        // ignore repeat presses while one is still running (see captureInFlight).
+        guard !captureInFlight else { return }
+        captureInFlight = true
+        Task {
+            await performCapture(mode)
+            captureInFlight = false
+        }
     }
 
     /// Captures an exact screen rectangle, as reported by the fixed-size
@@ -94,7 +109,7 @@ final class ScreenshotService {
 
         let succeeded = await Self.runScreencapture(arguments: arguments + [tmp.path])
         let exists = FileManager.default.fileExists(atPath: tmp.path)
-        NSLog("[PrtScn] capture \(mode) — succeeded=\(succeeded), fileExists=\(exists)")
+        log.info("capture \(mode.rawValue, privacy: .public) — succeeded=\(succeeded), fileExists=\(exists)")
 
         // On Esc/cancel, screencapture still exits 0 but writes no file — so we
         // check the file actually exists before showing a preview.
@@ -291,7 +306,7 @@ final class ScreenshotService {
             config.showsCursor = false
             return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
         } catch {
-            NSLog("[PrtScn] wallpaper capture failed: \(error)")
+            log.error("wallpaper capture failed: \(String(describing: error), privacy: .public)")
             return fallbackWallpaperImage()
         }
     }
@@ -329,7 +344,7 @@ final class ScreenshotService {
             do {
                 try process.run()
             } catch {
-                NSLog("[PrtScn] screencapture failed to launch: \(error)")
+                log.error("screencapture failed to launch: \(String(describing: error), privacy: .public)")
                 continuation.resume(returning: false)
             }
         }
@@ -366,7 +381,23 @@ final class ScreenshotService {
             downscaled = NSBitmapImageRep(cgImage: small).representation(using: .png, properties: [:])
         }
 
-        let destination = folder.appendingPathComponent("\(baseName).png")
+        // Same-second saves collide on the timestamped name; suffix with
+        // " (2)", " (3)"… until the name — and, for Both, its native `@Nx`
+        // companion — is free, so a quick burst never throws away a shot.
+        let savesNativeCopy = downscaled != nil && SettingsStore.shared.saveResolution == .both
+        func taken(_ name: String) -> Bool {
+            FileManager.default.fileExists(atPath: folder.appendingPathComponent("\(name).png").path)
+                || (savesNativeCopy && FileManager.default.fileExists(
+                    atPath: folder.appendingPathComponent("\(name)@\(Int(captureScale))x.png").path))
+        }
+        var name = baseName
+        var counter = 2
+        while taken(name) {
+            name = "\(baseName) (\(counter))"
+            counter += 1
+        }
+
+        let destination = folder.appendingPathComponent("\(name).png")
         do {
             guard let downscaled else {
                 try FileManager.default.copyItem(at: url, to: destination)
@@ -376,11 +407,11 @@ final class ScreenshotService {
             if SettingsStore.shared.saveResolution == .both {
                 try FileManager.default.copyItem(
                     at: url,
-                    to: folder.appendingPathComponent("\(baseName)@\(Int(captureScale))x.png"))
+                    to: folder.appendingPathComponent("\(name)@\(Int(captureScale))x.png"))
             }
             return destination
         } catch {
-            NSLog("[PrtScn] save failed: \(error)")
+            log.error("save failed: \(String(describing: error), privacy: .public)")
             return nil
         }
     }
@@ -426,43 +457,39 @@ final class ScreenshotService {
     /// puts the recognized text on the clipboard. No network, no dependencies —
     /// this is the same engine that powers Live Text. Operates on the in-memory
     /// image so it's unaffected by the temp file being cleaned up afterwards.
+    /// Fire-and-forget: the recognition itself runs off the main actor.
     func copyText(in image: NSImage) {
-        guard let text = Self.recognizeText(in: image) else {
-            NSLog("[PrtScn] OCR: no text recognized")
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            log.error("OCR: could not rasterize image")
             return
         }
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
+        Task {
+            guard let text = await Self.recognizeText(in: cgImage) else {
+                log.info("OCR: no text recognized")
+                return
+            }
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(text, forType: .string)
+        }
     }
 
     /// Recognizes text in `image`, returning the lines joined with newlines, or
-    /// `nil` if Vision finds nothing.
-    private static func recognizeText(in image: NSImage) -> String? {
-        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
-            return nil
-        }
-        let request = VNRecognizeTextRequest()
+    /// `nil` if Vision finds nothing. The Swift Vision API performs the request
+    /// on its own executor, so awaiting it suspends — rather than blocks — the
+    /// main actor while an accurate pass chews on a large capture.
+    private static func recognizeText(in image: CGImage) async -> String? {
+        var request = RecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.usesLanguageCorrection = true
-
-        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
         do {
-            try handler.perform([request])
+            let observations = try await request.perform(on: image)
+            let lines = observations.compactMap { $0.topCandidates(1).first?.string }
+            return lines.isEmpty ? nil : lines.joined(separator: "\n")
         } catch {
-            NSLog("[PrtScn] OCR failed: \(error)")
+            log.error("OCR failed: \(String(describing: error), privacy: .public)")
             return nil
         }
-
-        let lines = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
-        return lines.isEmpty ? nil : lines.joined(separator: "\n")
-    }
-
-    /// Opens the capture in Preview.app for markup/editing.
-    func edit(_ url: URL) {
-        let preview = URL(fileURLWithPath: "/System/Applications/Preview.app")
-        NSWorkspace.shared.open([url], withApplicationAt: preview,
-                                configuration: NSWorkspace.OpenConfiguration())
     }
 
     /// Removes a temp capture once we're done with it.
@@ -472,6 +499,9 @@ final class ScreenshotService {
 
     private static func timestamp() -> String {
         let formatter = DateFormatter()
+        // POSIX locale pins the fixed format: without it, a user's 12/24-hour
+        // override can inject "AM/PM" into filenames (Apple QA1480).
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
         return formatter.string(from: Date())
     }

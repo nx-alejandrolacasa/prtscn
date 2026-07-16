@@ -1,8 +1,7 @@
 import Foundation
 
 /// The capture modes, each mapping to flags for the macOS
-/// `/usr/sbin/screencapture` CLI — the same tool the Glaze version shelled out
-/// to.
+/// `/usr/sbin/screencapture` CLI.
 enum CaptureMode: String, CaseIterable, Codable {
     case region
     case window

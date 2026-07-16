@@ -2,6 +2,9 @@ import AppKit
 import ApplicationServices
 @preconcurrency import ScreenCaptureKit
 import SwiftUI
+import os
+
+private let log = Logger(subsystem: "com.alejandrolacasa.prtscn", category: "ScrollCapture")
 
 /// Drives the scrolling capture: region selection → auto-scroll the content
 /// underneath (synthetic scroll-wheel events, which is why this mode — alone
@@ -121,7 +124,7 @@ final class ScrollCaptureController {
         let options = ["AXTrustedCheckOptionPrompt": false] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(options)
 
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         let alert = NSAlert()
         alert.messageText = "Scrolling Capture needs Accessibility access"
         alert.informativeText = """
@@ -343,7 +346,7 @@ final class ScrollCaptureController {
     /// unified log (Console.app) plus a plain file at ~/Library/Logs/
     /// PrtScn.log, because `log show` is off-limits in sandboxed shells.
     static func logDiagnostic(_ message: String) {
-        NSLog("%@", message)
+        log.info("\(message, privacy: .public)")
         let line = "\(Date().formatted(.iso8601)) \(message)\n"
         guard let data = line.data(using: .utf8),
               let url = FileManager.default.urls(for: .libraryDirectory,

@@ -11,9 +11,9 @@ import SwiftUI
 struct PreviewCard: View {
     let model: PreviewModel
 
-    /// Transparent breathing room around the visible card so shadows (and the
-    /// polaroid's tilt) have space to render — the panel window itself is
-    /// clear. Must exceed the shadow's full blur tail (~2× radius + offset) or
+    /// Transparent breathing room around the visible card so shadows have
+    /// space to render — the panel window itself is clear.
+    /// Must exceed the shadow's full blur tail (~2× radius + offset) or
     /// the panel edge clips it into a visible hard line. Static so the
     /// controller can account for it when positioning the card near the cursor.
     static let shadowMargin: CGFloat = 36

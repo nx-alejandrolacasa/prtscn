@@ -70,7 +70,7 @@ final class FixedSizePrompt: NSObject, NSWindowDelegate {
         self.panel = panel
 
         // Accessory app: activate first or the dialog opens behind everything.
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         panel.makeKeyAndOrderFront(nil)
     }
 

@@ -46,7 +46,7 @@ final class FixedSizeOverlay {
             panels.append(panel)
         }
 
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         let mouse = NSEvent.mouseLocation
         for panel in panels {
             if NSMouseInRect(mouse, panel.frame, false) {
