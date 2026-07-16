@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import SwiftUI
 
 /// The panes of the Settings window, in sidebar order.
@@ -221,6 +222,7 @@ private struct FixedSizePresetsSection: View {
     @State private var newHeight: Int?
     @FocusState private var focusedField: Field?
     @State private var dropTarget: FixedSizePreset?
+    @State private var tabKeyMonitor: Any?
 
     private enum Field { case width, height }
 
@@ -243,7 +245,15 @@ private struct FixedSizePresetsSection: View {
     var body: some View {
         Section {
             ForEach(settings.fixedSizePresets) { preset in
-                LabeledContent(preset.label) {
+                HStack(spacing: 8) {
+                    Image(systemName: "line.3.horizontal")
+                        .foregroundStyle(.tertiary)
+                        .accessibilityHidden(true)
+
+                    Text(preset.label)
+
+                    Spacer()
+
                     Button {
                         settings.fixedSizePresets.removeAll { $0 == preset }
                     } label: {
@@ -255,6 +265,10 @@ private struct FixedSizePresetsSection: View {
                     .accessibilityLabel("Remove \(preset.width) by \(preset.height) preset")
                 }
                 .accessibilityElement(children: .combine)
+                // The whole row is the drag surface — without an explicit
+                // content shape only the rendered text/icons would start a
+                // drag, not the empty space between them.
+                .contentShape(Rectangle())
                 .draggable(preset)
                 .dropDestination(for: FixedSizePreset.self) { dropped, _ in
                     drop(dropped, on: preset)
@@ -297,6 +311,29 @@ private struct FixedSizePresetsSection: View {
             Text("Fixed-size capture")
         } footer: {
             Text("Presets offered in the Capture Fixed Size dialog, up to \(SettingsStore.maxFixedSizePresets). Drag to reorder.")
+        }
+        // Tab between the width/height fields by hand: text fields in
+        // grouped-form rows aren't in the window's key-view loop, so AppKit's
+        // insertTab: (what Tab normally triggers) goes nowhere. Intercept the
+        // key while one of our fields is focused and flip the FocusState —
+        // programmatic focus does work. Only Tab presses with one of the two
+        // fields focused are consumed; everything else passes through.
+        .onAppear {
+            tabKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                guard event.keyCode == kVK_Tab else { return event }
+                let handled = MainActor.assumeIsolated {
+                    guard let current = focusedField else { return false }
+                    focusedField = current == .width ? .height : .width
+                    return true
+                }
+                return handled ? nil : event
+            }
+        }
+        .onDisappear {
+            if let tabKeyMonitor {
+                NSEvent.removeMonitor(tabKeyMonitor)
+            }
+            tabKeyMonitor = nil
         }
     }
 
