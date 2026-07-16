@@ -221,7 +221,7 @@ private struct FixedSizePresetsSection: View {
     @State private var newWidth: Int?
     @State private var newHeight: Int?
     @FocusState private var focusedField: Field?
-    @State private var dropTarget: FixedSizePreset?
+    @State private var draggedPreset: FixedSizePreset?
     @State private var tabKeyMonitor: Any?
 
     private enum Field { case width, height }
@@ -269,23 +269,12 @@ private struct FixedSizePresetsSection: View {
                 // content shape only the rendered text/icons would start a
                 // drag, not the empty space between them.
                 .contentShape(Rectangle())
-                .draggable(preset)
-                .dropDestination(for: FixedSizePreset.self) { dropped, _ in
-                    drop(dropped, on: preset)
-                } isTargeted: { targeted in
-                    if targeted {
-                        dropTarget = preset
-                    } else if dropTarget == preset {
-                        dropTarget = nil
-                    }
+                .onDrag {
+                    draggedPreset = preset
+                    return NSItemProvider(object: preset.id as NSString)
                 }
-                .overlay {
-                    if dropTarget == preset {
-                        RoundedRectangle(cornerRadius: 4)
-                            .stroke(Color.accentColor, lineWidth: 1.5)
-                            .padding(-4)
-                    }
-                }
+                .onDrop(of: [.text],
+                        delegate: PresetReorderDelegate(item: preset, dragged: $draggedPreset))
             }
 
             if !atCapacity {
@@ -345,23 +334,6 @@ private struct FixedSizePresetsSection: View {
         focusedField = .width
     }
 
-    /// Dropping a row on another moves it into the target's slot.
-    private func drop(_ items: [FixedSizePreset], on target: FixedSizePreset) -> Bool {
-        guard let item = items.first, item != target,
-              let from = settings.fixedSizePresets.firstIndex(of: item),
-              let to = settings.fixedSizePresets.firstIndex(of: target)
-        else { return false }
-        withAnimation {
-            var presets = settings.fixedSizePresets
-            presets.remove(at: from)
-            // With `from` removed, inserting at the target's ORIGINAL index
-            // lands the item in the target's slot whichever direction it came
-            // from (downward: right after the target; upward: right before).
-            presets.insert(item, at: to)
-            settings.fixedSizePresets = presets
-        }
-        return true
-    }
 
     /// `.focused` registers the fields with the focus system explicitly —
     /// without it, Tab doesn't traverse text fields inside grouped-form rows
@@ -374,6 +346,43 @@ private struct FixedSizePresetsSection: View {
             .frame(width: 56)
             .focused($focusedField, equals: field)
             .onSubmit(add)
+    }
+}
+
+/// Reorders presets live while dragging: entering a row slides the dragged
+/// preset into that slot, and the drop just finalizes. `DropDelegate` (vs
+/// `.dropDestination`) is what lets the proposal be `.move` — otherwise the
+/// cursor shows the green "+" copy badge.
+private struct PresetReorderDelegate: DropDelegate {
+    let item: FixedSizePreset
+    @Binding var dragged: FixedSizePreset?
+
+    func validateDrop(info: DropInfo) -> Bool {
+        MainActor.assumeIsolated { dragged != nil }
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func dropEntered(info: DropInfo) {
+        MainActor.assumeIsolated {
+            guard let dragged, dragged != item else { return }
+            let settings = SettingsStore.shared
+            guard let from = settings.fixedSizePresets.firstIndex(of: dragged),
+                  let to = settings.fixedSizePresets.firstIndex(of: item)
+            else { return }
+            withAnimation {
+                settings.fixedSizePresets.move(
+                    fromOffsets: IndexSet(integer: from),
+                    toOffset: to > from ? to + 1 : to)
+            }
+        }
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        MainActor.assumeIsolated { dragged = nil }
+        return true
     }
 }
 

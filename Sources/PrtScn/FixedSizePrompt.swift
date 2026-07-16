@@ -1,7 +1,5 @@
 import AppKit
-import CoreTransferable
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// Whether the fixed-size dimensions mean output pixels or screen points.
 /// They only differ on Retina displays: a 1280 px frame is 640 pt on screen,
@@ -31,15 +29,6 @@ struct FixedSizePreset: Codable, Hashable, Identifiable {
     /// Plain interpolation on purpose: locale formatting would render
     /// "1.080 × 1.080" with grouping separators.
     var label: String { "\(width) × \(height)" }
-}
-
-/// Drag payload for reordering presets in Settings → Capture. A grouped
-/// `Form` never starts `onMove` drags on macOS (that's a `List`-only
-/// affordance), so the rows use `.draggable`/`.dropDestination` instead.
-extension FixedSizePreset: Transferable {
-    static var transferRepresentation: some TransferRepresentation {
-        CodableRepresentation(contentType: .json)
-    }
 }
 
 /// The small "what size?" dialog shown before a fixed-size capture. On
