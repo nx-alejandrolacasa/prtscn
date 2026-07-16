@@ -55,7 +55,6 @@ final class EditorModel {
     private static let zoomStepPercent: CGFloat = 50
     private static let maxZoom: CGFloat = 8
 
-    var canZoomIn: Bool { zoom < Self.maxZoom }
     var canZoomOut: Bool { zoom > 1 }
 
     func zoomIn() { stepZoom(by: 1) }
@@ -198,6 +197,12 @@ final class EditorModel {
     /// The text annotation being edited, if any.
     var editingTextID: UUID?
     private var editingIsNew = false
+    /// The text as it was when a re-edit began, plus the undo depth right after
+    /// `editText`'s snapshot — so an edit that ends with the text unchanged can
+    /// drop its dead undo entry (and only its own, not one a style tweak
+    /// pushed later in the session).
+    private var editingOriginalText: String?
+    private var editingUndoDepth = 0
 
     /// Snapshot-based undo: each entry is the full annotation list as it was
     /// *before* a change, so moves, resizes, deletes and draws all undo alike.
@@ -393,6 +398,8 @@ final class EditorModel {
         baseImage = NSImage(cgImage: cropped, size: rect.size)
         pixelSize = rect.size
         contentInsets = Self.opaqueInsets(of: baseImage, dividedBy: captureScale)
+        eyedropperRep = nil
+        mosaicCache.removeAll()
         zoom = 1
         pan = .zero
         selectedID = nil
@@ -477,8 +484,10 @@ final class EditorModel {
     /// Re-opens an existing text annotation for editing (double-click).
     func editText(id: UUID) {
         finishTextEditing()
-        guard annotations.contains(where: { $0.id == id }) else { return }
+        guard let index = annotations.firstIndex(where: { $0.id == id }) else { return }
         snapshot()
+        editingOriginalText = annotations[index].text
+        editingUndoDepth = undoStack.count
         selectedID = id
         editingTextID = id
         editingIsNew = false
@@ -502,18 +511,26 @@ final class EditorModel {
         editingTextID = nil
         let wasNew = editingIsNew
         editingIsNew = false
+        let originalText = editingOriginalText
+        let undoDepth = editingUndoDepth
+        editingOriginalText = nil
         guard let index = annotations.firstIndex(where: { $0.id == id }) else { return }
         // A shape label is optional: whitespace-only means "no label"; the
         // shape itself always survives the edit.
         if annotations[index].kind != .text {
             annotations[index].text = annotations[index].text
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            return
-        }
-        if !annotations[index].isMeaningful {
+        } else if !annotations[index].isMeaningful {
             annotations.remove(at: index)
             if wasNew, !undoStack.isEmpty { undoStack.removeLast() }
             if selectedID == id { selectedID = nil }
+            return
+        }
+        // A re-edit that ended with the text unchanged shouldn't leave a dead
+        // undo step behind; drop the snapshot — but only if nothing else (a
+        // style tweak) has pushed onto the stack since.
+        if !wasNew, annotations[index].text == originalText, undoStack.count == undoDepth {
+            undoStack.removeLast()
         }
     }
 
@@ -550,6 +567,7 @@ final class EditorModel {
         isPickingColor = false
         hoverColor = nil
         hoverColorHex = nil
+        eyedropperRep = nil
     }
 
     /// Called continuously while hovering the capture in picking mode; `pixel`
@@ -598,12 +616,21 @@ final class EditorModel {
         flash("Size copied")
     }
 
+    /// The capture as a bitmap, cached for the eyedropper session — rebuilding
+    /// it re-rasterized the whole image on every hover event. Dropped when
+    /// picking ends or `baseImage` changes (a crop). `@ObservationIgnored`:
+    /// it's a cache, not state the UI should track.
+    @ObservationIgnored private var eyedropperRep: NSBitmapImageRep?
+
     /// Samples the base image at a pixel coordinate (top-left origin, matching
     /// the annotation pixel space) — not the canvas's rendered annotations, so
     /// this reads the capture's real content regardless of what's drawn atop it.
     private func colorAt(pixel: CGPoint) -> NSColor? {
-        guard let cgImage = baseImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
-        let rep = NSBitmapImageRep(cgImage: cgImage)
+        if eyedropperRep == nil,
+           let cgImage = baseImage.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+            eyedropperRep = NSBitmapImageRep(cgImage: cgImage)
+        }
+        guard let rep = eyedropperRep else { return nil }
         let x = Int(pixel.x), y = Int(pixel.y)
         guard x >= 0, y >= 0, x < rep.pixelsWide, y < rep.pixelsHigh else { return nil }
         return rep.colorAt(x: x, y: y)
@@ -611,16 +638,42 @@ final class EditorModel {
 
     private static func hex(_ color: NSColor) -> String {
         let rgb = color.usingColorSpace(.sRGB) ?? color
+        // Wide-gamut (P3) pixels can convert to sRGB components outside 0…1;
+        // clamp so saturated colors can't format as malformed hex.
+        func byte(_ component: CGFloat) -> Int {
+            Int((min(max(component, 0), 1) * 255).rounded())
+        }
         return String(format: "#%02X%02X%02X",
-                      Int((rgb.redComponent * 255).rounded()),
-                      Int((rgb.greenComponent * 255).rounded()),
-                      Int((rgb.blueComponent * 255).rounded()))
+                      byte(rgb.redComponent), byte(rgb.greenComponent), byte(rgb.blueComponent))
+    }
+
+    /// Mosaics keyed by annotation id (with the source rect they were built
+    /// for), so canvas redraws don't recompute the crop + two resizes per
+    /// pixelate annotation on every frame. Stale ids are pruned as it grows;
+    /// the whole cache drops when `baseImage` changes (a crop).
+    /// `@ObservationIgnored`: written during canvas rendering.
+    @ObservationIgnored private var mosaicCache: [UUID: (region: CGRect, image: CGImage)] = [:]
+
+    /// The pixelate mosaic for an annotation's bounding rect, cached until the
+    /// rect (or the base image) changes.
+    func pixelatedRegion(for annotation: Annotation) -> CGImage? {
+        let rect = annotation.boundingRect
+        if let cached = mosaicCache[annotation.id], cached.region == rect { return cached.image }
+        guard let mosaic = pixelatedRegion(rect) else { return nil }
+        // Drafts get a fresh id per drag frame; prune ids that no longer exist
+        // so the cache stays bounded.
+        if mosaicCache.count > annotations.count + 8 {
+            let live = Set(annotations.map(\.id))
+            mosaicCache = mosaicCache.filter { live.contains($0.key) }
+        }
+        mosaicCache[annotation.id] = (rect, mosaic)
+        return mosaic
     }
 
     /// A mosaic of `rect` (pixel coords) from the base image: downscale, then
     /// nearest-neighbor upscale — pure Core Graphics, no Metal. Used for the
     /// pixelate tool on screen and in the export.
-    func pixelatedRegion(_ rect: CGRect) -> CGImage? {
+    private func pixelatedRegion(_ rect: CGRect) -> CGImage? {
         guard let base = baseImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
         let bounds = CGRect(x: 0, y: 0, width: base.width, height: base.height)
         let region = rect.integral.intersection(bounds)
@@ -778,7 +831,7 @@ final class EditorModel {
             case .ellipse:
                 context.strokeEllipse(in: flippedRect(annotation.boundingRect, in: h))
             case .pixelate:
-                if let mosaic = pixelatedRegion(annotation.boundingRect) {
+                if let mosaic = pixelatedRegion(for: annotation) {
                     context.draw(mosaic, in: flippedRect(annotation.boundingRect, in: h))
                 }
             case .counter:
@@ -795,26 +848,48 @@ final class EditorModel {
         return context.makeImage()
     }
 
+    /// Rasterizes attributed lines stacked at a uniform line height — the same
+    /// layout the on-screen canvas draws with — into a CGImage for the export
+    /// context. Text goes through an image (rather than Core Text directly)
+    /// so we don't fight Core Graphics' text matrix.
+    private static func renderTextImage(lines: [NSAttributedString], lineHeight: CGFloat,
+                                        size: CGSize, centered: Bool) -> CGImage? {
+        guard size.width > 0, size.height > 0 else { return nil }
+        let positioned = lines.enumerated().map { index, line in
+            (line, CGPoint(x: centered ? (size.width - line.size().width) / 2 : 0,
+                           y: CGFloat(index) * lineHeight))
+        }
+        let image = NSImage(size: size, flipped: true) { _ in
+            for (line, origin) in positioned { line.draw(at: origin) }
+            return true
+        }
+        return image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+    }
+
+    /// The rendered bitmap for annotation text: each newline-separated line in
+    /// the annotation font, stacked and (optionally) centered exactly like the
+    /// on-screen canvas draws it. Sized by `textRenderSize`, so the bitmap,
+    /// hit-testing, and a shape label's knockout hole always agree.
+    private static func textImage(for text: String, fontSize: CGFloat, design: FontDesign,
+                                  color: NSColor, centered: Bool) -> (image: CGImage, size: CGSize)? {
+        let size = textRenderSize(text, fontSize: fontSize, design: design)
+        let lineHeight = textRenderSize(" ", fontSize: fontSize, design: design).height
+        let font = annotationNSFont(size: fontSize, design: design)
+        let lines = text.components(separatedBy: .newlines).map {
+            NSAttributedString(string: $0, attributes: [.font: font, .foregroundColor: color])
+        }
+        guard let image = renderTextImage(lines: lines, lineHeight: lineHeight,
+                                          size: size, centered: centered) else { return nil }
+        return (image, size)
+    }
+
     /// A shape's centered label, drawn over its knockout hole — the same
     /// image-based technique as `drawText`, anchored at the label center
     /// instead of a top-left origin.
     private func drawShapeLabel(_ annotation: Annotation, in context: CGContext, imageHeight: CGFloat) {
-        // Center-aligned so multi-line labels match the on-screen canvas;
-        // alignment only applies when drawing *in* a rect, not *at* a point.
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.alignment = .center
-        let string = NSAttributedString(string: annotation.text, attributes: [
-            .font: annotationNSFont(size: annotation.fontSize, design: annotation.fontDesign),
-            .foregroundColor: NSColor(annotation.color),
-            .paragraphStyle: paragraph,
-        ])
-        let size = string.size()
-        guard size.width > 0, size.height > 0 else { return }
-        let label = NSImage(size: size)
-        label.lockFocus()
-        string.draw(in: CGRect(origin: .zero, size: size))
-        label.unlockFocus()
-        guard let labelImage = label.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
+        guard let (labelImage, size) = Self.textImage(
+            for: annotation.text, fontSize: annotation.fontSize, design: annotation.fontDesign,
+            color: NSColor(annotation.color), centered: true) else { return }
         let center = CGPoint(x: annotation.labelCenter.x, y: imageHeight - annotation.labelCenter.y)
         context.draw(labelImage, in: CGRect(x: center.x - size.width / 2, y: center.y - size.height / 2,
                                             width: size.width, height: size.height))
@@ -834,12 +909,8 @@ final class EditorModel {
             .foregroundColor: NSColor.white,
         ])
         let size = string.size()
-        guard size.width > 0, size.height > 0 else { return }
-        let label = NSImage(size: size)
-        label.lockFocus()
-        string.draw(at: .zero)
-        label.unlockFocus()
-        guard let labelImage = label.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
+        guard let labelImage = Self.renderTextImage(lines: [string], lineHeight: size.height,
+                                                    size: size, centered: false) else { return }
         context.draw(labelImage, in: CGRect(x: center.x - size.width / 2, y: center.y - size.height / 2,
                                             width: size.width, height: size.height))
     }
@@ -871,11 +942,8 @@ final class EditorModel {
         context.addPath(pillPath)
         context.fillPath()
 
-        let label = NSImage(size: size)
-        label.lockFocus()
-        string.draw(at: .zero)
-        label.unlockFocus()
-        guard let labelImage = label.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
+        guard let labelImage = Self.renderTextImage(lines: [string], lineHeight: size.height,
+                                                    size: size, centered: false) else { return }
         context.draw(labelImage, in: CGRect(x: center.x - size.width / 2, y: center.y - size.height / 2,
                                             width: size.width, height: size.height))
     }
@@ -887,20 +955,9 @@ final class EditorModel {
     /// Text is rendered to a small image (so we don't fight Core Graphics' text
     /// matrix) and drawn upright at the annotation's top-left.
     private func drawText(_ annotation: Annotation, in context: CGContext, imageHeight: CGFloat) {
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: annotationNSFont(size: annotation.fontSize, design: annotation.fontDesign),
-            .foregroundColor: NSColor(annotation.color),
-        ]
-        let string = NSAttributedString(string: annotation.text, attributes: attributes)
-        let size = string.size()
-        guard size.width > 0, size.height > 0 else { return }
-
-        let label = NSImage(size: size)
-        label.lockFocus()
-        string.draw(at: .zero)
-        label.unlockFocus()
-        guard let labelImage = label.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
-
+        guard let (labelImage, size) = Self.textImage(
+            for: annotation.text, fontSize: annotation.fontSize, design: annotation.fontDesign,
+            color: NSColor(annotation.color), centered: false) else { return }
         let rect = CGRect(x: annotation.start.x,
                           y: imageHeight - annotation.start.y - size.height,
                           width: size.width, height: size.height)

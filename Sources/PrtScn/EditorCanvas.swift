@@ -146,8 +146,13 @@ struct EditorCanvas: View {
                                 // each mouse-moved, so a one-shot set wouldn't stick.
                                 NSCursor.crosshair.set()
                                 model.updateHoverColor(at: fit.toImage(location, clampedTo: model.pixelSize))
-                            } else {
+                            } else if model.tool == .measure, !model.isCropping,
+                                      SettingsStore.shared.measureLoupe {
+                                // Only tracked while the loupe can actually show —
+                                // every update redraws the whole canvas.
                                 hoverPoint = snapped(fit.toImage(location, clampedTo: model.pixelSize))
+                            } else if hoverPoint != nil {
+                                hoverPoint = nil
                             }
                         case .ended:
                             hoverPoint = nil
@@ -165,9 +170,11 @@ struct EditorCanvas: View {
             // The model clamps zoom panning against the canvas's actual size.
             .onChange(of: geo.size, initial: true) { _, size in model.setCanvasSize(size) }
         }
-        // Switching tools commits any in-progress text.
+        // Switching tools commits any in-progress text (and retires the loupe's
+        // hover point, which is only tracked while the measure tool is armed).
         .onChange(of: model.tool) { _, _ in
             if model.editingTextID != nil { model.finishTextEditing() }
+            hoverPoint = nil
         }
         // Restore the arrow the moment picking ends (a lingering crosshair would
         // otherwise stay until the next mouse move).
@@ -268,7 +275,7 @@ struct EditorCanvas: View {
         case .ellipse:
             shape.stroke(Path(ellipseIn: rect), with: .color(annotation.color), style: style)
         case .pixelate:
-            if let mosaic = model.pixelatedRegion(annotation.boundingRect) {
+            if let mosaic = model.pixelatedRegion(for: annotation) {
                 context.draw(Image(decorative: mosaic, scale: 1), in: rect)
             } else {
                 context.fill(Path(rect), with: .color(.gray))

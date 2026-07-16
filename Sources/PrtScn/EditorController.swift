@@ -119,7 +119,7 @@ final class EditorController: NSObject, NSWindowDelegate {
 
         // Accessory (menu-bar) apps need an explicit activate for a normal
         // window to come forward and accept keyboard focus.
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         window.makeKeyAndOrderFront(nil)
 
         // Deferred a runloop turn: the readout anchors to the zoom control's
@@ -279,6 +279,15 @@ final class EditorController: NSObject, NSWindowDelegate {
         isPanning = false
         if let panMonitor { NSEvent.removeMonitor(panMonitor) }
         panMonitor = nil
+        // The editor's color control targets the shared color panel at a proxy
+        // owned by the (now torn down) view tree — de-target and dismiss it so
+        // a later color change can't message a deallocated object.
+        if NSColorPanel.sharedColorPanelExists {
+            let panel = NSColorPanel.shared
+            panel.setTarget(nil)
+            panel.setAction(nil)
+            if panel.isVisible { panel.orderOut(nil) }
+        }
     }
 
     /// Breathing room around the capture (left / top / right), so the floating

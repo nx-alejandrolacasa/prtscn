@@ -314,12 +314,18 @@ extension Annotation {
     }
 }
 
-/// The rendered size of a text annotation, matching the export font.
+/// The rendered size of a text annotation, matching the export font. Measured
+/// line by line at a uniform line height — the same stacking the on-screen
+/// canvas and the export draw with — because `NSAttributedString.size()` lays
+/// out a single line only, which undersized multi-line text everywhere.
 func textRenderSize(_ text: String, fontSize: CGFloat, design: FontDesign) -> CGSize {
-    let string = NSAttributedString(
-        string: text.isEmpty ? " " : text,
-        attributes: [.font: annotationNSFont(size: fontSize, design: design)])
-    return string.size()
+    let font = annotationNSFont(size: fontSize, design: design)
+    func lineSize(_ line: String) -> CGSize {
+        NSAttributedString(string: line, attributes: [.font: font]).size()
+    }
+    let lines = (text.isEmpty ? " " : text).components(separatedBy: .newlines)
+    return CGSize(width: lines.map { lineSize($0).width }.max() ?? 0,
+                  height: lineSize(" ").height * CGFloat(lines.count))
 }
 
 /// Shortest distance from `p` to the segment `a`–`b`.
