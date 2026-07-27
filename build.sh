@@ -50,7 +50,41 @@ mkdir -p "$APP/Contents/Resources"
 
 cp "$BIN" "$APP/Contents/MacOS/${APP_NAME}"
 cp "Resources/Info.plist" "$APP/Contents/Info.plist"
-cp "Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
+
+# App icon.
+#
+# macOS 26 draws the layered Icon Composer document (Resources/AppIcon.icon):
+# `actool` compiles it into an Assets.car carrying every appearance — light,
+# dark, clear and tinted — alongside a flat AppIcon.icns for older systems and
+# for Finder's smaller sizes. Info.plist's CFBundleIconName points at it.
+#
+# actool ships with Xcode, and this project otherwise only needs the Command
+# Line Tools, so when it's missing we bundle the pre-rendered flat icon instead
+# — which is why Resources/AppIcon.icns stays committed. CFBundleIconName is
+# dropped in that case so nothing points at an Assets.car that isn't there.
+#
+# Both icons come from tools/IconGenerator.swift; see CLAUDE.md → "App icon".
+if command -v actool >/dev/null 2>&1 && [[ -d "Resources/AppIcon.icon" ]]; then
+  ICON_TMP="$(mktemp -d)"
+  actool "Resources/AppIcon.icon" \
+    --compile "$APP/Contents/Resources" \
+    --platform macosx \
+    --minimum-deployment-target 26.0 \
+    --app-icon AppIcon \
+    --output-partial-info-plist "$ICON_TMP/icon.plist" >/dev/null
+  rm -rf "$ICON_TMP"
+  # actool derives its own AppIcon.icns from the layered document, but only up
+  # to 256px. Ours is the same design rendered to 1024, so overwrite it: macOS
+  # 26 reads Assets.car either way, and anything that falls back to the icns
+  # (Finder at large sizes, the DMG) gets the full-resolution art.
+  cp "Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
+  echo "Compiled Resources/AppIcon.icon (layered macOS 26 icon)."
+else
+  cp "Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
+  /usr/libexec/PlistBuddy -c "Delete :CFBundleIconName" \
+    "$APP/Contents/Info.plist" >/dev/null 2>&1 || true
+  echo "note: actool not found — bundled the flat AppIcon.icns (no layered icon)."
+fi
 
 # The marketing version. Bump it here when cutting a release; the build
 # number comes from git (commit count — monotonic and reproducible), so the

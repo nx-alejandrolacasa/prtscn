@@ -10,7 +10,13 @@
 	<string>com.alejandrolacasa.prtscn</string>
 	<key>CFBundleExecutable</key>
 	<string>PrtScn</string>
+	<!-- CFBundleIconFile is the flat AppIcon.icns; CFBundleIconName additionally
+	     points macOS 26 at the layered icon actool compiles from
+	     Resources/AppIcon.icon into Assets.car. build.sh removes
+	     CFBundleIconName when actool isn't available to compile it. -->
 	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIconName</key>
 	<string>AppIcon</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>

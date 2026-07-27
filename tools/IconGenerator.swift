@@ -7,6 +7,21 @@ import CoreText
 // sheen and a hairline edge. The front window's title bar picks up the warm
 // purple → orange brand ramp so both hues sing.
 //
+// This generator emits BOTH representations of that one design:
+//
+//   • AppIcon.iconset / AppIcon-preview.png — the flat raster icon, drawn with
+//     CoreGraphics. `iconutil` turns the iconset into Resources/AppIcon.icns,
+//     the fallback for hosts where `actool` isn't available.
+//   • Resources/AppIcon.icon — an Apple Icon Composer document: the same
+//     windows as unmasked SVG layers over a document-level gradient fill, so
+//     macOS 26 applies its own Liquid Glass material, shadows and specular
+//     highlights per appearance (light / dark / clear / tinted).
+//
+// Both consume the same `windows` specs and the same `WindowLayout` solver, so
+// the two icons can't drift apart. The flat one bakes in the effects macOS 26
+// draws for itself (drop shadow, body sheen, hairline edge); the layered one
+// deliberately leaves them out.
+//
 // Regeneration recipe: CLAUDE.md → "App icon".
 
 // MARK: - Palette (pastel purple + warm orange)
@@ -35,13 +50,11 @@ private func roundedPath(_ rect: CGRect, _ r: CGFloat) -> CGPath {
     CGPath(roundedRect: rect, cornerWidth: r, cornerHeight: r, transform: nil)
 }
 
-private func linearGradient(_ cg: CGContext, _ rect: CGRect, _ top: NSColor, _ bottom: NSColor,
-                            start: CGPoint? = nil, end: CGPoint? = nil) {
+private func linearGradient(_ cg: CGContext, _ top: NSColor, _ bottom: NSColor,
+                            from start: CGPoint, to end: CGPoint) {
     let grad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
                           colors: [top.cgColor, bottom.cgColor] as CFArray, locations: [0, 1])!
-    cg.drawLinearGradient(grad,
-                          start: start ?? CGPoint(x: rect.midX, y: rect.maxY),
-                          end: end ?? CGPoint(x: rect.midX, y: rect.minY), options: [])
+    cg.drawLinearGradient(grad, start: start, end: end, options: [])
 }
 
 /// Text lines in a window's content area: (width, left indent) as fractions of
@@ -53,82 +66,157 @@ private enum WindowStyle {
     case front  // active: brand-gradient chrome + toolbar field
 }
 
+// MARK: - Geometry
+
+/// One window card, described as fractions of the design square so the same
+/// spec can be resolved against the flat icon's inset tile (832pt) or the Icon
+/// Composer canvas (1024pt).
+private struct WindowSpec {
+    let style: WindowStyle
+    let center: CGPoint     // fraction of the design square, y-up
+    let size: CGSize        // fraction of the design square
+    let corner: CGFloat     // fraction of the design square's width
+    let rotationDeg: CGFloat
+    let lines: [TextLine]
+}
+
+/// Two overlapping windows: the inactive one behind (up-left, tilted up to the
+/// right) and the active one in front (down-right, slight opposite tilt).
+private let windows: [WindowSpec] = [
+    WindowSpec(style: .back,
+               center: CGPoint(x: 0.5 - 0.068, y: 0.5 + 0.117),
+               size: CGSize(width: 0.53, height: 0.46),
+               corner: 0.040, rotationDeg: 5,
+               lines: [(0.55, 0.30), (1.0, 0), (0.86, 0), (0.66, 0)]),
+    WindowSpec(style: .front,
+               center: CGPoint(x: 0.5 + 0.102, y: 0.5 - 0.114),
+               size: CGSize(width: 0.50, height: 0.42),
+               corner: 0.040, rotationDeg: -4,
+               lines: [(0.88, 0), (1.0, 0), (0.62, 0), (0.78, 0)]),
+]
+
+/// A spec resolved to absolute points, in a local space centred on the card and
+/// oriented y-up (CoreGraphics). The SVG emitter flips it to y-down.
+private struct WindowLayout {
+    let size: CGSize
+    let corner: CGFloat
+    let card: CGRect
+    let bar: CGRect
+    let body: CGRect
+    let dotRadius: CGFloat
+    let dotCenters: [CGPoint]
+    /// The front style's toolbar search field; nil for the back style.
+    let field: CGRect?
+    let lineRects: [CGRect]
+    let lineCorner: CGFloat
+    /// Title-bar gradient vector: vertical for the back style, diagonal for the
+    /// brand ramp on the front one.
+    let barGradient: (from: CGPoint, to: CGPoint)
+
+    init(_ spec: WindowSpec, square: CGFloat) {
+        let w = spec.size.width * square, h = spec.size.height * square
+        size = CGSize(width: w, height: h)
+        corner = spec.corner * square
+        card = CGRect(x: -w / 2, y: -h / 2, width: w, height: h)
+
+        let barH = h * 0.24
+        bar = CGRect(x: card.minX, y: card.maxY - barH, width: w, height: barH)
+        body = CGRect(x: card.minX, y: card.minY, width: w, height: h - barH)
+
+        let dotR = barH * 0.17
+        dotRadius = dotR
+        let firstDotX = card.minX + w * 0.085
+        let dotY = bar.midY
+        switch spec.style {
+        case .back:
+            // Three traffic lights, evenly spaced.
+            dotCenters = (0..<3).map { CGPoint(x: firstDotX + CGFloat($0) * dotR * 3.1, y: dotY) }
+            field = nil
+        case .front:
+            // A single light plus a toolbar field, both knocked out in white.
+            dotCenters = [CGPoint(x: firstDotX, y: dotY)]
+            let fieldH = dotR * 1.5
+            field = CGRect(x: firstDotX + dotR * 2.6, y: dotY - fieldH / 2,
+                           width: w * 0.46, height: fieldH)
+        }
+
+        let lx = body.minX + w * 0.10
+        let lw = w * 0.80
+        let lh = h * 0.045
+        let gap = h * 0.115
+        lineCorner = lh / 2
+        var ly = body.maxY - h * 0.14
+        var rects: [CGRect] = []
+        for line in spec.lines {
+            rects.append(CGRect(x: lx + lw * line.indent, y: ly, width: lw * line.width, height: lh))
+            ly -= gap
+        }
+        lineRects = rects
+
+        switch spec.style {
+        case .back:
+            barGradient = (CGPoint(x: bar.midX, y: bar.maxY), CGPoint(x: bar.midX, y: bar.minY))
+        case .front:
+            barGradient = (CGPoint(x: bar.minX, y: bar.maxY), CGPoint(x: bar.maxX, y: bar.minY))
+        }
+    }
+}
+
+// MARK: - Flat icon (CoreGraphics)
+
 /// Draws one window card, rotated about its own center, with a soft drop shadow,
 /// a title bar, a few content lines, a body sheen and a hairline edge.
-private func drawWindow(_ cg: CGContext, center: CGPoint, size: CGSize, corner: CGFloat,
-                        rotation: CGFloat, style: WindowStyle, lines: [TextLine]) {
+private func drawWindow(_ cg: CGContext, center: CGPoint, spec: WindowSpec, layout: WindowLayout) {
     cg.saveGState()
     cg.translateBy(x: center.x, y: center.y)
-    cg.rotate(by: rotation)
+    cg.rotate(by: spec.rotationDeg * .pi / 180)
 
-    let rect = CGRect(x: -size.width / 2, y: -size.height / 2, width: size.width, height: size.height)
-    let path = roundedPath(rect, corner)
+    let path = roundedPath(layout.card, layout.corner)
 
     // Drop shadow + body fill.
     cg.saveGState()
     cg.setShadow(offset: CGSize(width: 0, height: -12), blur: 30, color: NSColor(white: 0, alpha: 0.22).cgColor)
     cg.addPath(path)
-    cg.setFillColor((style == .front ? cardFront : cardBack).cgColor)
+    cg.setFillColor((spec.style == .front ? cardFront : cardBack).cgColor)
     cg.fillPath()
     cg.restoreGState()
 
     // Title bar: the top slice of the card.
-    let barH = size.height * 0.24
-    let bar = CGRect(x: rect.minX, y: rect.maxY - barH, width: size.width, height: barH)
     cg.saveGState(); cg.addPath(path); cg.clip()
-    cg.clip(to: bar)
-    if style == .front {
-        linearGradient(cg, bar, brandTop, brandBottom,
-                       start: CGPoint(x: bar.minX, y: bar.maxY),
-                       end: CGPoint(x: bar.maxX, y: bar.minY))
+    cg.clip(to: layout.bar)
+    if spec.style == .front {
+        linearGradient(cg, brandTop, brandBottom, from: layout.barGradient.from, to: layout.barGradient.to)
     } else {
-        linearGradient(cg, bar, barBackTop, barBackBottom)
+        linearGradient(cg, barBackTop, barBackBottom, from: layout.barGradient.from, to: layout.barGradient.to)
     }
     cg.restoreGState()
 
     // Chrome details inside the title bar.
-    let dotR = barH * 0.17
-    switch style {
-    case .back:
-        // Three traffic lights, sampled from the brand ramp.
-        for (i, color) in trafficDots.enumerated() {
-            let cxDot = bar.minX + size.width * 0.085 + CGFloat(i) * dotR * 3.1
-            let box = CGRect(x: cxDot - dotR, y: bar.midY - dotR, width: dotR * 2, height: dotR * 2)
-            cg.addEllipse(in: box); cg.setFillColor(color.cgColor); cg.fillPath()
-        }
-    case .front:
-        // A single light plus a toolbar field, both knocked out in white.
-        let cxDot = bar.minX + size.width * 0.085
-        let box = CGRect(x: cxDot - dotR, y: bar.midY - dotR, width: dotR * 2, height: dotR * 2)
+    let dotR = layout.dotRadius
+    for (i, dot) in layout.dotCenters.enumerated() {
+        let box = CGRect(x: dot.x - dotR, y: dot.y - dotR, width: dotR * 2, height: dotR * 2)
         cg.addEllipse(in: box)
-        cg.setFillColor(NSColor(white: 1, alpha: 0.92).cgColor); cg.fillPath()
-        let fieldH = dotR * 1.5
-        let field = CGRect(x: cxDot + dotR * 2.6, y: bar.midY - fieldH / 2,
-                           width: size.width * 0.46, height: fieldH)
-        cg.addPath(roundedPath(field, fieldH / 2))
+        cg.setFillColor(spec.style == .front ? NSColor(white: 1, alpha: 0.92).cgColor
+                                            : trafficDots[i].cgColor)
+        cg.fillPath()
+    }
+    if let field = layout.field {
+        cg.addPath(roundedPath(field, field.height / 2))
         cg.setFillColor(NSColor(white: 1, alpha: 0.75).cgColor); cg.fillPath()
     }
 
     // Content lines below the chrome.
-    let body = CGRect(x: rect.minX, y: rect.minY, width: size.width, height: size.height - barH)
-    let lx = body.minX + size.width * 0.10
-    let lw = size.width * 0.80
-    let lh = size.height * 0.045
-    let gap = size.height * 0.115
-    var ly = body.maxY - size.height * 0.14
-    for line in lines {
-        let lr = CGRect(x: lx + lw * line.indent, y: ly, width: lw * line.width, height: lh)
-        cg.addPath(roundedPath(lr, lh / 2)); cg.setFillColor(lineTint.cgColor); cg.fillPath()
-        ly -= gap
+    for lr in layout.lineRects {
+        cg.addPath(roundedPath(lr, layout.lineCorner)); cg.setFillColor(lineTint.cgColor); cg.fillPath()
     }
 
     // Glassy lift over the body only — the title bar keeps its own gradient.
-    cg.saveGState(); cg.addPath(path); cg.clip(); cg.clip(to: body)
+    cg.saveGState(); cg.addPath(path); cg.clip(); cg.clip(to: layout.body)
     let sheen = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
                            colors: [NSColor(white: 1, alpha: 0.55).cgColor, NSColor(white: 1, alpha: 0).cgColor] as CFArray,
                            locations: [0, 1])!
-    cg.drawLinearGradient(sheen, start: CGPoint(x: body.midX, y: body.maxY),
-                          end: CGPoint(x: body.midX, y: body.midY), options: [])
+    cg.drawLinearGradient(sheen, start: CGPoint(x: layout.body.midX, y: layout.body.maxY),
+                          end: CGPoint(x: layout.body.midX, y: layout.body.midY), options: [])
     cg.restoreGState()
 
     // Hairline edge.
@@ -138,8 +226,6 @@ private func drawWindow(_ cg: CGContext, center: CGPoint, size: CGSize, corner: 
 
     cg.restoreGState()
 }
-
-// MARK: - Compose
 
 private func drawIcon(_ cg: CGContext) {
     let canvas: CGFloat = 1024
@@ -155,29 +241,18 @@ private func drawIcon(_ cg: CGContext) {
 
     // Pastel diagonal gradient tile (lilac top-left → apricot bottom-right).
     cg.saveGState(); cg.addPath(tilePath); cg.clip()
-    linearGradient(cg, content, bgTop, bgBottom,
-                   start: CGPoint(x: content.minX, y: content.maxY),
-                   end: CGPoint(x: content.maxX, y: content.minY))
+    linearGradient(cg, bgTop, bgBottom,
+                   from: CGPoint(x: content.minX, y: content.maxY),
+                   to: CGPoint(x: content.maxX, y: content.minY))
     cg.restoreGState()
 
-    // Two overlapping windows: the inactive one behind (up-left, tilted up to the
-    // right) and the active one in front (down-right, slight opposite tilt).
-    let cx = content.midX, cy = content.midY
-    let deg = CGFloat.pi / 180
-
-    drawWindow(cg,
-               center: CGPoint(x: cx - content.width * 0.068, y: cy + content.height * 0.117),
-               size: CGSize(width: content.width * 0.53, height: content.height * 0.46),
-               corner: content.width * 0.040, rotation: 5 * deg,
-               style: .back,
-               lines: [(0.55, 0.30), (1.0, 0), (0.86, 0), (0.66, 0)])
-
-    drawWindow(cg,
-               center: CGPoint(x: cx + content.width * 0.102, y: cy - content.height * 0.114),
-               size: CGSize(width: content.width * 0.50, height: content.height * 0.42),
-               corner: content.width * 0.040, rotation: -4 * deg,
-               style: .front,
-               lines: [(0.88, 0), (1.0, 0), (0.62, 0), (0.78, 0)])
+    for spec in windows {
+        drawWindow(cg,
+                   center: CGPoint(x: content.minX + spec.center.x * content.width,
+                                   y: content.minY + spec.center.y * content.height),
+                   spec: spec,
+                   layout: WindowLayout(spec, square: content.width))
+    }
 
     // Whisper-thin inner rim on the tile for a crisp edge.
     cg.saveGState()
@@ -185,6 +260,237 @@ private func drawIcon(_ cg: CGContext) {
     cg.setStrokeColor(NSColor(white: 1, alpha: 0.30).cgColor)
     cg.setLineWidth(2); cg.strokePath()
     cg.restoreGState()
+}
+
+// MARK: - Layered icon (Apple Icon Composer)
+
+// The .icon document is a declarative package: a top-level gradient `fill` for
+// the background plus one `group` per foreground layer, each pointing at a
+// full-bleed 1024×1024 SVG in Assets/. macOS 26 masks the squircle, applies the
+// Liquid Glass material and draws the shadows, so the SVGs carry *shape and
+// colour only* — no rounded-corner mask on the tile, no drop shadows, no body
+// sheen, no hairline edge. (The window cards' own corner radii are shape, not
+// mask, and stay.)
+//
+// Two constraints that are easy to get wrong and expensive to debug:
+//
+//   • `groups` is ordered front to back — groups[0] paints last, on top. The
+//     front window therefore comes first. Reversing this hides the design.
+//   • `translucency` must be explicitly disabled. Icon Composer defaults it on
+//     at 0.5, which washes these near-white cards out against the pastel
+//     background. `glass: true` stays: that's the treatment we want, and it
+//     behaves once translucency is off.
+//
+// The background is the document's fill and never a layer — as a layer it would
+// pick up its group's glass treatment, and the dark / clear / tinted variants
+// are derived from the fill. `linear-gradient` takes two stops and runs
+// top-to-bottom with no direction control, so the flat icon's diagonal
+// lilac → apricot ramp becomes a vertical one here. That's the one intentional
+// difference between the two icons.
+
+private let iconAssetNames: [WindowStyle: String] = [
+    .front: "front-window.svg",
+    .back: "back-window.svg",
+]
+
+/// Icon Composer writes colours as `<space>:r,g,b,a` with five decimals.
+private func iconColor(_ c: NSColor) -> String {
+    let s = c.usingColorSpace(.sRGB)!
+    return String(format: "extended-srgb:%.5f,%.5f,%.5f,%.5f",
+                  s.redComponent, s.greenComponent, s.blueComponent, s.alphaComponent)
+}
+
+/// `icon.json`, modelled so `JSONEncoder` with `.sortedKeys` + `.prettyPrinted`
+/// reproduces Icon Composer's own on-disk format exactly: alphabetical keys,
+/// two-space indent, `" : "` separators, no trailing newline. Round-tripping the
+/// package through Icon Composer therefore leaves no diff.
+private struct IconDocument: Encodable {
+    struct Fill: Encodable {
+        let linearGradient: [String]
+        enum CodingKeys: String, CodingKey { case linearGradient = "linear-gradient" }
+    }
+    struct Layer: Encodable {
+        let glass: Bool
+        let imageName: String
+        let name: String
+        enum CodingKeys: String, CodingKey { case glass, imageName = "image-name", name }
+    }
+    struct Shadow: Encodable { let kind: String; let opacity: Double }
+    struct Translucency: Encodable { let enabled: Bool; let value: Double }
+    struct Group: Encodable {
+        let layers: [Layer]
+        let shadow: Shadow
+        let translucency: Translucency
+    }
+    struct Platforms: Encodable { let squares: String }
+
+    let fill: Fill
+    let groups: [Group]
+    let supportedPlatforms: Platforms
+
+    enum CodingKeys: String, CodingKey {
+        case fill, groups
+        case supportedPlatforms = "supported-platforms"
+    }
+}
+
+// No `color-space-for-untagged-svg-colors`: omitting it is what makes the SVGs'
+// untagged hex literals mean sRGB, which is the space the palette above is
+// authored in. The key's only value Icon Composer 1.6 accepts is "display-p3"
+// ("srgb" makes it refuse the document outright), and setting it changes
+// nothing in actool's output — so the correct move is to leave it out.
+
+private func iconDocument() -> IconDocument {
+    // Front to back: reverse the draw order the flat icon uses.
+    let groups = windows.reversed().map { spec in
+        IconDocument.Group(
+            layers: [IconDocument.Layer(glass: true,
+                                       imageName: iconAssetNames[spec.style]!,
+                                       name: spec.style == .front ? "Front Window" : "Back Window")],
+            // Keep a shadow per group so the stacked cards separate from each
+            // other and from the background.
+            shadow: IconDocument.Shadow(kind: "neutral", opacity: 0.5),
+            translucency: IconDocument.Translucency(enabled: false, value: 0.5))
+    }
+    return IconDocument(
+        fill: IconDocument.Fill(linearGradient: [iconColor(bgTop), iconColor(bgBottom)]),
+        groups: groups,
+        supportedPlatforms: IconDocument.Platforms(squares: "shared"))
+}
+
+// MARK: SVG emission
+
+/// Trims trailing zeros so the output reads like Icon Composer's own SVG export.
+private func n(_ v: CGFloat) -> String {
+    var s = String(format: "%.3f", v)
+    if s.contains(".") {
+        while s.hasSuffix("0") { s.removeLast() }
+        if s.hasSuffix(".") { s.removeLast() }
+    }
+    return s == "-0" ? "0" : s
+}
+
+private func hex(_ c: NSColor) -> String {
+    let s = c.usingColorSpace(.sRGB)!
+    return String(format: "#%02X%02X%02X",
+                  Int((s.redComponent * 255).rounded()),
+                  Int((s.greenComponent * 255).rounded()),
+                  Int((s.blueComponent * 255).rounded()))
+}
+
+/// Flips a y-up rect from `WindowLayout` into SVG's y-down local space.
+private func flip(_ r: CGRect) -> CGRect {
+    CGRect(x: r.minX, y: -r.maxY, width: r.width, height: r.height)
+}
+
+private func svgRect(_ r: CGRect, radius: CGFloat, fill: String, opacity: CGFloat? = nil) -> String {
+    let f = flip(r)
+    let alpha = opacity.map { " fill-opacity=\"\(n($0))\"" } ?? ""
+    return "<rect x=\"\(n(f.minX))\" y=\"\(n(f.minY))\" width=\"\(n(f.width))\" "
+        + "height=\"\(n(f.height))\" rx=\"\(n(radius))\" fill=\"\(fill)\"\(alpha)/>"
+}
+
+/// The title bar is the card's top slice: rounded where it meets the card's top
+/// corners, square where it meets the body. Drawn as an explicit path so the
+/// layer needs no clip mask.
+private func svgTopBarPath(bar: CGRect, radius r: CGFloat, fill: String) -> String {
+    let f = flip(bar)                       // y-down: f.minY is the card's top edge
+    let l = f.minX, right = f.maxX, top = f.minY, bottom = f.maxY
+    let d = "M\(n(l)),\(n(bottom)) V\(n(top + r)) A\(n(r)),\(n(r)) 0 0 1 \(n(l + r)),\(n(top)) "
+        + "H\(n(right - r)) A\(n(r)),\(n(r)) 0 0 1 \(n(right)),\(n(top + r)) V\(n(bottom)) Z"
+    return "<path d=\"\(d)\" fill=\"\(fill)\"/>"
+}
+
+private func svgLayer(for spec: WindowSpec, canvas: CGFloat) -> String {
+    let layout = WindowLayout(spec, square: canvas)
+    let center = CGPoint(x: spec.center.x * canvas, y: canvas - spec.center.y * canvas)
+    // SVG's positive rotation is clockwise on a y-down canvas, CoreGraphics'
+    // is counter-clockwise on a y-up one — hence the negation.
+    let rotation = -spec.rotationDeg
+    let gradientID = spec.style == .front ? "front-bar" : "back-bar"
+
+    var body: [String] = []
+
+    // Card body.
+    body.append(svgRect(layout.card, radius: layout.corner,
+                        fill: hex(spec.style == .front ? cardFront : cardBack)))
+
+    // Title bar.
+    body.append(svgTopBarPath(bar: layout.bar, radius: layout.corner, fill: "url(#\(gradientID))"))
+
+    // Chrome: traffic lights, or one light plus the toolbar field.
+    for (i, dot) in layout.dotCenters.enumerated() {
+        let fill = spec.style == .front ? hex(.white) : hex(trafficDots[i])
+        let alpha = spec.style == .front ? " fill-opacity=\"0.92\"" : ""
+        body.append("<circle cx=\"\(n(dot.x))\" cy=\"\(n(-dot.y))\" r=\"\(n(layout.dotRadius))\" "
+            + "fill=\"\(fill)\"\(alpha)/>")
+    }
+    if let field = layout.field {
+        body.append(svgRect(field, radius: field.height / 2, fill: hex(.white), opacity: 0.75))
+    }
+
+    // Content lines.
+    for lr in layout.lineRects {
+        body.append(svgRect(lr, radius: layout.lineCorner, fill: hex(lineTint)))
+    }
+
+    let g = layout.barGradient
+    let stops = spec.style == .front ? (brandTop, brandBottom) : (barBackTop, barBackBottom)
+    let gradient = """
+        <linearGradient id="\(gradientID)" gradientUnits="userSpaceOnUse" \
+    x1="\(n(g.from.x))" y1="\(n(-g.from.y))" x2="\(n(g.to.x))" y2="\(n(-g.to.y))">
+          <stop offset="0" stop-color="\(hex(stops.0))"/>
+          <stop offset="1" stop-color="\(hex(stops.1))"/>
+        </linearGradient>
+    """
+
+    let shapes = body.map { "    \($0)" }.joined(separator: "\n")
+    return """
+    <svg xmlns="http://www.w3.org/2000/svg" width="\(n(canvas))" height="\(n(canvas))" \
+    viewBox="0 0 \(n(canvas)) \(n(canvas))">
+      <defs>
+    \(gradient)
+      </defs>
+      <g transform="translate(\(n(center.x)) \(n(center.y))) rotate(\(n(rotation)))">
+    \(shapes)
+      </g>
+    </svg>
+
+    """
+}
+
+// MARK: Package writing
+
+/// Writes `icon.json` and the layer SVGs into `path`, creating it if needed.
+///
+/// Files are written individually rather than by recreating the directory: the
+/// package is a committed artifact that can also be opened and edited in Icon
+/// Composer, and blowing it away would discard anything added there. Assets we
+/// don't generate are left alone and reported instead.
+private func writeIconComposerPackage(at path: String) {
+    let fm = FileManager.default
+    let root = URL(fileURLWithPath: path)
+    let assets = root.appendingPathComponent("Assets")
+    try! fm.createDirectory(at: assets, withIntermediateDirectories: true)
+
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    try! encoder.encode(iconDocument()).write(to: root.appendingPathComponent("icon.json"))
+
+    var written: Set<String> = []
+    for spec in windows {
+        let name = iconAssetNames[spec.style]!
+        written.insert(name)
+        try! Data(svgLayer(for: spec, canvas: 1024).utf8)
+            .write(to: assets.appendingPathComponent(name))
+    }
+
+    let onDisk = Set((try? fm.contentsOfDirectory(atPath: assets.path)) ?? [])
+    let extras = onDisk.subtracting(written).filter { !$0.hasPrefix(".") }.sorted()
+    if !extras.isEmpty {
+        print("note: \(path)/Assets has files this generator doesn't write: \(extras.joined(separator: ", "))")
+    }
+    print("Wrote \(path)")
 }
 
 // MARK: - Render + output
@@ -237,3 +543,5 @@ for (name, size) in targets {
 }
 try! png(master, size: 1024).write(to: URL(fileURLWithPath: "AppIcon-preview.png"))
 print("Wrote \(outputDir) and AppIcon-preview.png")
+
+writeIconComposerPackage(at: "Resources/AppIcon.icon")
