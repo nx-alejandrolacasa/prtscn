@@ -58,6 +58,64 @@ struct SettingsSidebar: View {
     }
 }
 
+/// The toolbar's contents for the detail side: history chevrons, then the pane
+/// name a fixed gap away. Hosted as a single `NSToolbarItem` so AppKit places
+/// it in the title bar next to the traffic lights, System Settings style.
+struct SettingsPaneHeader: View {
+    let model: SettingsWindowModel
+
+    /// Fixed header width, leading-aligned: the toolbar item is sized to its
+    /// content, so letting it shrink with the pane name ("About" vs "Hotkeys")
+    /// slid the chevrons sideways on every selection.
+    private static let width: CGFloat = 240
+
+    var body: some View {
+        HStack(spacing: 10) {
+            historyChevrons
+
+            Text(model.pane.title)
+                .font(.headline)
+                .lineLimit(1)
+                .fixedSize()
+
+            Spacer(minLength: 0)
+        }
+        .frame(width: Self.width, alignment: .leading)
+    }
+
+    /// One glass capsule split by a hairline, as in System Settings: back on
+    /// the left, forward on the right, each dimmed when there's nowhere to go.
+    /// The halves are near-square so the capsule reads as round, not as a flat
+    /// pill.
+    private var historyChevrons: some View {
+        HStack(spacing: 0) {
+            chevron("chevron.left", help: "Back", enabled: model.canGoBack) { model.goBack() }
+            Divider().frame(height: 16).opacity(0.5)
+            chevron("chevron.right", help: "Forward", enabled: model.canGoForward) { model.goForward() }
+        }
+        .glassEffect(.regular, in: Capsule())
+    }
+
+    private func chevron(
+        _ symbol: String,
+        help: String,
+        enabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.title3.weight(.medium))
+                .foregroundStyle(enabled ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
+                .frame(width: 31, height: 32)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .help(help)
+        .accessibilityLabel(help)
+    }
+}
+
 /// The detail column: the selected pane's form.
 struct SettingsDetail: View {
     let model: SettingsWindowModel
