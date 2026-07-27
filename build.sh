@@ -64,26 +64,42 @@ cp "Resources/Info.plist" "$APP/Contents/Info.plist"
 # dropped in that case so nothing points at an Assets.car that isn't there.
 #
 # Both icons come from tools/IconGenerator.swift; see CLAUDE.md → "App icon".
+LAYERED_ICON=0
 if command -v actool >/dev/null 2>&1 && [[ -d "Resources/AppIcon.icon" ]]; then
   ICON_TMP="$(mktemp -d)"
-  actool "Resources/AppIcon.icon" \
-    --compile "$APP/Contents/Resources" \
-    --platform macosx \
-    --minimum-deployment-target 26.0 \
-    --app-icon AppIcon \
-    --output-partial-info-plist "$ICON_TMP/icon.plist" >/dev/null
+  # Treat a failure here as "no layered icon", not as a fatal error. actool
+  # drives Xcode's XPC helpers (ibtoold, CoreSimulatorService) and dies when
+  # they're unavailable — inside a sandboxed shell, for instance. Under `set -e`
+  # that aborted the script mid-assembly, leaving an app whose Info.plist was
+  # still the unstamped template: CFBundleExecutable said "PrtScn" while the
+  # binary was "PrtScn Dev", which macOS rejects on launch as "damaged or
+  # incomplete". Assets.car has to exist for the compile to count as a success —
+  # actool has been seen exiting 0 without writing anything.
+  if actool "Resources/AppIcon.icon" \
+      --compile "$APP/Contents/Resources" \
+      --platform macosx \
+      --minimum-deployment-target 26.0 \
+      --app-icon AppIcon \
+      --output-partial-info-plist "$ICON_TMP/icon.plist" >/dev/null \
+     && [[ -f "$APP/Contents/Resources/Assets.car" ]]; then
+    LAYERED_ICON=1
+  fi
   rm -rf "$ICON_TMP"
-  # actool derives its own AppIcon.icns from the layered document, but only up
-  # to 256px. Ours is the same design rendered to 1024, so overwrite it: macOS
-  # 26 reads Assets.car either way, and anything that falls back to the icns
-  # (Finder at large sizes, the DMG) gets the full-resolution art.
-  cp "Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
+fi
+
+# actool derives its own AppIcon.icns from the layered document, but only up to
+# 256px. Ours is the same design rendered to 1024, so it wins either way: macOS
+# 26 reads Assets.car when it's there, and anything falling back to the icns
+# (Finder at large sizes, the DMG) gets the full-resolution art.
+cp "Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
+
+if (( LAYERED_ICON )); then
   echo "Compiled Resources/AppIcon.icon (layered macOS 26 icon)."
 else
-  cp "Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
+  # Nothing must point at an Assets.car that isn't there.
   /usr/libexec/PlistBuddy -c "Delete :CFBundleIconName" \
     "$APP/Contents/Info.plist" >/dev/null 2>&1 || true
-  echo "note: actool not found — bundled the flat AppIcon.icns (no layered icon)."
+  echo "note: no layered icon (actool missing or failed) — bundled the flat AppIcon.icns."
 fi
 
 # The marketing version. Bump it here when cutting a release; the build
@@ -102,6 +118,17 @@ BUILD_NUMBER="$(git rev-list --count HEAD 2>/dev/null || echo 0)"
   -c "Set :CFBundleShortVersionString ${VERSION}" \
   -c "Set :CFBundleVersion ${BUILD_NUMBER}" \
   "$APP/Contents/Info.plist"
+
+# Never report success for a bundle macOS won't open. If the stamping above was
+# skipped or silently no-oped, CFBundleExecutable still names the other variant
+# and launching only ever produces Finder's useless "damaged or incomplete" —
+# with nothing in this script's output to suggest why. Check it here instead.
+STAMPED_EXEC="$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP/Contents/Info.plist")"
+if [[ "$STAMPED_EXEC" != "$APP_NAME" || ! -x "$APP/Contents/MacOS/$STAMPED_EXEC" ]]; then
+  echo "error: ${APP} is inconsistent — CFBundleExecutable is '${STAMPED_EXEC}'," >&2
+  echo "       but the bundled binary is 'MacOS/${APP_NAME}'. Re-run the build." >&2
+  exit 1
+fi
 
 # Code signing.
 #
