@@ -52,11 +52,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private override init() {}
 
     func show() {
-        // Accessory app: activate first or the window opens behind everything.
-        NSApp.activate()
-
         if let window {
-            window.makeKeyAndOrderFront(nil)
+            present(window)
             return
         }
 
@@ -82,6 +79,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         window.titlebarSeparatorStyle = .none
         window.isReleasedWhenClosed = false
         window.delegate = self
+        // Come to the Space the user is actually on. The window is built once
+        // and reused, so without this it stays on the Space it first opened
+        // on — reopening it from anywhere else either yanks the user across
+        // Spaces or looks like nothing happened at all. `fullScreenAuxiliary`
+        // covers the same trip from a full-screen app, where the menu-bar item
+        // is reachable but an ordinary window can't be shown.
+        window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
         // A unified toolbar merges the title-bar region into the split view's
         // columns — that's what puts the window controls inside the sidebar
         // (HIG "split views" layout) instead of in a strip above it. It also
@@ -98,7 +102,22 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         window.center()
         self.window = window
 
+        present(window)
+    }
+
+    /// Brings the window up from a menu-bar click, where PrtScn is not the
+    /// active app.
+    ///
+    /// `activate()` on its own isn't enough. Activation is cooperative since
+    /// macOS 14 — the request is granted by the system rather than taken, and
+    /// it can land a beat after `makeKeyAndOrderFront`, which by then has only
+    /// ordered the window to the front of PrtScn's *own* layer: still beneath
+    /// every window of whichever app is frontmost. `orderFrontRegardless`
+    /// settles it by placing the window above them whoever wins that race.
+    private func present(_ window: NSWindow) {
+        NSApp.activate()
         window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
     }
 
     func windowWillClose(_ notification: Notification) {
