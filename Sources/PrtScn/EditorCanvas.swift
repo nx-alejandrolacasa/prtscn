@@ -185,9 +185,21 @@ struct EditorCanvas: View {
 
     // MARK: - Canvas
 
+    /// Past native 1:1 the capture is resampled with nearest-neighbor, so deep
+    /// zoom shows sharp pixel squares (like the loupe) instead of interpolated
+    /// blur — what pixel-accurate measuring needs.
+    private func isMagnified(_ fit: CanvasFit) -> Bool {
+        fit.scale * model.captureScale > 1.001
+    }
+
     private func canvas(fit: CanvasFit) -> some View {
-        Canvas { context, _ in
-            context.draw(Image(nsImage: model.baseImage), in: fit.imageRect)
+        Canvas { context, size in
+            var base = Image(nsImage: model.baseImage)
+            if isMagnified(fit) { base = base.interpolation(.none) }
+            context.draw(base, in: fit.imageRect)
+            if fit.scale >= 4 {
+                drawPixelGrid(in: &context, fit: fit, canvasSize: size)
+            }
 
             for annotation in model.annotations {
                 if annotation.id == model.editingTextID {
@@ -271,7 +283,9 @@ struct EditorCanvas: View {
             shape.stroke(Path(ellipseIn: rect), with: .color(annotation.color), style: style)
         case .pixelate:
             if let mosaic = model.pixelatedRegion(for: annotation) {
-                context.draw(Image(decorative: mosaic, scale: 1), in: rect)
+                var image = Image(decorative: mosaic, scale: 1)
+                if isMagnified(fit) { image = image.interpolation(.none) }
+                context.draw(image, in: rect)
             } else {
                 context.fill(Path(rect), with: .color(.gray))
             }
@@ -314,8 +328,36 @@ struct EditorCanvas: View {
         }
     }
 
+    /// Hairline grid on capture-pixel boundaries once pixels span 4+ view
+    /// points — zoomed that deep the work is pixel-accurate, so show the
+    /// pixels. Difference-blended so it reads on light and dark content alike.
+    private func drawPixelGrid(in context: inout GraphicsContext, fit: CanvasFit,
+                               canvasSize: CGSize) {
+        let visible = fit.imageRect.intersection(CGRect(origin: .zero, size: canvasSize))
+        guard !visible.isEmpty else { return }
+        var path = Path()
+        let firstCol = ((visible.minX - fit.imageRect.minX) / fit.scale).rounded(.down)
+        let lastCol = ((visible.maxX - fit.imageRect.minX) / fit.scale).rounded(.up)
+        for col in stride(from: firstCol, through: lastCol, by: 1) {
+            let x = fit.imageRect.minX + col * fit.scale
+            path.move(to: CGPoint(x: x, y: visible.minY))
+            path.addLine(to: CGPoint(x: x, y: visible.maxY))
+        }
+        let firstRow = ((visible.minY - fit.imageRect.minY) / fit.scale).rounded(.down)
+        let lastRow = ((visible.maxY - fit.imageRect.minY) / fit.scale).rounded(.up)
+        for row in stride(from: firstRow, through: lastRow, by: 1) {
+            let y = fit.imageRect.minY + row * fit.scale
+            path.move(to: CGPoint(x: visible.minX, y: y))
+            path.addLine(to: CGPoint(x: visible.maxX, y: y))
+        }
+        var grid = context
+        grid.blendMode = .difference
+        grid.stroke(path, with: .color(.white.opacity(0.25)), lineWidth: 0.5)
+    }
+
     /// The measure tool's distance label: white text on a rounded pill in
-    /// the annotation color, centered on the line's midpoint. Formatted by
+    /// the annotation color, placed by `measureLabelCenter` (on the midpoint,
+    /// or beside a segment it would otherwise cover). Formatted by
     /// `measureLabelText` (shared with the export, so the two can never
     /// disagree) and stays correct no matter how zoomed-out the on-screen
     /// canvas is, since the length comes from the capture's pixel space,
@@ -324,18 +366,27 @@ struct EditorCanvas: View {
                                   fit: CanvasFit, color: Color, fontSize: CGFloat, captureScale: CGFloat) {
         let label = measureLabelText(length: geometry.length, captureScale: captureScale,
                                      unit: SettingsStore.shared.measureUnit)
+        // Shrunk when the pill would out-span the measured segment (shared
+        // rule with the export, so what's copied is what's on screen).
+        let fontSize = measureLabelFontSize(for: label, requested: fontSize,
+                                            segmentLength: geometry.length)
         let text = Text(label)
             .font(.system(size: fontSize * fit.scale, weight: .semibold))
             .foregroundStyle(.white)
         let resolved = context.resolve(text)
         let huge = CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         let size = resolved.measure(in: huge)
-        let center = fit.toView(geometry.mid)
         // Font-proportional, matching the export's pill exactly.
         let paddingX: CGFloat = fontSize * 0.35 * fit.scale
         let paddingY: CGFloat = fontSize * 0.18 * fit.scale
         let pillWidth = size.width + paddingX * 2
         let pillHeight = size.height + paddingY * 2
+        let tickHalf = hypot(geometry.startTickA.x - geometry.start.x,
+                             geometry.startTickA.y - geometry.start.y) * fit.scale
+        let center = measureLabelCenter(start: fit.toView(geometry.start),
+                                        end: fit.toView(geometry.end),
+                                        pillSize: CGSize(width: pillWidth, height: pillHeight),
+                                        tickHalf: tickHalf, bounds: fit.imageRect)
         let pillOrigin = CGPoint(x: center.x - pillWidth / 2, y: center.y - pillHeight / 2)
         let pillRect = CGRect(origin: pillOrigin, size: CGSize(width: pillWidth, height: pillHeight))
         context.fill(Path(roundedRect: pillRect, cornerRadius: pillHeight / 2), with: .color(color))
@@ -438,9 +489,13 @@ struct EditorCanvas: View {
                         loupePoint = end
                     }
                     let labelSize = isMeasure ? model.measureSize : model.fontSize
+                    // Measure keeps its defaults — its label shrinks/relocates
+                    // per segment instead, and should stay readable in exports.
+                    let sizeScale = isMeasure ? 1 : model.creationSizeScale
                     var draft = Annotation(kind: model.tool, start: start, end: end,
-                                           color: model.color, lineWidth: model.lineWidth,
-                                           fontSize: labelSize)
+                                           color: model.color,
+                                           lineWidth: model.lineWidth * sizeScale,
+                                           fontSize: labelSize * sizeScale)
                     if model.tool == .line {
                         draft.startCap = model.lineStartCap
                         draft.endCap = model.lineEndCap

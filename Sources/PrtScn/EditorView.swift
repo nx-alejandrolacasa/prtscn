@@ -449,7 +449,7 @@ private struct TextToolControl: View {
             if isExpanded {
                 SubToolbar {
                     fontPicker
-                    SizeStepper(points: model.inPoints(model.fontSize)) { model.adjustFontSize(by: $0) }
+                    SizeStepper(points: model.inPoints(model.stepperSize(for: .text))) { model.adjustFontSize(by: $0) }
                 }
             }
         }
@@ -501,7 +501,7 @@ private struct CounterToolControl: View {
 
             if isExpanded {
                 SubToolbar {
-                    SizeStepper(points: model.inPoints(model.counterSize)) { model.adjustCounterSize(by: $0) }
+                    SizeStepper(points: model.inPoints(model.stepperSize(for: .counter))) { model.adjustCounterSize(by: $0) }
                 }
             }
         }
@@ -524,7 +524,7 @@ private struct MeasureToolControl: View {
 
             if isExpanded {
                 SubToolbar {
-                    SizeStepper(points: model.inPoints(model.measureSize)) { model.adjustMeasureSize(by: $0) }
+                    SizeStepper(points: model.inPoints(model.stepperSize(for: .measure))) { model.adjustMeasureSize(by: $0) }
                 }
             }
         }

@@ -110,6 +110,15 @@ final class EditorModel {
     /// title-bar percentage shows. 100% = true size.
     var zoomPercent: Int { Int((fittedPercent * zoom).rounded()) }
 
+    /// Shrinks the sizes given to *newly created* annotations so they appear
+    /// default-sized at the current magnification — drawn at 400%, an arrow
+    /// gets a quarter of the default stroke, looks normal on screen, and
+    /// exports exactly as it looks. Never enlarges (≤ 1): at or below 100%
+    /// the defaults apply unchanged.
+    var creationSizeScale: CGFloat {
+        min(1, 100 / max(fittedPercent * zoom, 1))
+    }
+
     /// Right-click-drag panning; deltas in view points.
     func panBy(dx: CGFloat, dy: CGFloat) {
         guard zoom > 1 else { return }
@@ -158,7 +167,10 @@ final class EditorModel {
     /// fresh so the preference can be flipped on at any time.
     var tool: EditTool = SettingsStore.shared.rememberLastTool
         ? SettingsStore.shared.editorTool : .line {
-        didSet { SettingsStore.shared.editorTool = tool }
+        didSet {
+            SettingsStore.shared.editorTool = tool
+            if tool == .measure, zoom == 1 { showTip("Zoom in to measure small distances") }
+        }
     }
     /// The line tool's end decorations (a plain tail and an arrow head by
     /// default, so the head lands where the drag releases) — remembered across
@@ -434,7 +446,8 @@ final class EditorModel {
         finishTextEditing()
         snapshot()
         let annotation = Annotation(kind: .text, start: point, end: point,
-                                    color: color, lineWidth: 0, fontSize: fontSize,
+                                    color: color, lineWidth: 0,
+                                    fontSize: fontSize * creationSizeScale,
                                     fontDesign: fontDesign)
         annotations.append(annotation)
         selectedID = annotation.id
@@ -444,30 +457,54 @@ final class EditorModel {
 
     // MARK: - Text style
 
-    /// Multiplies the current text size and applies it to the selected/edited
-    /// text if any.
+    /// Multiplies the current text size — the selected/edited text's own size
+    /// when one exists (so a small zoom-created label steps from where it is,
+    /// rather than snapping to the session default), the default otherwise.
     func adjustFontSize(by factor: CGFloat) {
-        fontSize = clampSize(fontSize * factor)
-        applyTextStyleToSelection()
+        if !adjustSelectionSize(of: .text, by: factor) {
+            fontSize = clampSize(fontSize * factor)
+        }
     }
 
-    /// Multiplies the current step-counter size and applies it to a selected
-    /// counter if any.
+    /// Multiplies the current step-counter size — likewise selection-first.
     func adjustCounterSize(by factor: CGFloat) {
-        counterSize = clampSize(counterSize * factor)
-        applyStyle(to: .counter) { $0.fontSize = self.counterSize }
+        if !adjustSelectionSize(of: .counter, by: factor) {
+            counterSize = clampSize(counterSize * factor)
+        }
     }
 
-    /// Multiplies the current measure-label size and applies it to a selected
-    /// measure line if any.
+    /// Multiplies the current measure-label size — likewise selection-first.
     func adjustMeasureSize(by factor: CGFloat) {
-        measureSize = clampSize(measureSize * factor)
-        applyStyle(to: .measure) { $0.fontSize = self.measureSize }
+        if !adjustSelectionSize(of: .measure, by: factor) {
+            measureSize = clampSize(measureSize * factor)
+        }
     }
 
     func setFontDesign(_ design: FontDesign) {
         fontDesign = design
-        applyTextStyleToSelection()
+        applyStyle(to: .text) { $0.fontDesign = design }
+    }
+
+    /// The size the palette stepper shows: the selected annotation's own size
+    /// when one of `kind` is selected, the session default otherwise.
+    func stepperSize(for kind: EditTool) -> CGFloat {
+        if let index = selectedIndex(of: kind) { return annotations[index].fontSize }
+        switch kind {
+        case .counter: return counterSize
+        case .measure: return measureSize
+        default: return fontSize
+        }
+    }
+
+    /// Scales the selected annotation's own size. Returns false when nothing
+    /// of `kind` is selected. Clamped with a lower floor than the session
+    /// default, so delicate zoom-created annotations stay steppable.
+    private func adjustSelectionSize(of kind: EditTool, by factor: CGFloat) -> Bool {
+        guard selectedIndex(of: kind) != nil else { return false }
+        applyStyle(to: kind) {
+            $0.fontSize = min(max($0.fontSize * factor, 4), self.pixelSize.height * 0.5)
+        }
+        return true
     }
 
     /// Sets one of the line tool's end decorations and restyles a selected
@@ -486,20 +523,17 @@ final class EditorModel {
         min(max(size.rounded(), max(6 * captureScale, 10)), pixelSize.height * 0.5)
     }
 
-    /// Pushes the current size/design onto the selected (or actively edited)
-    /// text annotation, so changes are visible immediately.
-    private func applyTextStyleToSelection() {
-        applyStyle(to: .text) {
-            $0.fontSize = self.fontSize
-            $0.fontDesign = self.fontDesign
-        }
+    /// The selected (or actively edited) annotation's index, if it's of `kind`.
+    private func selectedIndex(of kind: EditTool) -> Int? {
+        guard let id = editingTextID ?? selectedID,
+              let index = annotations.firstIndex(where: { $0.id == id }),
+              annotations[index].kind == kind else { return nil }
+        return index
     }
 
     /// Applies `mutate` to the selected annotation if it's of `kind`.
     private func applyStyle(to kind: EditTool, _ mutate: (inout Annotation) -> Void) {
-        guard let id = editingTextID ?? selectedID,
-              let index = annotations.firstIndex(where: { $0.id == id }),
-              annotations[index].kind == kind else { return }
+        guard let index = selectedIndex(of: kind) else { return }
         snapshot()
         mutate(&annotations[index])
     }
@@ -508,7 +542,8 @@ final class EditorModel {
     func stampCounter(at point: CGPoint) {
         snapshot()
         let annotation = Annotation(kind: .counter, start: point, end: point,
-                                    color: color, lineWidth: 0, fontSize: counterSize, number: nextCounter)
+                                    color: color, lineWidth: 0,
+                                    fontSize: counterSize * creationSizeScale, number: nextCounter)
         annotations.append(annotation)
         selectedID = annotation.id
         nextCounter += 1
@@ -943,14 +978,16 @@ final class EditorModel {
     }
 
     /// The measure tool's distance label, mirroring `EditorCanvas`'s on-screen
-    /// rendering: white text on a rounded pill in the annotation color, centered
-    /// on the line's midpoint. Formatted by `measureLabelText`, the same
-    /// function the on-screen label uses, so the two can never disagree.
+    /// rendering: white text on a rounded pill in the annotation color, placed
+    /// by `measureLabelCenter` (on the midpoint, or beside a segment it would
+    /// otherwise cover). Formatted by `measureLabelText`, the same function
+    /// the on-screen label uses, so the two can never disagree.
     private func drawMeasureLabel(_ geometry: MeasureGeometry, color: Color, fontSize: CGFloat,
                                   in context: CGContext, imageHeight: CGFloat) {
-        let center = CGPoint(x: geometry.mid.x, y: imageHeight - geometry.mid.y)
         let labelText = measureLabelText(length: geometry.length, captureScale: captureScale,
                                          unit: SettingsStore.shared.measureUnit)
+        let fontSize = measureLabelFontSize(for: labelText, requested: fontSize,
+                                            segmentLength: geometry.length)
         let string = NSAttributedString(string: labelText, attributes: [
             .font: NSFont.systemFont(ofSize: fontSize, weight: .semibold),
             .foregroundColor: NSColor.white,
@@ -961,6 +998,13 @@ final class EditorModel {
         let paddingX: CGFloat = fontSize * 0.35
         let paddingY: CGFloat = fontSize * 0.18
         let pillSize = CGSize(width: size.width + paddingX * 2, height: size.height + paddingY * 2)
+        let tickHalf = hypot(geometry.startTickA.x - geometry.start.x,
+                             geometry.startTickA.y - geometry.start.y)
+        let placed = measureLabelCenter(start: geometry.start, end: geometry.end,
+                                        pillSize: pillSize, tickHalf: tickHalf,
+                                        bounds: CGRect(x: 0, y: 0, width: pixelSize.width,
+                                                       height: imageHeight))
+        let center = CGPoint(x: placed.x, y: imageHeight - placed.y)
         let pillRect = CGRect(x: center.x - pillSize.width / 2, y: center.y - pillSize.height / 2,
                               width: pillSize.width, height: pillSize.height)
         context.setFillColor(NSColor(color).cgColor)

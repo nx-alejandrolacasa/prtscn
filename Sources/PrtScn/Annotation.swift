@@ -162,6 +162,44 @@ func measureLabelText(length: CGFloat, captureScale: CGFloat, unit: MeasureUnit)
     }
 }
 
+/// The measure label's effective font size: the requested size, shrunk when
+/// the pill would be wider than the measured segment (so the label can't
+/// swamp a short measurement on a small capture), floored for legibility.
+/// Shared by the on-screen canvas and the export so they render alike.
+func measureLabelFontSize(for label: String, requested: CGFloat, segmentLength: CGFloat) -> CGFloat {
+    let font = NSFont.systemFont(ofSize: requested, weight: .semibold)
+    let textWidth = (label as NSString).size(withAttributes: [.font: font]).width
+    let pillWidth = textWidth + requested * 0.7   // the pill's font-proportional padding
+    guard segmentLength > 0, pillWidth > segmentLength else { return requested }
+    return max(requested * segmentLength / pillWidth, 8)
+}
+
+/// Where the measure pill sits, in whatever coordinate space the caller works
+/// in: centered on the segment's midpoint while it fits comfortably along the
+/// segment; otherwise offset perpendicular, clear of the ticks, so it doesn't
+/// cover the very thing being measured. Clamped into `bounds` (the capture on
+/// export, so the pill never bakes half-outside), preferring the side that
+/// needs less clamping. Shared by the on-screen canvas and the export.
+func measureLabelCenter(start: CGPoint, end: CGPoint, pillSize: CGSize,
+                        tickHalf: CGFloat, bounds: CGRect) -> CGPoint {
+    func clamped(_ c: CGPoint) -> CGPoint {
+        CGPoint(x: min(max(c.x, bounds.minX + pillSize.width / 2), bounds.maxX - pillSize.width / 2),
+                y: min(max(c.y, bounds.minY + pillSize.height / 2), bounds.maxY - pillSize.height / 2))
+    }
+    let mid = CGPoint(x: (start.x + end.x) / 2, y: (start.y + end.y) / 2)
+    let dx = end.x - start.x, dy = end.y - start.y
+    let length = hypot(dx, dy)
+    guard length > 0.0001, pillSize.width > length * 0.75 else { return clamped(mid) }
+    let (px, py) = (-dy / length, dx / length)
+    let offset = tickHalf + pillSize.height * 0.6
+    let sideA = CGPoint(x: mid.x + px * offset, y: mid.y + py * offset)
+    let sideB = CGPoint(x: mid.x - px * offset, y: mid.y - py * offset)
+    let clampedA = clamped(sideA), clampedB = clamped(sideB)
+    let driftA = hypot(clampedA.x - sideA.x, clampedA.y - sideA.y)
+    let driftB = hypot(clampedB.x - sideB.x, clampedB.y - sideB.y)
+    return driftA <= driftB ? clampedA : clampedB
+}
+
 /// Typeface family for text annotations — the three system designs.
 enum FontDesign: String, CaseIterable, Identifiable {
     case sans, serif, monospaced
