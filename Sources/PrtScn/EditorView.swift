@@ -86,14 +86,14 @@ struct EditorView: View {
                 setExpanded(.shapes)
             }
 
-            MeasureToolControl(model: model, isExpanded: expanded == .measure) {
-                model.tool = .measure
-                setExpanded(.measure)
-            }
-
             TextToolControl(model: model, isExpanded: expanded == .text) {
                 model.tool = .text
                 setExpanded(.text)
+            }
+
+            MeasureToolControl(model: model, isExpanded: expanded == .measure) {
+                model.tool = .measure
+                setExpanded(.measure)
             }
 
             CounterToolControl(model: model, isExpanded: expanded == .counter) {
@@ -257,8 +257,9 @@ private struct SubToolbar<Content: View>: View {
     var body: some View {
         HStack(spacing: spacing) { content }
             .frame(height: 32)
-            .padding(.horizontal, 4)
-            .padding(.vertical, 2)
+            // A uniform inset keeps a selected segment's capsule concentric
+            // with the track's (track radius 18 − segment radius 16).
+            .padding(2)
             // The system's semantic fill for grouped controls — a properly
             // tuned gray in both appearances, unlike a hand-rolled opacity.
             .background(Color(nsColor: .systemFill), in: Capsule())
