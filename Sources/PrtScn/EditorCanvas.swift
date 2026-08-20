@@ -238,20 +238,15 @@ struct EditorCanvas: View {
         }
 
         switch annotation.kind {
-        case .arrow:
-            let geometry = arrowGeometry(from: annotation.start, to: annotation.end,
-                                         lineWidth: annotation.lineWidth)
-            var path = Path()
-            path.move(to: fit.toView(geometry.shaftStart))
-            path.addLine(to: fit.toView(geometry.tip))
-            path.move(to: fit.toView(geometry.leftBarb))
-            path.addLine(to: fit.toView(geometry.tip))
-            path.addLine(to: fit.toView(geometry.rightBarb))
-            shape.stroke(path, with: .color(annotation.color), style: style)
         case .line:
             var path = Path()
-            path.move(to: fit.toView(annotation.start))
-            path.addLine(to: fit.toView(annotation.end))
+            for segment in cappedLineSegments(from: annotation.start, to: annotation.end,
+                                              startCap: annotation.startCap,
+                                              endCap: annotation.endCap,
+                                              lineWidth: annotation.lineWidth) {
+                path.move(to: fit.toView(segment[0]))
+                for point in segment.dropFirst() { path.addLine(to: fit.toView(point)) }
+            }
             shape.stroke(path, with: .color(annotation.color), style: style)
         case .measure:
             let geometry = measureGeometry(from: annotation.start, to: annotation.end,
@@ -443,9 +438,14 @@ struct EditorCanvas: View {
                         loupePoint = end
                     }
                     let labelSize = isMeasure ? model.measureSize : model.fontSize
-                    model.draft = Annotation(kind: model.tool, start: start, end: end,
-                                             color: model.color, lineWidth: model.lineWidth,
-                                             fontSize: labelSize)
+                    var draft = Annotation(kind: model.tool, start: start, end: end,
+                                           color: model.color, lineWidth: model.lineWidth,
+                                           fontSize: labelSize)
+                    if model.tool == .line {
+                        draft.startCap = model.lineStartCap
+                        draft.endCap = model.lineEndCap
+                    }
+                    model.draft = draft
                 case .move(let id):
                     guard moved else { return }
                     if !current.didMutate { model.snapshot(); current.didMutate = true; session = current }
@@ -580,7 +580,7 @@ struct EditorCanvas: View {
 
     /// Which tools Shift constrains to the dominant axis.
     private func axisLocks(_ kind: EditTool) -> Bool {
-        kind == .measure || kind == .line || kind == .arrow
+        kind == .measure || kind == .line
     }
 
     /// `p` projected onto a horizontal or vertical through `anchor`, whichever

@@ -99,6 +99,15 @@ final class SettingsStore {
         didSet { defaults.set(editorFontDesign.rawValue, forKey: Keys.editorFontDesign) }
     }
 
+    /// Last-used line tool end decorations (none / arrow / bar per endpoint).
+    var editorLineStartCap: LineCap {
+        didSet { defaults.set(editorLineStartCap.rawValue, forKey: Keys.editorLineStartCap) }
+    }
+
+    var editorLineEndCap: LineCap {
+        didSet { defaults.set(editorLineEndCap.rawValue, forKey: Keys.editorLineEndCap) }
+    }
+
     /// The unit the measure tool's labels report distances in.
     var measureUnit: MeasureUnit {
         didSet { defaults.set(measureUnit.rawValue, forKey: Keys.measureUnit) }
@@ -241,6 +250,8 @@ final class SettingsStore {
         static let closeEditorAfterAction = "closeEditorAfterAction"
         static let editorColor = "editorColor"
         static let editorFontDesign = "editorFontDesign"
+        static let editorLineStartCap = "editorLineStartCap"
+        static let editorLineEndCap = "editorLineEndCap"
         static let measureUnit = "measureUnit"
         static let measureLoupe = "measureLoupe"
         static let includePointer = "includePointer"
@@ -279,6 +290,8 @@ final class SettingsStore {
         closeEditorAfterAction = defaults.object(forKey: Keys.closeEditorAfterAction) as? Bool ?? true
         editorColor = Color(hex: defaults.string(forKey: Keys.editorColor) ?? Self.defaultEditorColor)
         editorFontDesign = FontDesign(rawValue: defaults.string(forKey: Keys.editorFontDesign) ?? "") ?? .sans
+        editorLineStartCap = LineCap(rawValue: defaults.string(forKey: Keys.editorLineStartCap) ?? "") ?? .none
+        editorLineEndCap = LineCap(rawValue: defaults.string(forKey: Keys.editorLineEndCap) ?? "") ?? .arrow
         measureUnit = MeasureUnit(rawValue: defaults.string(forKey: Keys.measureUnit) ?? "") ?? .points
         measureLoupe = defaults.object(forKey: Keys.measureLoupe) as? Bool ?? true
         includePointer = defaults.object(forKey: Keys.includePointer) as? Bool ?? false
@@ -287,7 +300,8 @@ final class SettingsStore {
         copyResolution = CopyResolution(rawValue: defaults.string(forKey: Keys.copyResolution) ?? "") ?? .native
         filenamePrefix = defaults.string(forKey: Keys.filenamePrefix) ?? "PrtScn"
         rememberLastTool = defaults.object(forKey: Keys.rememberLastTool) as? Bool ?? true
-        editorTool = EditTool(rawValue: defaults.string(forKey: Keys.editorTool) ?? "") ?? .arrow
+        // A remembered "arrow" from before the line/arrow merge falls back here.
+        editorTool = EditTool(rawValue: defaults.string(forKey: Keys.editorTool) ?? "") ?? .line
         fixedSizeWidth = defaults.object(forKey: Keys.fixedSizeWidth) as? Int ?? 1280
         fixedSizeHeight = defaults.object(forKey: Keys.fixedSizeHeight) as? Int ?? 720
         fixedSizeUnit = FixedSizeUnit(rawValue: defaults.string(forKey: Keys.fixedSizeUnit) ?? "") ?? .pixels

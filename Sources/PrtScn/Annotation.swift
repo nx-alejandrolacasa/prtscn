@@ -6,7 +6,6 @@ import SwiftUI
 /// The drawing tools offered in the editor. A tool maps 1:1 to the kind of
 /// annotation it produces.
 enum EditTool: String, CaseIterable, Identifiable {
-    case arrow
     case line
     case measure
     case rectangle
@@ -20,7 +19,6 @@ enum EditTool: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .arrow: "Arrow"
         case .line: "Line"
         case .measure: "Measure"
         case .rectangle: "Rectangle"
@@ -34,7 +32,6 @@ enum EditTool: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
-        case .arrow: "arrow.up.right"
         case .line: "line.diagonal"
         case .measure: "ruler"
         case .rectangle: "rectangle"
@@ -45,6 +42,11 @@ enum EditTool: String, CaseIterable, Identifiable {
         case .text: "textformat"
         }
     }
+
+    /// The closed-shape tools grouped behind the palette's single shape button.
+    static let shapes: [EditTool] = [.rectangle, .roundedRect, .ellipse]
+
+    var isShape: Bool { Self.shapes.contains(self) }
 
     /// Palette icon. The rounded-rectangle tool is drawn (no SF Symbol shows a
     /// rectangle with all four corners rounded), the rest use SF Symbols.
@@ -57,6 +59,73 @@ enum EditTool: String, CaseIterable, Identifiable {
         default:
             Image(systemName: systemImage).font(.system(size: 15, weight: .medium))
         }
+    }
+}
+
+/// What the line tool draws at one endpoint.
+enum LineCap: String, CaseIterable, Identifiable {
+    case none, arrow, bar
+
+    var id: Self { self }
+
+    var label: String {
+        switch self {
+        case .none: "None"
+        case .arrow: "Arrow"
+        case .bar: "Bar"
+        }
+    }
+}
+
+/// A cap's palette-button glyph, drawn rather than typeset — Unicode glyphs
+/// (⊢, →) come from different font tables and their stroke weights clash. A
+/// short shaft with the cap at its outer end, pointing left at the line's
+/// start and right at its end.
+struct LineCapIcon: Shape {
+    let cap: LineCap
+    let atStart: Bool
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let mid = rect.midY
+        path.move(to: CGPoint(x: rect.minX, y: mid))
+        path.addLine(to: CGPoint(x: rect.maxX, y: mid))
+
+        let tipX = atStart ? rect.minX : rect.maxX
+        let inward: CGFloat = atStart ? 1 : -1     // tip → back along the shaft
+        let reach = rect.height / 2
+        switch cap {
+        case .none:
+            break
+        case .arrow:
+            path.move(to: CGPoint(x: tipX + inward * reach, y: mid - reach))
+            path.addLine(to: CGPoint(x: tipX, y: mid))
+            path.addLine(to: CGPoint(x: tipX + inward * reach, y: mid + reach))
+        case .bar:
+            path.move(to: CGPoint(x: tipX, y: mid - reach))
+            path.addLine(to: CGPoint(x: tipX, y: mid + reach))
+        }
+        return path
+    }
+}
+
+/// A diagonal line with a perpendicular bar at each end — the tool button's
+/// icon when the caps are bars, oriented like `line.diagonal`.
+struct BarsLineIcon: Shape {
+    func path(in rect: CGRect) -> Path {
+        let a = CGPoint(x: rect.minX + 1, y: rect.maxY - 1)
+        let b = CGPoint(x: rect.maxX - 1, y: rect.minY + 1)
+        // The line runs ↗, so its perpendicular is the ↘ diagonal.
+        let half = rect.width * 0.24
+        let (dx, dy) = (half * 0.7071, half * 0.7071)
+        var path = Path()
+        path.move(to: a)
+        path.addLine(to: b)
+        for p in [a, b] {
+            path.move(to: CGPoint(x: p.x - dx, y: p.y - dy))
+            path.addLine(to: CGPoint(x: p.x + dx, y: p.y + dy))
+        }
+        return path
     }
 }
 
@@ -154,6 +223,9 @@ struct Annotation: Identifiable {
     var fontDesign: FontDesign = .sans
     /// The badge number — step-counter only.
     var number: Int = 0
+    /// End decorations — line tool only.
+    var startCap: LineCap = .none
+    var endCap: LineCap = .arrow
 
     /// Bounding rect of `start`/`end`, normalized so width/height are positive.
     var boundingRect: CGRect {
@@ -188,6 +260,8 @@ struct Annotation: Identifiable {
         copy.text = text
         copy.fontDesign = fontDesign
         copy.number = number
+        copy.startCap = startCap
+        copy.endCap = endCap
         return copy
     }
 
@@ -218,7 +292,7 @@ extension Annotation {
     /// Measure has its own pixel-count label; pixelate/counter/text don't apply.
     var supportsLabel: Bool {
         switch kind {
-        case .arrow, .line, .rectangle, .roundedRect, .ellipse: return true
+        case .line, .rectangle, .roundedRect, .ellipse: return true
         default: return false
         }
     }
@@ -232,7 +306,7 @@ extension Annotation {
     /// center of a closed shape.
     var labelCenter: CGPoint {
         switch kind {
-        case .arrow, .line:
+        case .line:
             return CGPoint(x: (start.x + end.x) / 2, y: (start.y + end.y) / 2)
         default:
             return CGPoint(x: boundingRect.midX, y: boundingRect.midY)
@@ -270,7 +344,7 @@ extension Annotation {
     /// Text has none — it's move-only.
     var handles: [(handle: ResizeHandle, point: CGPoint)] {
         switch kind {
-        case .arrow, .line, .measure:
+        case .line, .measure:
             return [(.start, start), (.end, end)]
         case .rectangle, .roundedRect, .ellipse, .pixelate:
             let r = boundingRect
@@ -302,7 +376,7 @@ extension Annotation {
         // shape, astride a thin line), yet must still select/move/re-edit.
         if hasLabel, labelHoleRect().contains(point) { return true }
         switch kind {
-        case .arrow, .line, .measure:
+        case .line, .measure:
             return distanceFromPoint(point, toSegment: start, end) <= tolerance + lineWidth / 2
         case .rectangle, .roundedRect, .ellipse, .pixelate:
             return boundingRect.insetBy(dx: -tolerance, dy: -tolerance).contains(point)
@@ -337,13 +411,14 @@ func distanceFromPoint(_ p: CGPoint, toSegment a: CGPoint, _ b: CGPoint) -> CGFl
     return hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy))
 }
 
-func arrowGeometry(from: CGPoint, to tip: CGPoint, lineWidth: CGFloat) -> ArrowGeometry {
+func arrowGeometry(from: CGPoint, to tip: CGPoint, lineWidth: CGFloat,
+                   maxHeadFraction: CGFloat = 0.85) -> ArrowGeometry {
     let dx = tip.x - from.x, dy = tip.y - from.y
     let length = max((dx * dx + dy * dy).squareRoot(), 0.0001)
     let ux = dx / length, uy = dy / length          // unit direction
     let back = (x: -ux, y: -uy)                      // tip → tail direction
 
-    let headLength = min(max(lineWidth * 5.6, 24), length * 0.85)
+    let headLength = min(max(lineWidth * 5.6, 24), length * maxHeadFraction)
     let spread = CGFloat.pi / 4                       // 45° open head
 
     func barb(_ angle: CGFloat) -> CGPoint {
@@ -354,6 +429,40 @@ func arrowGeometry(from: CGPoint, to tip: CGPoint, lineWidth: CGFloat) -> ArrowG
 
     return ArrowGeometry(shaftStart: from, tip: tip,
                          leftBarb: barb(spread), rightBarb: barb(-spread))
+}
+
+/// The polylines to stroke for a line annotation: the shaft plus each end's
+/// cap, in the inputs' coordinate space — shared by the on-screen canvas and
+/// the export so they can never disagree. With an arrow head on both ends,
+/// each head shrinks to under half the length so the two never collide.
+func cappedLineSegments(from start: CGPoint, to end: CGPoint,
+                        startCap: LineCap, endCap: LineCap,
+                        lineWidth: CGFloat) -> [[CGPoint]] {
+    var segments = [[start, end]]
+    let headFraction: CGFloat = startCap == .arrow && endCap == .arrow ? 0.42 : 0.85
+
+    let dx = end.x - start.x, dy = end.y - start.y
+    let length = max((dx * dx + dy * dy).squareRoot(), 0.0001)
+    let (px, py) = (-dy / length, dx / length)       // unit perpendicular
+    let half = max(lineWidth * 4, 12)                // matches the measure ticks
+
+    func append(_ cap: LineCap, at point: CGPoint, from other: CGPoint) {
+        switch cap {
+        case .none:
+            break
+        case .arrow:
+            let g = arrowGeometry(from: other, to: point, lineWidth: lineWidth,
+                                  maxHeadFraction: headFraction)
+            // leftBarb → tip → rightBarb, so the tip gets a rounded join.
+            segments.append([g.leftBarb, g.tip, g.rightBarb])
+        case .bar:
+            segments.append([CGPoint(x: point.x + px * half, y: point.y + py * half),
+                             CGPoint(x: point.x - px * half, y: point.y - py * half)])
+        }
+    }
+    append(startCap, at: start, from: end)
+    append(endCap, at: end, from: start)
+    return segments
 }
 
 /// Geometry for the measure tool: the main segment plus a short perpendicular

@@ -12,7 +12,7 @@ struct EditorView: View {
     /// text and color expanders mutually exclusive.
     @State private var expanded: PaletteSection?
 
-    private enum PaletteSection { case text, counter, measure, color }
+    private enum PaletteSection { case line, shapes, text, counter, measure, color }
 
     /// Opens `target` (or closes, if `nil`). When switching directly between two
     /// open sections, the current one collapses *before* the next expands, so
@@ -47,52 +47,67 @@ struct EditorView: View {
             .background(shortcuts)
             .frame(minWidth: EditorController.minContentSize.width,
                    minHeight: EditorController.minContentSize.height)
-            // Top-bar tools (pixelate) and crop mode collapse any open section.
-            .onChange(of: model.tool) { _, tool in
-                if tool == .pixelate, expanded != nil { setExpanded(nil) }
-            }
-            .onChange(of: model.isCropping) { _, cropping in
-                if cropping, expanded != nil { setExpanded(nil) }
-            }
+            // The open section always follows the active tool — a selected
+            // tool's subtools stay in view (tools without any, like pixelate,
+            // collapse the bar).
+            .onChange(of: model.tool) { _, tool in setExpanded(section(for: tool)) }
+            // The preselected tool's section starts open (set directly, so it
+            // doesn't animate in), putting its options in view without a click.
+            .onAppear { expanded = section(for: model.tool) }
+    }
+
+    /// The palette section belonging to a tool — always shown while that tool
+    /// is active. `nil` for tools without subtools.
+    private func section(for tool: EditTool) -> PaletteSection? {
+        switch tool {
+        case .line: .line
+        case .rectangle, .roundedRect, .ellipse: .shapes
+        case .text: .text
+        case .counter: .counter
+        case .measure: .measure
+        default: nil
+        }
     }
 
     // MARK: - Tool palette
 
     private var palette: some View {
         HStack(spacing: 6) {
-            ForEach(EditTool.allCases.filter {
-                $0 != .text && $0 != .pixelate && $0 != .counter && $0 != .measure
-            }) { tool in
-                PaletteButton(help: tool.label, isOn: model.tool == tool) {
-                    model.tool = tool
-                    setExpanded(nil)
-                } icon: { tool.icon }
+            // Tool buttons only ever *open* their section (switching tools
+            // swaps it via `onChange`); the explicit `setExpanded` here covers
+            // re-opening it over the color expander without a tool change.
+            LineToolControl(model: model, isExpanded: expanded == .line) {
+                model.tool = .line
+                setExpanded(.line)
+            }
+
+            ShapeToolControl(model: model, isExpanded: expanded == .shapes) {
+                model.selectShape(model.lastShapeTool)
+                setExpanded(.shapes)
             }
 
             MeasureToolControl(model: model, isExpanded: expanded == .measure) {
                 model.tool = .measure
-                setExpanded(expanded == .measure ? nil : .measure)
+                setExpanded(.measure)
             }
 
             TextToolControl(model: model, isExpanded: expanded == .text) {
                 model.tool = .text
-                setExpanded(expanded == .text ? nil : .text)
+                setExpanded(.text)
             }
 
-            // Counter is the last tool control before the fixed divider below,
-            // so it must not draw its own trailing one (that separator already
-            // exists) — otherwise expanding it shows a double divider.
-            CounterToolControl(model: model, isExpanded: expanded == .counter,
-                               hasTrailingSeparator: true) {
+            CounterToolControl(model: model, isExpanded: expanded == .counter) {
                 model.tool = .counter
-                setExpanded(expanded == .counter ? nil : .counter)
+                setExpanded(.counter)
             }
 
             Divider().frame(height: 20)
 
+            // Closing the color expander returns to the active tool's section
+            // rather than collapsing to nothing.
             ColorPalette(selection: $model.color, isExpanded: expanded == .color,
-                         onToggle: { setExpanded(expanded == .color ? nil : .color) },
-                         collapse: { setExpanded(nil) })
+                         onToggle: { setExpanded(expanded == .color ? section(for: model.tool) : .color) },
+                         collapse: { setExpanded(section(for: model.tool)) })
 
             Divider().frame(height: 20)
 
@@ -105,8 +120,11 @@ struct EditorView: View {
                 Image(systemName: "arrow.uturn.forward").font(.system(size: 15, weight: .medium))
             }
         }
+        // Pinned to the sub-toolbar's height (32 + its vertical padding), so
+        // the palette is the same size with any section open — or none.
+        .frame(height: 36)
         .padding(.horizontal, 10)
-        .padding(.vertical, 7)
+        .padding(.vertical, 6)
         .glassEffect(.regular, in: Capsule())
         .padding(.bottom, EditorController.contentMargin)
     }
@@ -228,22 +246,46 @@ private struct CheckerboardBackground: View {
     }
 }
 
-/// A flat, square palette button with an active/hover/disabled state and a
-/// custom icon view.
+/// A capsule-shaped "sub toolbar": the single, subtly darker background that
+/// groups a tool's expanded options inside the palette (its elements draw no
+/// backgrounds of their own beyond hover/active states). Fixed-height, so the
+/// palette is the same size whichever tool's options are open.
+private struct SubToolbar<Content: View>: View {
+    var spacing: CGFloat = 6
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        HStack(spacing: spacing) { content }
+            .frame(height: 32)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 2)
+            // The system's semantic fill for grouped controls — a properly
+            // tuned gray in both appearances, unlike a hand-rolled opacity.
+            .background(Color(nsColor: .systemFill), in: Capsule())
+            .transition(.scale.combined(with: .opacity))
+    }
+}
+
+/// A flat palette button with an active/hover/disabled state and a custom
+/// icon view. Two active looks: the accent circle (main-bar tools), or —
+/// `segmented` — a raised white pill for an exclusive choice sitting on a
+/// `SubToolbar` track, like a segmented control's selected segment.
 private struct PaletteButton<Icon: View>: View {
     let help: String
     var isOn = false
     var disabled = false
+    var segmented = false
     let action: () -> Void
     let icon: Icon
 
     @State private var hovering = false
 
-    init(help: String, isOn: Bool = false, disabled: Bool = false,
+    init(help: String, isOn: Bool = false, disabled: Bool = false, segmented: Bool = false,
          action: @escaping () -> Void, @ViewBuilder icon: () -> Icon) {
         self.help = help
         self.isOn = isOn
         self.disabled = disabled
+        self.segmented = segmented
         self.action = action
         self.icon = icon()
     }
@@ -251,10 +293,10 @@ private struct PaletteButton<Icon: View>: View {
     var body: some View {
         Button(action: action) {
             icon
-                .foregroundStyle(isOn ? Color.white : Color.primary)
-                .frame(width: 32, height: 28)
-                .background(background, in: RoundedRectangle(cornerRadius: 7))
-                .contentShape(Rectangle())
+                .foregroundStyle(isOn && !segmented ? Color.white : Color.primary)
+                .frame(width: segmented ? 38 : 32, height: 32)
+                .background { background }
+                .contentShape(shape)
         }
         .buttonStyle(.plain)
         .disabled(disabled)
@@ -263,9 +305,124 @@ private struct PaletteButton<Icon: View>: View {
         .help(help)
     }
 
-    private var background: Color {
-        if isOn { return .accentColor.opacity(0.9) }
-        return hovering ? .primary.opacity(0.12) : .clear
+    private var shape: AnyShape {
+        segmented ? AnyShape(Capsule()) : AnyShape(Circle())
+    }
+
+    @ViewBuilder private var background: some View {
+        if segmented, isOn {
+            Capsule()
+                .fill(Color(nsColor: .controlBackgroundColor))
+                .overlay(Capsule().strokeBorder(.primary.opacity(0.12), lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
+        } else if isOn {
+            Circle().fill(Color.accentColor.opacity(0.9))
+        } else if hovering {
+            shape.fill(Color.primary.opacity(0.12))
+        }
+    }
+}
+
+/// The merged line/arrow tool: while active, it expands a Start and an End
+/// dropdown that set each endpoint's decoration (none / arrow / bar) — for the
+/// next line drawn and, in place, for a selected one. The tool button's icon
+/// follows the caps, arrow being the default look.
+private struct LineToolControl: View {
+    let model: EditorModel
+    let isExpanded: Bool
+    let onToggle: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            PaletteButton(help: hasArrow ? "Arrow" : "Line", isOn: model.tool == .line,
+                          action: onToggle) {
+                toolIcon
+            }
+
+            if isExpanded {
+                // The two cap dropdowns with a dot between them, so together
+                // they read as the editable ends of one line — no labels.
+                SubToolbar(spacing: 4) {
+                    capMenu("Start", atStart: true,
+                            selection: Binding(get: { model.lineStartCap },
+                                               set: { model.setLineStartCap($0) }))
+                    Circle()
+                        .fill(.secondary)
+                        .frame(width: 5, height: 5)
+                    capMenu("End", atStart: false,
+                            selection: Binding(get: { model.lineEndCap },
+                                               set: { model.setLineEndCap($0) }))
+                }
+            }
+        }
+    }
+
+    private var hasArrow: Bool {
+        model.lineStartCap == .arrow || model.lineEndCap == .arrow
+    }
+
+    @ViewBuilder private var toolIcon: some View {
+        if hasArrow {
+            Image(systemName: "arrow.up.right").font(.system(size: 15, weight: .medium))
+        } else if model.lineStartCap == .bar || model.lineEndCap == .bar {
+            BarsLineIcon()
+                .stroke(style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
+                .frame(width: 14, height: 14)
+        } else {
+            Image(systemName: "line.diagonal").font(.system(size: 15, weight: .medium))
+        }
+    }
+
+    /// The dropdown for one endpoint, showing its current cap glyph. A Picker
+    /// inside a Menu, so the current cap gets the native checkmark.
+    private func capMenu(_ title: String, atStart: Bool, selection: Binding<LineCap>) -> some View {
+        Menu {
+            Picker(title, selection: selection) {
+                ForEach(LineCap.allCases) { cap in
+                    Text(cap.label).tag(cap)
+                }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } label: {
+            LineCapIcon(cap: selection.wrappedValue, atStart: atStart)
+                .stroke(style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
+                .foregroundStyle(.primary)
+                .frame(width: 13, height: 9)
+                .frame(width: 30, height: 32)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .help("\(title) cap: \(selection.wrappedValue.label)")
+    }
+}
+
+/// The merged shape tool (rectangle / rounded rectangle / ellipse): one button
+/// in the bar that, while active, expands the three shapes inline. The button
+/// itself re-arms the last shape used.
+private struct ShapeToolControl: View {
+    let model: EditorModel
+    let isExpanded: Bool
+    let onToggle: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            PaletteButton(help: "Shapes", isOn: model.tool.isShape, action: onToggle) {
+                Image(systemName: "square.on.circle").font(.system(size: 15, weight: .medium))
+            }
+
+            if isExpanded {
+                SubToolbar {
+                    ForEach(EditTool.shapes) { shape in
+                        PaletteButton(help: shape.label, isOn: model.tool == shape,
+                                      segmented: true) {
+                            model.selectShape(shape)
+                        } icon: { shape.icon }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -290,13 +447,10 @@ private struct TextToolControl: View {
             }
 
             if isExpanded {
-                Divider().frame(height: 18)
-                fontPicker
-                Divider().frame(height: 18)
-                SizeStepper(points: model.inPoints(model.fontSize)) { model.adjustFontSize(by: $0) }
-                // Marks where this control's expansion ends, since whatever
-                // sits next in the toolbar otherwise butts right up against it.
-                Divider().frame(height: 18)
+                SubToolbar {
+                    fontPicker
+                    SizeStepper(points: model.inPoints(model.fontSize)) { model.adjustFontSize(by: $0) }
+                }
             }
         }
         .onChange(of: isExpanded) { _, open in if !open { fontExpanded = false } }
@@ -306,7 +460,8 @@ private struct TextToolControl: View {
     private var fontPicker: some View {
         if fontExpanded {
             ForEach(FontDesign.allCases) { design in
-                PaletteButton(help: design.label, isOn: model.fontDesign == design) {
+                PaletteButton(help: design.label, isOn: model.fontDesign == design,
+                              segmented: true) {
                     model.setFontDesign(design)
                     withAnimation(.snappy(duration: 0.2)) { fontExpanded = false }
                 } icon: {
@@ -328,9 +483,6 @@ private struct TextToolControl: View {
 private struct CounterToolControl: View {
     let model: EditorModel
     let isExpanded: Bool
-    /// Set when a fixed divider already follows in the palette, so the trailing
-    /// separator below is skipped to avoid a double divider.
-    var hasTrailingSeparator = false
     let onToggle: () -> Void
 
     var body: some View {
@@ -348,12 +500,9 @@ private struct CounterToolControl: View {
             }
 
             if isExpanded {
-                Divider().frame(height: 18)
-                SizeStepper(points: model.inPoints(model.counterSize)) { model.adjustCounterSize(by: $0) }
-                // Marks where this control's expansion ends, since whatever
-                // sits next in the toolbar otherwise butts right up against it —
-                // unless a fixed separator already follows.
-                if !hasTrailingSeparator { Divider().frame(height: 18) }
+                SubToolbar {
+                    SizeStepper(points: model.inPoints(model.counterSize)) { model.adjustCounterSize(by: $0) }
+                }
             }
         }
     }
@@ -374,11 +523,9 @@ private struct MeasureToolControl: View {
             }
 
             if isExpanded {
-                Divider().frame(height: 18)
-                SizeStepper(points: model.inPoints(model.measureSize)) { model.adjustMeasureSize(by: $0) }
-                // Marks where this control's expansion ends, since whatever
-                // sits next in the toolbar otherwise butts right up against it.
-                Divider().frame(height: 18)
+                SubToolbar {
+                    SizeStepper(points: model.inPoints(model.measureSize)) { model.adjustMeasureSize(by: $0) }
+                }
             }
         }
     }
@@ -427,14 +574,14 @@ private struct ColorPalette: View {
                 .help("Color")
 
             if isExpanded {
-                Divider().frame(height: 18)
-                ForEach(Array(Self.presets.enumerated()), id: \.offset) { _, color in
-                    swatch(color, selected: color == selection) { choose(color) }
+                SubToolbar(spacing: 4) {
+                    ForEach(Array(Self.presets.enumerated()), id: \.offset) { _, color in
+                        swatch(color, selected: color == selection) { choose(color) }
+                    }
+                    rainbowWell
                 }
-                rainbowWell
             }
         }
-        .padding(.horizontal, isExpanded ? 2 : 0)
     }
 
     private func swatch(_ color: Color, selected: Bool, action: @escaping () -> Void) -> some View {

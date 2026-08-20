@@ -157,8 +157,26 @@ final class EditorModel {
     /// Restored from the last session when the user opts in; always kept
     /// fresh so the preference can be flipped on at any time.
     var tool: EditTool = SettingsStore.shared.rememberLastTool
-        ? SettingsStore.shared.editorTool : .arrow {
+        ? SettingsStore.shared.editorTool : .line {
         didSet { SettingsStore.shared.editorTool = tool }
+    }
+    /// The line tool's end decorations (a plain tail and an arrow head by
+    /// default, so the head lands where the drag releases) — remembered across
+    /// sessions like the color.
+    var lineStartCap: LineCap {
+        didSet { SettingsStore.shared.editorLineStartCap = lineStartCap }
+    }
+    var lineEndCap: LineCap {
+        didSet { SettingsStore.shared.editorLineEndCap = lineEndCap }
+    }
+    /// What the palette's merged shape button re-arms: the last shape used.
+    private(set) var lastShapeTool: EditTool = .rectangle
+
+    /// Selects one of the closed-shape tools (via the shape button's expansion).
+    func selectShape(_ shape: EditTool) {
+        guard shape.isShape else { return }
+        tool = shape
+        lastShapeTool = shape
     }
     /// Drawing color and text font design — remembered across sessions via
     /// `SettingsStore`.
@@ -221,6 +239,8 @@ final class EditorModel {
         self.captureScale = max(captureScale, 1)
         self.color = SettingsStore.shared.editorColor
         self.fontDesign = SettingsStore.shared.editorFontDesign
+        self.lineStartCap = SettingsStore.shared.editorLineStartCap
+        self.lineEndCap = SettingsStore.shared.editorLineEndCap
         let px = Self.pixelSize(of: image)
         self.pixelSize = px
         // Stored in pixel space (annotations render with them); shown in points.
@@ -232,6 +252,7 @@ final class EditorModel {
         self.counterSize = 21 * self.captureScale
         self.measureSize = 18 * self.captureScale
         self.contentInsets = Self.opaqueInsets(of: image, dividedBy: self.captureScale)
+        if tool.isShape { lastShapeTool = tool }
     }
 
     /// Bounding box of the pixels with meaningful alpha, as insets from the
@@ -447,6 +468,18 @@ final class EditorModel {
     func setFontDesign(_ design: FontDesign) {
         fontDesign = design
         applyTextStyleToSelection()
+    }
+
+    /// Sets one of the line tool's end decorations and restyles a selected
+    /// line, so an already-drawn line's ends can be changed after the fact.
+    func setLineStartCap(_ cap: LineCap) {
+        lineStartCap = cap
+        applyStyle(to: .line) { $0.startCap = cap }
+    }
+
+    func setLineEndCap(_ cap: LineCap) {
+        lineEndCap = cap
+        applyStyle(to: .line) { $0.endCap = cap }
     }
 
     private func clampSize(_ size: CGFloat) -> CGFloat {
@@ -792,20 +825,14 @@ final class EditorModel {
             }
 
             switch annotation.kind {
-            case .arrow:
-                let geometry = arrowGeometry(from: annotation.start, to: annotation.end,
-                                             lineWidth: annotation.lineWidth)
-                context.beginPath()
-                context.move(to: flip(geometry.shaftStart))
-                context.addLine(to: flip(geometry.tip))
-                context.strokePath()
-                context.beginPath()
-                context.addLines(between: [geometry.leftBarb, geometry.tip, geometry.rightBarb].map(flip))
-                context.strokePath()
             case .line:
                 context.beginPath()
-                context.move(to: flip(annotation.start))
-                context.addLine(to: flip(annotation.end))
+                for segment in cappedLineSegments(from: annotation.start, to: annotation.end,
+                                                  startCap: annotation.startCap,
+                                                  endCap: annotation.endCap,
+                                                  lineWidth: annotation.lineWidth) {
+                    context.addLines(between: segment.map(flip))
+                }
                 context.strokePath()
             case .measure:
                 let geometry = measureGeometry(from: annotation.start, to: annotation.end,

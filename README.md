@@ -41,10 +41,12 @@ eating your battery — just system frameworks, doing exactly what you asked.
 - 🪄 **Cursor-anchored preview** with Copy / Save / Edit / Copy Text (OCR),
   a hover-to-pause auto-dismiss countdown, and drag-to-export straight from
   the thumbnail.
-- ✏️ **In-app annotation editor** — arrow, line, measure (reports the
-  capture's *true* pixel dimensions, not the on-screen render size),
-  rectangle, rounded rectangle, ellipse, pixelate/redact, step counter,
-  text, a live eyedropper color picker, crop, and full undo/redo.
+- ✏️ **In-app annotation editor** — lines/arrows with a configurable
+  decoration per end (none, arrowhead, or bar — so double-headed arrows
+  and dimension-style lines too), measure (reports the capture's *true*
+  pixel dimensions, not the on-screen render size), rectangle, rounded
+  rectangle, ellipse, pixelate/redact, step counter, text, a live
+  eyedropper color picker, crop, and full undo/redo.
   Double-click any shape to label it: the text sits centered on the
   shape with the stroke cleared away around it. The title bar always
   shows the image's pixel size — while cropping it previews the crop's
