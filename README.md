@@ -61,13 +61,20 @@ eating your battery — just system frameworks, doing exactly what you asked.
 - 🚀 **Launch at login**, a native macOS 26 Liquid Glass interface, and a
   menu bar you'll forget is even running.
 
-## Download
+## Install
 
-Grab the latest signed build from the
+With [Homebrew](https://brew.sh):
+
+```sh
+brew install nx-alejandrolacasa/tap/prtscn
+```
+
+Or grab the latest signed build from the
 **[Releases page](https://github.com/nx-alejandrolacasa/prtscn/releases/latest)**.
 
 > These builds aren't notarized by Apple, so Gatekeeper blocks them on first
-> launch. Either **right-click PrtScn → Open** and confirm the dialog, or run
+> launch (the Homebrew cask handles this for you). Either **right-click
+> PrtScn → Open** and confirm the dialog, or run
 > `xattr -cr /Applications/PrtScn.app` once in Terminal.
 
 ## Building from source
