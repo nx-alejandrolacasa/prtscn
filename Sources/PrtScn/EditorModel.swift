@@ -329,6 +329,7 @@ final class EditorModel {
 
     /// Records the current state for undo. Call once, before a logical change.
     func snapshot() {
+        recoloringID = nil
         undoStack.append(annotations)
         redoStack.removeAll()
         if undoStack.count > 60 { undoStack.removeFirst() }
@@ -337,6 +338,7 @@ final class EditorModel {
     func undo() {
         finishTextEditing()
         guard let previous = undoStack.popLast() else { return }
+        recoloringID = nil
         redoStack.append(annotations)
         annotations = previous
         clearSelectionIfMissing()
@@ -344,6 +346,7 @@ final class EditorModel {
 
     func redo() {
         guard let next = redoStack.popLast() else { return }
+        recoloringID = nil
         undoStack.append(annotations)
         annotations = next
         clearSelectionIfMissing()
@@ -555,6 +558,33 @@ final class EditorModel {
     func setLineEndCap(_ cap: LineCap) {
         lineEndCap = cap
         applyStyle(to: .line) { $0.endCap = cap }
+    }
+
+    /// Sets the drawing color and recolors the selected annotation, so an
+    /// already-drawn annotation's color can be changed after the fact.
+    /// Continuous color-panel drags coalesce into a single undo step
+    /// (`recoloringID` survives until any other change snapshots).
+    func setColor(_ newColor: Color) {
+        color = newColor
+        guard let id = editingTextID ?? selectedID,
+              let index = annotations.firstIndex(where: { $0.id == id }),
+              annotations[index].kind != .pixelate else { return }
+        if recoloringID != id {
+            snapshot()
+            recoloringID = id
+        }
+        annotations[index].color = newColor
+    }
+
+    private var recoloringID: UUID?
+
+    /// The color the palette swatch shows: the selected annotation's own color
+    /// when one is selected, the session default otherwise.
+    var paletteColor: Color {
+        guard let id = editingTextID ?? selectedID,
+              let annotation = annotations.first(where: { $0.id == id }),
+              annotation.kind != .pixelate else { return color }
+        return annotation.color
     }
 
     private func clampSize(_ size: CGFloat) -> CGFloat {

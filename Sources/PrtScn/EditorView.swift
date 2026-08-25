@@ -115,7 +115,8 @@ struct EditorView: View {
 
             // Closing the color expander returns to the active tool's section
             // rather than collapsing to nothing.
-            ColorPalette(selection: $model.color, isExpanded: expanded == .color,
+            ColorPalette(selection: Binding(get: { model.paletteColor }, set: { model.setColor($0) }),
+                         isExpanded: expanded == .color,
                          onToggle: { setExpanded(expanded == .color ? section(for: model.tool) : .color) },
                          collapse: { setExpanded(section(for: model.tool)) })
 
