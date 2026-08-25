@@ -387,10 +387,14 @@ final class EditorModel {
     private func syncBoundLines(to shape: Annotation) {
         for index in annotations.indices {
             if let binding = annotations[index].startBinding, binding.shapeID == shape.id {
-                annotations[index].start = shape.anchorPoint(for: binding.side)
+                annotations[index].start = boundEndpoint(anchor: shape.anchorPoint(for: binding.side),
+                                                         side: binding.side,
+                                                         lineWidth: annotations[index].lineWidth)
             }
             if let binding = annotations[index].endBinding, binding.shapeID == shape.id {
-                annotations[index].end = shape.anchorPoint(for: binding.side)
+                annotations[index].end = boundEndpoint(anchor: shape.anchorPoint(for: binding.side),
+                                                       side: binding.side,
+                                                       lineWidth: annotations[index].lineWidth)
             }
         }
     }

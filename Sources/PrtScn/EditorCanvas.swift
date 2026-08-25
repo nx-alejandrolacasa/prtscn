@@ -519,12 +519,16 @@ struct EditorCanvas: View {
                     if model.tool == .line {
                         if let candidate = bindingCandidate(
                             at: image, in: model.annotations,
-                            excluding: current.startBinding?.shapeID,
+                            excluding: current.startBinding,
                             tolerance: bindSnapRadius / fit.scale) {
-                            end = candidate.anchor
+                            end = boundEndpoint(anchor: candidate.anchor,
+                                                side: candidate.binding.side,
+                                                lineWidth: model.lineWidth * model.creationSizeScale)
                             endBinding = candidate.binding
+                            snapAnchor = candidate.anchor
+                        } else {
+                            snapAnchor = nil
                         }
-                        snapAnchor = endBinding != nil ? end : nil
                     }
                     let labelSize = isMeasure ? model.measureSize : model.fontSize
                     // Measure keeps its defaults — its label shrinks/relocates
@@ -647,12 +651,24 @@ struct EditorCanvas: View {
         // 2. With the line tool armed, a press near a bindable shape's side
         // starts a line bound there — taking precedence over selecting the
         // shape underneath, since the aim is clearly to connect it. Pressing
-        // deeper inside the shape still selects it.
+        // deeper inside the shape still selects it. But a press right on a
+        // dot that already holds a line end grabs that end to re-route it —
+        // a second line from the same anchor is still possible by pressing
+        // elsewhere along the side.
         if model.tool == .line,
            let candidate = bindingCandidate(at: pressImage, in: model.annotations,
                                             tolerance: bindSnapRadius / fit.scale) {
+            if distance(pressView, fit.toView(candidate.anchor)) <= handleHitRadius,
+               let bound = boundLineEnd(at: candidate.binding) {
+                model.selectedID = bound.line.id
+                return DragSession(kind: .resize(bound.line.id, bound.handle),
+                                   pressImage: pressImage,
+                                   originalStart: bound.line.start, originalEnd: bound.line.end)
+            }
             model.selectedID = nil
-            var session = DragSession(kind: .draw, pressImage: candidate.anchor)
+            let start = boundEndpoint(anchor: candidate.anchor, side: candidate.binding.side,
+                                      lineWidth: model.lineWidth * model.creationSizeScale)
+            var session = DragSession(kind: .draw, pressImage: start)
             session.startBinding = candidate.binding
             return session
         }
@@ -682,6 +698,15 @@ struct EditorCanvas: View {
         hypot(a.x - b.x, a.y - b.y)
     }
 
+    /// The topmost line with an end bound to exactly this shape side, if any.
+    private func boundLineEnd(at binding: ShapeBinding) -> (line: Annotation, handle: ResizeHandle)? {
+        for line in model.annotations.reversed() where line.kind == .line {
+            if line.startBinding == binding { return (line, .start) }
+            if line.endBinding == binding { return (line, .end) }
+        }
+        return nil
+    }
+
     /// Trackpad pinch: continuous zoom, live-updating the title-bar percentage.
     private var pinchGesture: some Gesture {
         MagnifyGesture()
@@ -698,14 +723,18 @@ struct EditorCanvas: View {
 
     /// Re-snaps a dragged line endpoint to any shape side in range, updating
     /// its binding (or freeing it when nothing is nearby). The other end's
-    /// shape is excluded so both ends can't land on the same shape.
+    /// exact spot is excluded so both ends can't land on the same point.
     private func resizeLineEndpoint(id: UUID, handle: ResizeHandle, to point: CGPoint, fit: CanvasFit) {
         let line = model.annotations.first { $0.id == id }
-        let otherShape = handle == .start ? line?.endBinding?.shapeID : line?.startBinding?.shapeID
-        let candidate = bindingCandidate(at: point, in: model.annotations, excluding: otherShape,
+        let otherEnd = handle == .start ? line?.endBinding : line?.startBinding
+        let candidate = bindingCandidate(at: point, in: model.annotations, excluding: otherEnd,
                                          tolerance: bindSnapRadius / fit.scale)
         snapAnchor = candidate?.anchor
-        model.setLineEndpoint(id: id, handle: handle, point: candidate?.anchor ?? point,
+        let snapped = candidate.map {
+            boundEndpoint(anchor: $0.anchor, side: $0.binding.side,
+                          lineWidth: line?.lineWidth ?? model.lineWidth)
+        }
+        model.setLineEndpoint(id: id, handle: handle, point: snapped ?? point,
                               binding: candidate?.binding)
     }
 

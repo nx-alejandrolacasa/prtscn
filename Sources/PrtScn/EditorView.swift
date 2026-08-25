@@ -311,6 +311,7 @@ private struct PaletteButton<Icon: View>: View {
     let icon: Icon
 
     @State private var hovering = false
+    @State private var showTip = false
 
     init(help: String, isOn: Bool = false, disabled: Bool = false, segmented: Bool = false,
          action: @escaping () -> Void, @ViewBuilder icon: () -> Icon) {
@@ -334,7 +335,21 @@ private struct PaletteButton<Icon: View>: View {
         .disabled(disabled)
         .opacity(disabled ? 0.35 : 1)
         .onHover { hovering = $0 }
-        .help(help)
+        .accessibilityLabel(help)
+        .overlay(alignment: .top) {
+            if showTip {
+                TooltipBubble(text: help)
+                    .offset(y: -34)
+                    .transition(.opacity)
+            }
+        }
+        // Our own tooltip: the system one (`.help`) takes seconds to appear
+        // and doesn't reliably show on plain buttons inside the glass palette.
+        .task(id: hovering) {
+            if !hovering { showTip = false; return }
+            try? await Task.sleep(for: .milliseconds(300))
+            if hovering { withAnimation(.easeOut(duration: 0.12)) { showTip = true } }
+        }
     }
 
     private var shape: AnyShape {
@@ -352,6 +367,24 @@ private struct PaletteButton<Icon: View>: View {
         } else if hovering {
             shape.fill(Color.primary.opacity(0.12))
         }
+    }
+}
+
+/// The palette's own quick tooltip bubble, shown a beat after hover — small,
+/// with the tool's shortcut key in the text ("Move (H)").
+private struct TooltipBubble: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 11, weight: .medium))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(.primary.opacity(0.12), lineWidth: 0.5))
+            .fixedSize()
+            .allowsHitTesting(false)
     }
 }
 

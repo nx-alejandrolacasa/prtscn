@@ -268,11 +268,30 @@ func annotationNSFont(size: CGFloat, design: FontDesign) -> NSFont {
 /// A side of a bindable shape an arrow endpoint can attach to.
 enum BindingSide: String, CaseIterable {
     case top, bottom, left, right
+
+    /// Outward unit direction of the side — where a bound line end backs off.
+    var outwardNormal: CGPoint {
+        switch self {
+        case .top: CGPoint(x: 0, y: -1)
+        case .bottom: CGPoint(x: 0, y: 1)
+        case .left: CGPoint(x: -1, y: 0)
+        case .right: CGPoint(x: 1, y: 0)
+        }
+    }
+}
+
+/// Where a bound line end actually sits: the anchor backed off outward by a
+/// small line-width-proportional gap, so the arrow never touches the shape's
+/// stroke. The snap dot still draws on the anchor itself.
+func boundEndpoint(anchor: CGPoint, side: BindingSide, lineWidth: CGFloat) -> CGPoint {
+    let gap = max(lineWidth * 1.5, 4)
+    return CGPoint(x: anchor.x + side.outwardNormal.x * gap,
+                   y: anchor.y + side.outwardNormal.y * gap)
 }
 
 /// Ties one end of a line to the middle of a shape's side, so moving or
 /// resizing the shape carries the line end with it.
-struct ShapeBinding {
+struct ShapeBinding: Equatable {
     var shapeID: UUID
     var side: BindingSide
 }
@@ -349,7 +368,7 @@ struct Annotation: Identifiable {
     /// so growing a shape keeps its corners constant; capped only so a tiny
     /// shape can't out-round its own sides.
     var cornerRadius: CGFloat {
-        min(lineWidth * 4, min(boundingRect.width, boundingRect.height) / 2)
+        min(lineWidth * 5.5, min(boundingRect.width, boundingRect.height) / 2)
     }
 
     /// Corner radius for the diamond tool — deliberately subtler than the
@@ -484,14 +503,16 @@ extension Annotation {
 
 /// The bindable shape spot within `tolerance` of `point` (image coords), if
 /// any: approaching a side (or, on a diamond, a corner) offers its anchor as
-/// the snap point. The topmost such shape wins; `excluding` skips the shape
-/// the line's other end is bound to, so one line can't collapse onto a
-/// single shape.
+/// the snap point. The topmost such shape wins; `excluding` skips the exact
+/// spot the line's other end is bound to — both ends may share a shape, just
+/// not the same point.
 func bindingCandidate(at point: CGPoint, in annotations: [Annotation],
-                      excluding excluded: UUID? = nil, tolerance: CGFloat)
+                      excluding excluded: ShapeBinding? = nil, tolerance: CGFloat)
     -> (binding: ShapeBinding, anchor: CGPoint)? {
-    for shape in annotations.reversed() where shape.isBindable && shape.id != excluded {
-        let nearest = shape.bindingDistances(from: point).min { $0.distance < $1.distance }
+    for shape in annotations.reversed() where shape.isBindable {
+        let nearest = shape.bindingDistances(from: point)
+            .filter { excluded != ShapeBinding(shapeID: shape.id, side: $0.side) }
+            .min { $0.distance < $1.distance }
         if let nearest, nearest.distance <= tolerance {
             return (ShapeBinding(shapeID: shape.id, side: nearest.side),
                     shape.anchorPoint(for: nearest.side))
