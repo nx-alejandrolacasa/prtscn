@@ -632,15 +632,19 @@ struct EditorCanvas: View {
                         updateDraggedBendDots(id: id)
                     case .cornerH:
                         // The horizontal run follows the cursor's y, snapping
-                        // back onto its endpoint when close.
-                        let offset = image.y - current.originalStart.y
-                        model.setElbowH(id: id, abs(offset) * fit.scale < 5 ? 0 : offset)
-                        updateDraggedBendDots(id: id)
+                        // back onto its baseline when close.
+                        if let line = model.annotations.first(where: { $0.id == id }) {
+                            let offset = image.y - line.elbowHBase
+                            model.setElbowH(id: id, abs(offset) * fit.scale < 5 ? 0 : offset)
+                            updateDraggedBendDots(id: id)
+                        }
                     case .cornerV:
                         // The vertical trunk follows the cursor's x — likewise.
-                        let offset = image.x - current.originalEnd.x
-                        model.setElbowV(id: id, abs(offset) * fit.scale < 5 ? 0 : offset)
-                        updateDraggedBendDots(id: id)
+                        if let line = model.annotations.first(where: { $0.id == id }) {
+                            let offset = image.x - line.elbowVBase
+                            model.setElbowV(id: id, abs(offset) * fit.scale < 5 ? 0 : offset)
+                            updateDraggedBendDots(id: id)
+                        }
                     default:
                         model.setPoints(id: id, start: current.anchor ?? current.originalStart, end: image)
                     }

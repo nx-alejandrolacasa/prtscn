@@ -286,6 +286,22 @@ enum BindingSide: String, CaseIterable {
         case .right: CGPoint(x: 1, y: 0)
         }
     }
+
+    /// The axis a corner route travels when leaving/entering this side —
+    /// perpendicular to the side itself.
+    var routeAxis: RouteAxis {
+        switch self {
+        case .left, .right: .horizontal
+        case .top, .bottom: .vertical
+        }
+    }
+}
+
+/// Direction of one leg of a corner line's orthogonal route.
+enum RouteAxis {
+    case horizontal, vertical
+
+    var flipped: RouteAxis { self == .horizontal ? .vertical : .horizontal }
 }
 
 /// Where a bound line end actually sits: the anchor backed off outward by a
@@ -339,8 +355,8 @@ struct Annotation: Identifiable {
     /// How the shaft bends — line tool only.
     var bend: LineBend = .curve
     /// Corner mode's editable segments, as offsets so moves/crops carry them:
-    /// the horizontal run sits at `start.y + elbowH`, the vertical trunk at
-    /// `end.x + elbowV`. Both 0 = the clean two-segment elbow.
+    /// the horizontal run sits at `elbowHBase + elbowH`, the vertical trunk
+    /// at `elbowVBase + elbowV`. Both 0 = the clean minimal route.
     var elbowH: CGFloat = 0
     var elbowV: CGFloat = 0
 
@@ -473,42 +489,137 @@ extension Annotation {
     /// a head on the stub still shows some straight shaft behind it.
     private var elbowStub: CGFloat { max(lineWidth * 8, 28) }
 
-    /// Corner mode's orthogonal route (image coords), start → end: it leaves
-    /// `start` horizontally along the run at `start.y + elbowH` and enters
-    /// `end` vertically along the trunk at `end.x + elbowV`. Dragging a run
-    /// off its endpoint inserts a short stub there, so the connection stays
-    /// in place. Every segment is horizontal or vertical.
+    /// The axis the route leaves `start` along: perpendicular to a bound
+    /// side; a free end takes the complement of the other end's bound side
+    /// (one clean elbow), or the dominant travel direction when both are free.
+    var cornerStartAxis: RouteAxis {
+        if let side = startBinding?.side { return side.routeAxis }
+        if let side = endBinding?.side { return side.routeAxis.flipped }
+        return abs(end.x - start.x) >= abs(end.y - start.y) ? .horizontal : .vertical
+    }
+
+    /// The axis the route enters `end` along — same rules, from the other end.
+    var cornerEndAxis: RouteAxis {
+        if let side = endBinding?.side { return side.routeAxis }
+        if let side = startBinding?.side { return side.routeAxis.flipped }
+        return abs(end.x - start.x) >= abs(end.y - start.y) ? .vertical : .horizontal
+    }
+
+    /// Baseline (image coords) the `elbowH` offset shifts the editable
+    /// horizontal run away from; which endpoint (or the midline) anchors it
+    /// depends on the route's orientation.
+    var elbowHBase: CGFloat {
+        switch (cornerStartAxis, cornerEndAxis) {
+        case (.horizontal, .vertical): start.y
+        case (.vertical, .horizontal): end.y
+        case (.vertical, .vertical): (start.y + end.y) / 2
+        case (.horizontal, .horizontal): 0   // no editable horizontal run
+        }
+    }
+
+    /// Baseline the `elbowV` offset shifts the vertical trunk away from.
+    var elbowVBase: CGFloat {
+        switch (cornerStartAxis, cornerEndAxis) {
+        case (.horizontal, .vertical): end.x
+        case (.vertical, .horizontal): start.x
+        case (.horizontal, .horizontal): (start.x + end.x) / 2
+        case (.vertical, .vertical): 0   // no editable vertical trunk
+        }
+    }
+
+    /// Keeps a free middle segment on the outward side of a bound endpoint,
+    /// at least a stub away, so the route never doubles back through the shape.
+    private func outwardClamp(_ value: CGFloat, past coordinate: CGFloat,
+                              side: BindingSide) -> CGFloat {
+        switch side {
+        case .right, .bottom: max(value, coordinate + elbowStub)
+        case .left, .top: min(value, coordinate - elbowStub)
+        }
+    }
+
+    /// Corner mode's orthogonal route (image coords), start → end. Its
+    /// orientation follows `cornerStartAxis`/`cornerEndAxis`, so a bound end
+    /// always leaves its shape perpendicular to the bound side: perpendicular
+    /// axes give the classic two-segment elbow, matching axes a three-segment
+    /// Z through the midline. Dragging a run off its endpoint inserts a short
+    /// stub there, so the connection stays in place. Every segment is
+    /// horizontal or vertical.
     var cornerRoute: [CGPoint] {
-        let hy = start.y + elbowH
-        let vx = end.x + elbowV
-        var points = [start]
-        if abs(elbowH) > 0.5 {
-            let jx = start.x + (vx >= start.x ? elbowStub : -elbowStub)
-            points.append(CGPoint(x: jx, y: start.y))
-            points.append(CGPoint(x: jx, y: hy))
+        switch (cornerStartAxis, cornerEndAxis) {
+        case (.horizontal, .vertical):
+            let hy = start.y + elbowH
+            let vx = end.x + elbowV
+            var points = [start]
+            if abs(elbowH) > 0.5 {
+                let jx = start.x + (vx >= start.x ? elbowStub : -elbowStub)
+                points.append(CGPoint(x: jx, y: start.y))
+                points.append(CGPoint(x: jx, y: hy))
+            }
+            points.append(CGPoint(x: vx, y: hy))
+            if abs(elbowV) > 0.5 {
+                let ky = end.y + (hy <= end.y ? -elbowStub : elbowStub)
+                points.append(CGPoint(x: vx, y: ky))
+                points.append(CGPoint(x: end.x, y: ky))
+            }
+            points.append(end)
+            return points
+        case (.vertical, .horizontal):
+            let vx = start.x + elbowV
+            let hy = end.y + elbowH
+            var points = [start]
+            if abs(elbowV) > 0.5 {
+                let jy = start.y + (hy >= start.y ? elbowStub : -elbowStub)
+                points.append(CGPoint(x: start.x, y: jy))
+                points.append(CGPoint(x: vx, y: jy))
+            }
+            points.append(CGPoint(x: vx, y: hy))
+            if abs(elbowH) > 0.5 {
+                let kx = end.x + (vx <= end.x ? -elbowStub : elbowStub)
+                points.append(CGPoint(x: kx, y: hy))
+                points.append(CGPoint(x: kx, y: end.y))
+            }
+            points.append(end)
+            return points
+        case (.horizontal, .horizontal):
+            var vx = elbowVBase + elbowV
+            if let side = startBinding?.side { vx = outwardClamp(vx, past: start.x, side: side) }
+            if let side = endBinding?.side { vx = outwardClamp(vx, past: end.x, side: side) }
+            return [start, CGPoint(x: vx, y: start.y), CGPoint(x: vx, y: end.y), end]
+        case (.vertical, .vertical):
+            var hy = elbowHBase + elbowH
+            if let side = startBinding?.side { hy = outwardClamp(hy, past: start.y, side: side) }
+            if let side = endBinding?.side { hy = outwardClamp(hy, past: end.y, side: side) }
+            return [start, CGPoint(x: start.x, y: hy), CGPoint(x: end.x, y: hy), end]
         }
-        points.append(CGPoint(x: vx, y: hy))
-        if abs(elbowV) > 0.5 {
-            let ky = end.y + (hy <= end.y ? -elbowStub : elbowStub)
-            points.append(CGPoint(x: vx, y: ky))
-            points.append(CGPoint(x: end.x, y: ky))
-        }
-        points.append(end)
-        return points
     }
 
     /// The grabbable bend dots, all sitting on the stroke itself: the single
     /// dot riding the curve, or — in corner mode — one on each editable run
     /// at its midpoint (`.cornerH` drags vertically, `.cornerV` horizontally).
+    /// A Z route has a single editable middle segment, so a single dot.
     var bendDots: [(handle: ResizeHandle, point: CGPoint)] {
         guard isCorner else { return [(.curve, curveMidpoint)] }
         let route = cornerRoute
-        let hy = start.y + elbowH
-        let vx = end.x + elbowV
-        let runStartX = abs(elbowH) > 0.5 ? route[2].x : start.x
-        let trunkEndY = abs(elbowV) > 0.5 ? route[route.count - 3].y : end.y
-        return [(.cornerH, CGPoint(x: (runStartX + vx) / 2, y: hy)),
-                (.cornerV, CGPoint(x: vx, y: (hy + trunkEndY) / 2))]
+        switch (cornerStartAxis, cornerEndAxis) {
+        case (.horizontal, .vertical):
+            let hy = start.y + elbowH
+            let vx = end.x + elbowV
+            let runStartX = abs(elbowH) > 0.5 ? route[2].x : start.x
+            let trunkEndY = abs(elbowV) > 0.5 ? route[route.count - 3].y : end.y
+            return [(.cornerH, CGPoint(x: (runStartX + vx) / 2, y: hy)),
+                    (.cornerV, CGPoint(x: vx, y: (hy + trunkEndY) / 2))]
+        case (.vertical, .horizontal):
+            let vx = start.x + elbowV
+            let hy = end.y + elbowH
+            let trunkStartY = abs(elbowV) > 0.5 ? route[2].y : start.y
+            let runEndX = abs(elbowH) > 0.5 ? route[route.count - 3].x : end.x
+            return [(.cornerH, CGPoint(x: (vx + runEndX) / 2, y: hy)),
+                    (.cornerV, CGPoint(x: vx, y: (trunkStartY + hy) / 2))]
+        case (.horizontal, .horizontal):
+            return [(.cornerV, CGPoint(x: route[1].x, y: (start.y + end.y) / 2))]
+        case (.vertical, .vertical):
+            return [(.cornerH, CGPoint(x: (start.x + end.x) / 2, y: route[1].y))]
+        }
     }
 
     /// Where the label anchors: the horizontal run's dot in corner mode, the
@@ -640,6 +751,18 @@ extension Annotation {
         case .left: return CGPoint(x: r.minX, y: r.midY)
         case .right: return CGPoint(x: r.maxX, y: r.midY)
         }
+    }
+
+    /// The side a corner route attaches to best for a line coming from
+    /// `point`: the one facing it, judged from the shape's center and
+    /// normalized by its extents so a wide shape doesn't over-prefer its
+    /// long sides.
+    func bestBindingSide(toward point: CGPoint) -> BindingSide {
+        let r = boundingRect
+        let dx = (point.x - r.midX) / max(r.width, 1)
+        let dy = (point.y - r.midY) / max(r.height, 1)
+        if abs(dx) >= abs(dy) { return dx >= 0 ? .right : .left }
+        return dy >= 0 ? .bottom : .top
     }
 
     private var sideSegments: [(side: BindingSide, a: CGPoint, b: CGPoint)] {

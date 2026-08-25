@@ -342,18 +342,48 @@ final class EditorModel {
     }
 
     /// Re-anchors every line end bound to `shape` after it moved or resized.
+    /// Corner lines also re-pick their bound sides, so the elbow keeps the
+    /// most natural angle as the shapes move around each other.
     private func syncBoundLines(to shape: Annotation) {
         for index in annotations.indices {
+            var touched = false
             if let binding = annotations[index].startBinding, binding.shapeID == shape.id {
                 annotations[index].start = boundEndpoint(anchor: shape.anchorPoint(for: binding.side),
                                                          side: binding.side,
                                                          lineWidth: annotations[index].lineWidth)
+                touched = true
             }
             if let binding = annotations[index].endBinding, binding.shapeID == shape.id {
                 annotations[index].end = boundEndpoint(anchor: shape.anchorPoint(for: binding.side),
                                                        side: binding.side,
                                                        lineWidth: annotations[index].lineWidth)
+                touched = true
             }
+            if touched {
+                rebindCornerSide(at: index, end: .start)
+                rebindCornerSide(at: index, end: .end)
+            }
+        }
+    }
+
+    /// Hops one bound end of a corner line to the side of its shape facing
+    /// the line's other endpoint, when that's no longer the bound one.
+    private func rebindCornerSide(at index: Int, end handle: ResizeHandle) {
+        guard annotations[index].isCorner else { return }
+        let isStart = handle == .start
+        guard let binding = isStart ? annotations[index].startBinding : annotations[index].endBinding,
+              let shape = annotations.first(where: { $0.id == binding.shapeID }) else { return }
+        let toward = isStart ? annotations[index].end : annotations[index].start
+        let side = shape.bestBindingSide(toward: toward)
+        guard side != binding.side else { return }
+        let point = boundEndpoint(anchor: shape.anchorPoint(for: side), side: side,
+                                  lineWidth: annotations[index].lineWidth)
+        if isStart {
+            annotations[index].startBinding?.side = side
+            annotations[index].start = point
+        } else {
+            annotations[index].endBinding?.side = side
+            annotations[index].end = point
         }
     }
 
@@ -368,6 +398,9 @@ final class EditorModel {
             annotations[index].end = point
             annotations[index].endBinding = binding
         }
+        // The dragged end sits where the user aimed; the opposite bound end
+        // of a corner line re-picks its side to face the new position.
+        rebindCornerSide(at: index, end: handle == .start ? .end : .start)
     }
 
     /// Bends or straightens a line's shaft (live drag of its curve dot). The
@@ -399,6 +432,10 @@ final class EditorModel {
               annotations[index].kind == .line else { return }
         snapshot()
         annotations[index].bend = annotations[index].bend == .corner ? .curve : .corner
+        // Entering corner mode: bound ends hop to the sides that give the
+        // most natural elbow for where the shapes sit.
+        rebindCornerSide(at: index, end: .start)
+        rebindCornerSide(at: index, end: .end)
         selectedID = id
     }
 
