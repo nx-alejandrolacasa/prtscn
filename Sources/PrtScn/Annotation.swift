@@ -246,7 +246,7 @@ func annotationNSFont(size: CGFloat, design: FontDesign) -> NSFont {
 }
 
 /// A side of a bindable shape an arrow endpoint can attach to.
-enum BindingSide: String {
+enum BindingSide: String, CaseIterable {
     case top, bottom, left, right
 }
 
@@ -439,26 +439,39 @@ extension Annotation {
         }
     }
 
-    fileprivate var sideSegments: [(side: BindingSide, a: CGPoint, b: CGPoint)] {
+    private var sideSegments: [(side: BindingSide, a: CGPoint, b: CGPoint)] {
         let r = boundingRect
         return [(.top, CGPoint(x: r.minX, y: r.minY), CGPoint(x: r.maxX, y: r.minY)),
                 (.bottom, CGPoint(x: r.minX, y: r.maxY), CGPoint(x: r.maxX, y: r.maxY)),
                 (.left, CGPoint(x: r.minX, y: r.minY), CGPoint(x: r.minX, y: r.maxY)),
                 (.right, CGPoint(x: r.maxX, y: r.minY), CGPoint(x: r.maxX, y: r.maxY))]
     }
+
+    /// How close `point` comes to each attachable spot: the bounding rect's
+    /// sides for rectangles and ellipses, but the vertices themselves for the
+    /// diamond — its corners are the snap targets, so the dot engages when
+    /// approaching a corner, not somewhere along the rect's phantom sides.
+    fileprivate func bindingDistances(from point: CGPoint) -> [(side: BindingSide, distance: CGFloat)] {
+        if kind == .diamond {
+            return BindingSide.allCases.map { side in
+                let anchor = anchorPoint(for: side)
+                return (side, hypot(point.x - anchor.x, point.y - anchor.y))
+            }
+        }
+        return sideSegments.map { (side: $0.side, distance: distanceFromPoint(point, toSegment: $0.a, $0.b)) }
+    }
 }
 
-/// The bindable shape side within `tolerance` of `point` (image coords), if
-/// any: approaching a side offers its midpoint as the snap anchor. The topmost
-/// such shape wins; `excluding` skips the shape the line's other end is bound
-/// to, so one line can't collapse onto a single shape.
+/// The bindable shape spot within `tolerance` of `point` (image coords), if
+/// any: approaching a side (or, on a diamond, a corner) offers its anchor as
+/// the snap point. The topmost such shape wins; `excluding` skips the shape
+/// the line's other end is bound to, so one line can't collapse onto a
+/// single shape.
 func bindingCandidate(at point: CGPoint, in annotations: [Annotation],
                       excluding excluded: UUID? = nil, tolerance: CGFloat)
     -> (binding: ShapeBinding, anchor: CGPoint)? {
     for shape in annotations.reversed() where shape.isBindable && shape.id != excluded {
-        let nearest = shape.sideSegments
-            .map { (side: $0.side, distance: distanceFromPoint(point, toSegment: $0.a, $0.b)) }
-            .min { $0.distance < $1.distance }
+        let nearest = shape.bindingDistances(from: point).min { $0.distance < $1.distance }
         if let nearest, nearest.distance <= tolerance {
             return (ShapeBinding(shapeID: shape.id, side: nearest.side),
                     shape.anchorPoint(for: nearest.side))
