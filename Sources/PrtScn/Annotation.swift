@@ -55,7 +55,7 @@ enum EditTool: String, CaseIterable, Identifiable {
         case .move: "H"
         case .line: "L"
         case .measure: "M"
-        case .roundedRect: "S"
+        case .roundedRect: "R"
         case .ellipse: "C"
         case .diamond: "D"
         case .pixelate: "P"
@@ -84,6 +84,14 @@ enum EditTool: String, CaseIterable, Identifiable {
             Image(systemName: systemImage).font(.system(size: 15, weight: .medium))
         }
     }
+}
+
+/// How a line's shaft bends between its endpoints: a free quadratic bow, or
+/// an orthogonal route of horizontal/vertical segments with rounded corners
+/// (the flowchart connector look). Double-clicking a bend dot toggles
+/// between the two.
+enum LineBend: String {
+    case curve, corner
 }
 
 /// What the line tool draws at one endpoint.
@@ -323,6 +331,18 @@ struct Annotation: Identifiable {
     /// only. Cleared when the line is dragged bodily off its shapes.
     var startBinding: ShapeBinding?
     var endBinding: ShapeBinding?
+    /// Signed bow of the shaft (pixels): the perpendicular offset of the
+    /// curve's midpoint from the straight chord's midpoint — line tool only,
+    /// 0 = straight. Relative to the chord, so moving, resizing and cropping
+    /// carry the bow along.
+    var curvature: CGFloat = 0
+    /// How the shaft bends — line tool only.
+    var bend: LineBend = .curve
+    /// Corner mode's editable segments, as offsets so moves/crops carry them:
+    /// the horizontal run sits at `start.y + elbowH`, the vertical trunk at
+    /// `end.x + elbowV`. Both 0 = the clean two-segment elbow.
+    var elbowH: CGFloat = 0
+    var elbowV: CGFloat = 0
 
     /// Bounding rect of `start`/`end`, normalized so width/height are positive.
     var boundingRect: CGRect {
@@ -360,6 +380,10 @@ struct Annotation: Identifiable {
         copy.number = number
         copy.startCap = startCap
         copy.endCap = endCap
+        copy.curvature = curvature
+        copy.bend = bend
+        copy.elbowH = elbowH
+        copy.elbowV = elbowV
         return copy
     }
 
@@ -402,6 +426,146 @@ func diamondPath(in rect: CGRect, cornerRadius: CGFloat) -> CGPath {
     return path
 }
 
+// MARK: - Curved lines
+
+extension Annotation {
+    /// Whether the shaft bows. Sub-pixel values count as straight so a
+    /// degenerate control point can't sneak in.
+    var isCurved: Bool { kind == .line && abs(curvature) > 0.5 }
+
+    /// Unit perpendicular of the start→end chord (zero-length-safe).
+    private var chordPerpendicular: CGPoint {
+        let dx = end.x - start.x, dy = end.y - start.y
+        let length = max(hypot(dx, dy), 0.0001)
+        return CGPoint(x: -dy / length, y: dx / length)
+    }
+
+    /// The point the shaft passes through at its middle — the curve dot the
+    /// user grabs and drags to bow the line. The chord midpoint while straight.
+    var curveMidpoint: CGPoint {
+        let mid = CGPoint(x: (start.x + end.x) / 2, y: (start.y + end.y) / 2)
+        guard isCurved else { return mid }
+        let perp = chordPerpendicular
+        return CGPoint(x: mid.x + perp.x * curvature, y: mid.y + perp.y * curvature)
+    }
+
+    /// The quadratic Bézier control that puts the curve through
+    /// `curveMidpoint` at t = 0.5; `nil` while straight.
+    var curveControl: CGPoint? {
+        guard isCurved else { return nil }
+        let mid = CGPoint(x: (start.x + end.x) / 2, y: (start.y + end.y) / 2)
+        let perp = chordPerpendicular
+        return CGPoint(x: mid.x + perp.x * curvature * 2, y: mid.y + perp.y * curvature * 2)
+    }
+}
+
+// MARK: - Corner lines
+
+extension Annotation {
+    var isCorner: Bool { kind == .line && bend == .corner }
+
+    /// How far each 90° corner is rounded. Stroke-proportional, like the
+    /// rounded rectangle's corners; the path builder caps it per corner.
+    var cornerBendRadius: CGFloat { lineWidth * 4 }
+
+    /// Length of the connection stub kept at an endpoint when its run is
+    /// dragged away from it. Longer than an arrow head (5.6× the stroke), so
+    /// a head on the stub still shows some straight shaft behind it.
+    private var elbowStub: CGFloat { max(lineWidth * 8, 28) }
+
+    /// Corner mode's orthogonal route (image coords), start → end: it leaves
+    /// `start` horizontally along the run at `start.y + elbowH` and enters
+    /// `end` vertically along the trunk at `end.x + elbowV`. Dragging a run
+    /// off its endpoint inserts a short stub there, so the connection stays
+    /// in place. Every segment is horizontal or vertical.
+    var cornerRoute: [CGPoint] {
+        let hy = start.y + elbowH
+        let vx = end.x + elbowV
+        var points = [start]
+        if abs(elbowH) > 0.5 {
+            let jx = start.x + (vx >= start.x ? elbowStub : -elbowStub)
+            points.append(CGPoint(x: jx, y: start.y))
+            points.append(CGPoint(x: jx, y: hy))
+        }
+        points.append(CGPoint(x: vx, y: hy))
+        if abs(elbowV) > 0.5 {
+            let ky = end.y + (hy <= end.y ? -elbowStub : elbowStub)
+            points.append(CGPoint(x: vx, y: ky))
+            points.append(CGPoint(x: end.x, y: ky))
+        }
+        points.append(end)
+        return points
+    }
+
+    /// The grabbable bend dots, all sitting on the stroke itself: the single
+    /// dot riding the curve, or — in corner mode — one on each editable run
+    /// at its midpoint (`.cornerH` drags vertically, `.cornerV` horizontally).
+    var bendDots: [(handle: ResizeHandle, point: CGPoint)] {
+        guard isCorner else { return [(.curve, curveMidpoint)] }
+        let route = cornerRoute
+        let hy = start.y + elbowH
+        let vx = end.x + elbowV
+        let runStartX = abs(elbowH) > 0.5 ? route[2].x : start.x
+        let trunkEndY = abs(elbowV) > 0.5 ? route[route.count - 3].y : end.y
+        return [(.cornerH, CGPoint(x: (runStartX + vx) / 2, y: hy)),
+                (.cornerV, CGPoint(x: vx, y: (hy + trunkEndY) / 2))]
+    }
+
+    /// Where the label anchors: the horizontal run's dot in corner mode, the
+    /// curve's midpoint otherwise.
+    var bendPoint: CGPoint { isCorner ? bendDots[0].point : curveMidpoint }
+}
+
+/// A polyline with every interior corner rounded by a tangent arc — the
+/// corner-mode shaft, shared by the on-screen canvas and the export so they
+/// can never disagree. The radius is capped per corner so short legs can't
+/// be overrun by their arcs.
+func roundedPolylinePath(_ points: [CGPoint], radius: CGFloat) -> CGPath {
+    let path = CGMutablePath()
+    guard let first = points.first, let last = points.last, points.count >= 2 else { return path }
+    path.move(to: first)
+    for index in 1..<(points.count - 1) {
+        let previous = points[index - 1], corner = points[index], next = points[index + 1]
+        let capped = min(radius,
+                         hypot(corner.x - previous.x, corner.y - previous.y) / 2,
+                         hypot(next.x - corner.x, next.y - corner.y) / 2)
+        if capped > 0.01 {
+            path.addArc(tangent1End: corner, tangent2End: next, radius: capped)
+        } else {
+            path.addLine(to: corner)
+        }
+    }
+    path.addLine(to: last)
+    return path
+}
+
+/// The curvature a drag of the curve dot to `p` asks for: the signed
+/// perpendicular offset of `p` from the chord a–b, matching
+/// `Annotation.curveMidpoint`'s sign convention so the dot lands under the
+/// cursor (its along-chord component is ignored — the bow stays centered).
+func curvatureValue(of p: CGPoint, chordStart a: CGPoint, chordEnd b: CGPoint) -> CGFloat {
+    let dx = b.x - a.x, dy = b.y - a.y
+    let length = max(hypot(dx, dy), 0.0001)
+    let mid = CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
+    return ((p.x - mid.x) * -dy + (p.y - mid.y) * dx) / length
+}
+
+/// Shortest distance from `p` to the quadratic Bézier a–control–b, measured
+/// against a fine polyline flattening — plenty for hit-testing a stroked shaft.
+func distanceFromPoint(_ p: CGPoint, toQuadCurve a: CGPoint, control: CGPoint, _ b: CGPoint) -> CGFloat {
+    var best = CGFloat.greatestFiniteMagnitude
+    var previous = a
+    for step in 1...24 {
+        let t = CGFloat(step) / 24
+        let s = 1 - t
+        let point = CGPoint(x: s * s * a.x + 2 * s * t * control.x + t * t * b.x,
+                            y: s * s * a.y + 2 * s * t * control.y + t * t * b.y)
+        best = min(best, distanceFromPoint(p, toSegment: previous, point))
+        previous = point
+    }
+    return best
+}
+
 /// Geometry for a bold, modern arrow drawn as a single-weight stroke (round
 /// caps/joins): a shaft to the tip plus an open chevron head — the look of the
 /// `arrow.up.right` SF Symbol. All points share the inputs' coordinate space.
@@ -431,12 +595,12 @@ extension Annotation {
         supportsLabel && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// Where the label sits (image coords): the midpoint of a line/arrow, the
-    /// center of a closed shape.
+    /// Where the label sits (image coords): the bend point of a line/arrow
+    /// (riding the bow or elbow when it bends), the center of a closed shape.
     var labelCenter: CGPoint {
         switch kind {
         case .line:
-            return CGPoint(x: (start.x + end.x) / 2, y: (start.y + end.y) / 2)
+            return bendPoint
         default:
             return CGPoint(x: boundingRect.midX, y: boundingRect.midY)
         }
@@ -526,6 +690,8 @@ func bindingCandidate(at point: CGPoint, in annotations: [Annotation],
 /// A draggable handle on a selected annotation.
 enum ResizeHandle {
     case start, end                                       // arrow endpoints
+    case curve                                            // the line's bow dot
+    case cornerH, cornerV                                 // elbow run dots
     case topLeft, topRight, bottomLeft, bottomRight       // shape corners
 }
 
@@ -540,7 +706,9 @@ extension Annotation {
     /// Text has none — it's move-only.
     var handles: [(handle: ResizeHandle, point: CGPoint)] {
         switch kind {
-        case .line, .measure:
+        case .line:
+            return [(.start, start), (.end, end)] + bendDots
+        case .measure:
             return [(.start, start), (.end, end)]
         case .roundedRect, .ellipse, .diamond, .pixelate:
             let r = boundingRect
@@ -561,7 +729,7 @@ extension Annotation {
         case .topRight: return CGPoint(x: r.minX, y: r.maxY)
         case .bottomLeft: return CGPoint(x: r.maxX, y: r.minY)
         case .bottomRight: return CGPoint(x: r.minX, y: r.minY)
-        case .start, .end: return nil
+        case .start, .end, .curve, .cornerH, .cornerV: return nil
         }
     }
 
@@ -573,7 +741,17 @@ extension Annotation {
         if hasLabel, labelHoleRect().contains(point) { return true }
         switch kind {
         case .line, .measure:
-            return distanceFromPoint(point, toSegment: start, end) <= tolerance + lineWidth / 2
+            let slop = tolerance + lineWidth / 2
+            if isCorner {
+                let route = cornerRoute
+                return (0..<(route.count - 1)).contains {
+                    distanceFromPoint(point, toSegment: route[$0], route[$0 + 1]) <= slop
+                }
+            }
+            if let control = curveControl {
+                return distanceFromPoint(point, toQuadCurve: start, control: control, end) <= slop
+            }
+            return distanceFromPoint(point, toSegment: start, end) <= slop
         case .roundedRect, .ellipse, .diamond, .pixelate:
             return boundingRect.insetBy(dx: -tolerance, dy: -tolerance).contains(point)
         case .text:
@@ -616,7 +794,7 @@ func arrowGeometry(from: CGPoint, to tip: CGPoint, lineWidth: CGFloat,
     let ux = dx / length, uy = dy / length          // unit direction
     let back = (x: -ux, y: -uy)                      // tip → tail direction
 
-    let headLength = min(max(lineWidth * 5.6, 24), length * maxHeadFraction)
+    let headLength = min(max(lineWidth * 3.4, 14), length * maxHeadFraction)
     let spread = CGFloat.pi / 4                       // 45° open head
 
     func barb(_ angle: CGFloat) -> CGPoint {
@@ -629,19 +807,20 @@ func arrowGeometry(from: CGPoint, to tip: CGPoint, lineWidth: CGFloat,
                          leftBarb: barb(spread), rightBarb: barb(-spread))
 }
 
-/// The polylines to stroke for a line annotation: the shaft plus each end's
-/// cap, in the inputs' coordinate space — shared by the on-screen canvas and
-/// the export so they can never disagree. With an arrow head on both ends,
-/// each head shrinks to under half the length so the two never collide.
-func cappedLineSegments(from start: CGPoint, to end: CGPoint,
-                        startCap: LineCap, endCap: LineCap,
-                        lineWidth: CGFloat) -> [[CGPoint]] {
-    var segments = [[start, end]]
+/// The polylines to stroke for a line's end decorations, in the inputs'
+/// coordinate space — shared by the on-screen canvas and the export so they
+/// can never disagree. `startTangent`/`endTangent` are the points the shaft
+/// leaves toward / arrives from when it bends (the curve's control point, or
+/// an elbow route's neighboring corners), so caps align with the shaft's real
+/// end direction instead of the chord; `nil` falls back to the opposite
+/// endpoint. With an arrow head on both ends, each head shrinks to under
+/// half the length so the two never collide.
+func lineCapSegments(from start: CGPoint, to end: CGPoint,
+                     startTangent: CGPoint?, endTangent: CGPoint?,
+                     startCap: LineCap, endCap: LineCap,
+                     lineWidth: CGFloat) -> [[CGPoint]] {
+    var segments: [[CGPoint]] = []
     let headFraction: CGFloat = startCap == .arrow && endCap == .arrow ? 0.42 : 0.85
-
-    let dx = end.x - start.x, dy = end.y - start.y
-    let length = max((dx * dx + dy * dy).squareRoot(), 0.0001)
-    let (px, py) = (-dy / length, dx / length)       // unit perpendicular
     let half = max(lineWidth * 4, 12)                // matches the measure ticks
 
     func append(_ cap: LineCap, at point: CGPoint, from other: CGPoint) {
@@ -654,12 +833,15 @@ func cappedLineSegments(from start: CGPoint, to end: CGPoint,
             // leftBarb → tip → rightBarb, so the tip gets a rounded join.
             segments.append([g.leftBarb, g.tip, g.rightBarb])
         case .bar:
+            let dx = point.x - other.x, dy = point.y - other.y
+            let length = max(hypot(dx, dy), 0.0001)
+            let (px, py) = (-dy / length, dx / length)   // unit perpendicular
             segments.append([CGPoint(x: point.x + px * half, y: point.y + py * half),
                              CGPoint(x: point.x - px * half, y: point.y - py * half)])
         }
     }
-    append(startCap, at: start, from: end)
-    append(endCap, at: end, from: start)
+    append(startCap, at: start, from: startTangent ?? end)
+    append(endCap, at: end, from: endTangent ?? start)
     return segments
 }
 

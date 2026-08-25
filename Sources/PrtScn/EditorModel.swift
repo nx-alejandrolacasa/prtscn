@@ -231,8 +231,24 @@ final class EditorModel {
     private(set) var annotations: [Annotation] = []
     /// The shape currently being dragged out (not yet committed).
     var draft: Annotation?
-    /// The currently selected annotation, if any.
-    var selectedID: UUID?
+    /// The currently selected annotation, if any. Selecting a line surfaces
+    /// the bend-dot hint — the dot only shows on hover, so it needs one.
+    var selectedID: UUID? {
+        didSet {
+            guard selectedID != oldValue, let id = selectedID,
+                  annotations.first(where: { $0.id == id })?.kind == .line else { return }
+            showBendTip()
+        }
+    }
+    /// The bend hint runs once per editor session — it teaches a persistent
+    /// feature, so repeating it on every line selection would just be noise.
+    private var didShowBendTip = false
+
+    private func showBendTip() {
+        guard !didShowBendTip else { return }
+        didShowBendTip = true
+        showTip("Drag the middle dot to curve · double-click it for a 90° corner")
+    }
     /// The text annotation being edited, if any.
     var editingTextID: UUID?
     private var editingIsNew = false
@@ -410,6 +426,38 @@ final class EditorModel {
             annotations[index].end = point
             annotations[index].endBinding = binding
         }
+    }
+
+    /// Bends or straightens a line's shaft (live drag of its curve dot). The
+    /// caller takes the undo `snapshot()` once, when the drag first moves.
+    func setCurvature(id: UUID, _ value: CGFloat) {
+        guard let index = annotations.firstIndex(where: { $0.id == id }) else { return }
+        annotations[index].curvature = value
+    }
+
+    /// Moves a corner line's horizontal run up/down (live drag of its dot).
+    /// The caller takes the undo `snapshot()` once, on first move.
+    func setElbowH(id: UUID, _ offset: CGFloat) {
+        guard let index = annotations.firstIndex(where: { $0.id == id }) else { return }
+        annotations[index].elbowH = offset
+    }
+
+    /// Moves a corner line's vertical trunk left/right — likewise.
+    func setElbowV(id: UUID, _ offset: CGFloat) {
+        guard let index = annotations.firstIndex(where: { $0.id == id }) else { return }
+        annotations[index].elbowV = offset
+    }
+
+    /// Toggles a line between its curve and orthogonal-corner bends
+    /// (double-click on a bend dot). Each mode's shape survives the switch —
+    /// the curve keeps its bow and the corner keeps its dragged runs — so
+    /// toggling round-trips instead of resetting.
+    func toggleLineBend(id: UUID) {
+        guard let index = annotations.firstIndex(where: { $0.id == id }),
+              annotations[index].kind == .line else { return }
+        snapshot()
+        annotations[index].bend = annotations[index].bend == .corner ? .curve : .corner
+        selectedID = id
     }
 
     /// A line dragged by its body detaches from its shapes.
@@ -943,10 +991,30 @@ final class EditorModel {
             switch annotation.kind {
             case .line:
                 context.beginPath()
-                for segment in cappedLineSegments(from: annotation.start, to: annotation.end,
-                                                  startCap: annotation.startCap,
-                                                  endCap: annotation.endCap,
-                                                  lineWidth: annotation.lineWidth) {
+                let startTangent: CGPoint?, endTangent: CGPoint?
+                if annotation.isCorner {
+                    let route = annotation.cornerRoute
+                    context.addPath(roundedPolylinePath(route.map(flip),
+                                                        radius: annotation.cornerBendRadius))
+                    startTangent = route[1]
+                    endTangent = route[route.count - 2]
+                } else {
+                    context.move(to: flip(annotation.start))
+                    if let control = annotation.curveControl {
+                        context.addQuadCurve(to: flip(annotation.end), control: flip(control))
+                        startTangent = control
+                        endTangent = control
+                    } else {
+                        context.addLine(to: flip(annotation.end))
+                        startTangent = nil
+                        endTangent = nil
+                    }
+                }
+                for segment in lineCapSegments(from: annotation.start, to: annotation.end,
+                                               startTangent: startTangent, endTangent: endTangent,
+                                               startCap: annotation.startCap,
+                                               endCap: annotation.endCap,
+                                               lineWidth: annotation.lineWidth) {
                     context.addLines(between: segment.map(flip))
                 }
                 context.strokePath()

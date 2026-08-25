@@ -130,6 +130,10 @@ struct EditorCanvas: View {
     /// now — the little dot shown while hovering or dragging with the line
     /// tool near a shape's side. `nil` when nothing is in snapping range.
     @State private var snapAnchor: CGPoint?
+    /// The bend dots (image coords) of the hovered line, all sitting on the
+    /// stroke itself: the curve's midpoint, or the elbow runs' midpoints in
+    /// corner mode. Dragging one reshapes the line. Empty when none hovered.
+    @State private var bendDots: [CGPoint] = []
 
     /// Hit slop in view points.
     private let handleHitRadius: CGFloat = 11
@@ -165,9 +169,13 @@ struct EditorCanvas: View {
                                 hoverPoint = nil
                             }
                             updateHoverSnap(at: location, fit: fit)
+                            updateBendDots(at: location, fit: fit)
                         case .ended:
                             hoverPoint = nil
-                            if session == nil { snapAnchor = nil }
+                            if session == nil {
+                                snapAnchor = nil
+                                bendDots = []
+                            }
                             if model.isPickingColor {
                                 NSCursor.arrow.set()
                                 model.updateHoverColor(at: nil)
@@ -188,6 +196,7 @@ struct EditorCanvas: View {
             if model.editingTextID != nil { model.finishTextEditing() }
             hoverPoint = nil
             snapAnchor = nil
+            bendDots = []
         }
         // Restore the arrow the moment picking ends (a lingering crosshair would
         // otherwise stay until the next mouse move).
@@ -236,6 +245,11 @@ struct EditorCanvas: View {
             if let snapAnchor, !model.isCropping {
                 drawSnapDot(at: fit.toView(snapAnchor), in: &context)
             }
+            if !model.isCropping {
+                for dot in bendDots {
+                    drawSnapDot(at: fit.toView(dot), in: &context)
+                }
+            }
         }
         .contentShape(Rectangle())
         // Marquee pointer while cropping, hand while the move tool is armed.
@@ -275,10 +289,30 @@ struct EditorCanvas: View {
         switch annotation.kind {
         case .line:
             var path = Path()
-            for segment in cappedLineSegments(from: annotation.start, to: annotation.end,
-                                              startCap: annotation.startCap,
-                                              endCap: annotation.endCap,
-                                              lineWidth: annotation.lineWidth) {
+            let startTangent: CGPoint?, endTangent: CGPoint?
+            if annotation.isCorner {
+                let route = annotation.cornerRoute
+                path.addPath(Path(roundedPolylinePath(route.map(fit.toView),
+                                                      radius: annotation.cornerBendRadius * fit.scale)))
+                startTangent = route[1]
+                endTangent = route[route.count - 2]
+            } else {
+                path.move(to: fit.toView(annotation.start))
+                if let control = annotation.curveControl {
+                    path.addQuadCurve(to: fit.toView(annotation.end), control: fit.toView(control))
+                    startTangent = control
+                    endTangent = control
+                } else {
+                    path.addLine(to: fit.toView(annotation.end))
+                    startTangent = nil
+                    endTangent = nil
+                }
+            }
+            for segment in lineCapSegments(from: annotation.start, to: annotation.end,
+                                           startTangent: startTangent, endTangent: endTangent,
+                                           startCap: annotation.startCap,
+                                           endCap: annotation.endCap,
+                                           lineWidth: annotation.lineWidth) {
                 path.move(to: fit.toView(segment[0]))
                 for point in segment.dropFirst() { path.addLine(to: fit.toView(point)) }
             }
@@ -496,7 +530,16 @@ struct EditorCanvas: View {
         DragGesture(minimumDistance: 0, coordinateSpace: .local)
             .onChanged { value in
                 if model.isCropping { cropChanged(value, fit: fit); return }
-                if session == nil { session = makeSession(pressView: value.startLocation, fit: fit) }
+                if session == nil {
+                    session = makeSession(pressView: value.startLocation, fit: fit)
+                    // Hover doesn't fire during a drag: only a bend-dot drag
+                    // keeps its dots alive (and tracking); any other drag
+                    // could move the line out from under stale dots.
+                    switch session?.kind {
+                    case .resize(_, .curve), .resize(_, .cornerH), .resize(_, .cornerV): break
+                    default: bendDots = []
+                    }
+                }
                 guard var current = session else { return }
 
                 let moved = hypot(value.location.x - value.startLocation.x,
@@ -584,6 +627,24 @@ struct EditorCanvas: View {
                         } else {
                             model.setPoints(id: id, start: current.originalStart, end: p)
                         }
+                    case .curve:
+                        // The dot lands under the cursor; near-straight snaps
+                        // back flat so the bow is easy to undo.
+                        let value = curvatureValue(of: image, chordStart: current.originalStart,
+                                                   chordEnd: current.originalEnd)
+                        model.setCurvature(id: id, abs(value) * fit.scale < 5 ? 0 : value)
+                        updateDraggedBendDots(id: id)
+                    case .cornerH:
+                        // The horizontal run follows the cursor's y, snapping
+                        // back onto its endpoint when close.
+                        let offset = image.y - current.originalStart.y
+                        model.setElbowH(id: id, abs(offset) * fit.scale < 5 ? 0 : offset)
+                        updateDraggedBendDots(id: id)
+                    case .cornerV:
+                        // The vertical trunk follows the cursor's x — likewise.
+                        let offset = image.x - current.originalEnd.x
+                        model.setElbowV(id: id, abs(offset) * fit.scale < 5 ? 0 : offset)
+                        updateDraggedBendDots(id: id)
                     default:
                         model.setPoints(id: id, start: current.anchor ?? current.originalStart, end: image)
                     }
@@ -673,15 +734,29 @@ struct EditorCanvas: View {
             return session
         }
 
-        // 3. The body of any annotation (topmost = last drawn) — select + move.
+        // 3. A bend dot of the hovered line — same hit rule that shows the
+        // dots, so pressing what's visible always grabs it. Dragging reshapes
+        // the line (a plain click just selects — the resize only mutates once
+        // the drag moves).
         let tolerance = bodyTolerance / fit.scale
+        if let line = model.annotations.last(where: {
+            $0.kind == .line && $0.bodyContains(pressImage, tolerance: tolerance)
+        }), let dot = line.bendDots.first(where: {
+            distance(pressView, fit.toView($0.point)) <= handleHitRadius
+        }) {
+            model.selectedID = line.id
+            return DragSession(kind: .resize(line.id, dot.handle), pressImage: pressImage,
+                               originalStart: line.start, originalEnd: line.end)
+        }
+
+        // 4. The body of any annotation (topmost = last drawn) — select + move.
         if let hit = model.annotations.last(where: { $0.bodyContains(pressImage, tolerance: tolerance) }) {
             model.selectedID = hit.id
             return DragSession(kind: .move(hit.id), pressImage: pressImage,
                                originalStart: hit.start, originalEnd: hit.end)
         }
 
-        // 4. Empty space — deselect, then draw / place text / stamp a counter.
+        // 5. Empty space — deselect, then draw / place text / stamp a counter.
         // The move tool draws nothing, so its press ends there.
         model.selectedID = nil
         let kind: DragSession.Kind
@@ -752,6 +827,27 @@ struct EditorCanvas: View {
         if anchor != snapAnchor { snapAnchor = anchor }
     }
 
+    /// Tracks the bend dots while hovering: approaching a line's shaft offers
+    /// its dots — dragging one reshapes the line.
+    private func updateBendDots(at location: CGPoint, fit: CanvasFit) {
+        guard session == nil else { return }
+        guard !model.isCropping, !model.isPickingColor, model.editingTextID == nil else {
+            if !bendDots.isEmpty { bendDots = [] }
+            return
+        }
+        let point = fit.toImage(location, clampedTo: model.pixelSize)
+        let tolerance = bodyTolerance / fit.scale
+        let dots = model.annotations.last {
+            $0.kind == .line && $0.bodyContains(point, tolerance: tolerance)
+        }?.bendDots.map(\.point) ?? []
+        if dots != bendDots { bendDots = dots }
+    }
+
+    /// Re-seeds the dots from the model mid-drag (hover doesn't fire then).
+    private func updateDraggedBendDots(id: UUID) {
+        bendDots = model.annotations.first { $0.id == id }?.bendDots.map(\.point) ?? []
+    }
+
     /// The binding dot on a shape side's midpoint: pressing or releasing a
     /// line end while it shows snaps (and binds) the end there.
     private func drawSnapDot(at center: CGPoint, in context: inout GraphicsContext) {
@@ -793,6 +889,17 @@ struct EditorCanvas: View {
                 guard !model.isCropping else { return }
                 let point = fit.toImage(value.location, clampedTo: model.pixelSize)
                 let tolerance = bodyTolerance / fit.scale
+                // On a bend dot, double-click toggles curve ↔ corner mode
+                // instead of opening the line's label.
+                if let line = model.annotations.last(where: {
+                    $0.kind == .line && $0.bodyContains(point, tolerance: tolerance)
+                }), line.bendDots.contains(where: {
+                    distance(value.location, fit.toView($0.point)) <= handleHitRadius
+                }) {
+                    model.toggleLineBend(id: line.id)
+                    updateDraggedBendDots(id: line.id)
+                    return
+                }
                 if let hit = model.annotations.last(where: {
                     ($0.kind == .text || $0.supportsLabel)
                         && $0.bodyContains(point, tolerance: tolerance)
