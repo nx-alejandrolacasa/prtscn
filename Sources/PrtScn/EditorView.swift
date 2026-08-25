@@ -235,7 +235,7 @@ struct EditorView: View {
             Button("", action: { model.tool = .move }).keyboardShortcut("h", modifiers: [])
             Button("", action: { model.selectLineTool(arrow: true) }).keyboardShortcut("a", modifiers: [])
             Button("", action: { model.selectLineTool(arrow: false) }).keyboardShortcut("l", modifiers: [])
-            Button("", action: { model.selectShape(.roundedRect) }).keyboardShortcut("s", modifiers: [])
+            Button("", action: { model.selectShape(.roundedRect) }).keyboardShortcut("r", modifiers: [])
             Button("", action: { model.selectShape(.ellipse) }).keyboardShortcut("c", modifiers: [])
             Button("", action: { model.selectShape(.ellipse) }).keyboardShortcut("e", modifiers: [])
             Button("", action: { model.selectShape(.diamond) }).keyboardShortcut("d", modifiers: [])
