@@ -347,49 +347,27 @@ final class EditorController: NSObject, NSWindowDelegate {
         SettingsStore.shared.applyDockIcon()
     }
 
-    /// Breathing room around the capture (left / top / right), so the floating
-    /// controls and the loupe aren't glued to the image.
-    static let contentMargin: CGFloat = 32
-
-    /// Height of the floating tool palette / crop bar capsule (28pt buttons +
-    /// 7pt vertical padding each side — see `PaletteButton` / `palette`).
-    static let paletteHeight: CGFloat = 42
-
-    /// The band reserved *below* the capture: a margin, the palette, and
-    /// another margin — so the palette floats in its own space instead of
-    /// covering the image.
-    static var bottomInset: CGFloat { contentMargin + paletteHeight + contentMargin }
-
-    /// The canvas padding for a capture: the frame margins *minus* whatever
-    /// transparent surround the capture already carries (a window shot's
-    /// shadow box), so the visible breathing room around the content is the
-    /// same for every capture type. Shared by the view layout and
-    /// `windowSize(for:)` so they can't drift apart.
-    static func canvasPadding(for model: EditorModel) -> NSEdgeInsets {
-        let insets = model.contentInsets
-        return NSEdgeInsets(top: max(0, contentMargin - insets.top),
-                            left: max(0, contentMargin - insets.left),
-                            bottom: max(0, bottomInset - insets.bottom),
-                            right: max(0, contentMargin - insets.right))
-    }
+    /// Breathing room between the floating palette / crop bar and the window's
+    /// bottom edge. The capture itself runs edge-to-edge — the palette floats
+    /// on top of it.
+    static let paletteMargin: CGFloat = 16
 
     /// The smallest content area: wide enough that every title-bar toolbar
     /// item (crop/pixelate/eyedropper, the −/%/+ zoom group, and the export
     /// buttons) plus the image-size readout after zoom stays visible without
     /// the toolbar collapsing into the overflow chevron —
-    /// and for the full tool palette; tall enough for the palette band plus a
-    /// canvas that can still fit the measure loupe. The window otherwise hugs
-    /// the capture's 1:1 size plus margins, capped to the screen. (The title
-    /// text is hidden, so the width only has to cover the tool groups.)
+    /// and for the full tool palette; tall enough for a canvas that can still
+    /// fit the measure loupe. The window otherwise hugs the capture's 1:1
+    /// size, capped to the screen; captures smaller than this open centered
+    /// over the checkerboard. (The title text is hidden, so the width only
+    /// has to cover the tool groups.)
     static let minContentSize = NSSize(width: 760, height: 280)
 
     /// Sizes the window so the capture opens at full resolution: its true pixel
     /// dimensions mapped 1:1 to the screen's device pixels (pixels ÷ backing
-    /// scale → points), framed by `canvasPadding` — the standard margins,
-    /// reduced by any transparent surround the capture brings itself. The
-    /// image — not its frame — is scaled down when a capture is too large for
-    /// the screen (e.g. a full-screen grab), and the window never opens
-    /// smaller than the toolbar needs.
+    /// scale → points), edge-to-edge. The image — not its frame — is scaled
+    /// down when a capture is too large for the screen (e.g. a full-screen
+    /// grab), and the window never opens smaller than the toolbar needs.
     private static func windowSize(for model: EditorModel) -> NSSize {
         let visible = NSScreen.main?.visibleFrame.size ?? NSSize(width: 1440, height: 900)
         // The capture's logical (1:1) size = pixels ÷ the scale it was taken at.
@@ -399,13 +377,9 @@ final class EditorController: NSObject, NSWindowDelegate {
 
         // Shrink the image to fit the visible screen (frame included) only if
         // needed; never enlarge.
-        let padding = canvasPadding(for: model)
-        let horizontalChrome = padding.left + padding.right
-        let verticalChrome = padding.top + padding.bottom
-        let fit = min(1, min((visible.width * 0.95 - horizontalChrome) / w,
-                             (visible.height * 0.95 - verticalChrome) / h))
-        w = w * fit + horizontalChrome
-        h = h * fit + verticalChrome
+        let fit = min(1, min(visible.width * 0.95 / w, visible.height * 0.95 / h))
+        w *= fit
+        h *= fit
         // Floor at the toolbar's minimum so the controls always fit.
         return NSSize(width: max(w.rounded(), minContentSize.width),
                       height: max(h.rounded(), minContentSize.height))

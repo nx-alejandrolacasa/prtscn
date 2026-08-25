@@ -11,29 +11,26 @@ struct CanvasFit {
     let imageRect: CGRect
     let scale: CGFloat
 
-    /// The aspect-fit scale at zoom 1: fit the framed (inset) area, but never
-    /// enlarge past the image's native 1:1 size (1 / captureScale view-points
-    /// per pixel), so it always reads true-size.
+    /// The aspect-fit scale at zoom 1: fit the canvas, but never enlarge past
+    /// the image's native 1:1 size (1 / captureScale view-points per pixel),
+    /// so it always reads true-size.
     static func baseScale(pixelSize: CGSize, captureScale: CGFloat,
-                          insets: NSEdgeInsets, in size: CGSize) -> CGFloat {
-        let available = CGSize(width: max(size.width - insets.left - insets.right, 1),
-                               height: max(size.height - insets.top - insets.bottom, 1))
+                          in size: CGSize) -> CGFloat {
+        let available = CGSize(width: max(size.width, 1), height: max(size.height, 1))
         return min(available.width / pixelSize.width, available.height / pixelSize.height,
                    1 / max(captureScale, 1))
     }
 
-    /// Center of the framed area — the point the image grows around.
-    private static func anchor(insets: NSEdgeInsets, in size: CGSize) -> CGPoint {
-        CGPoint(x: insets.left + (size.width - insets.left - insets.right) / 2,
-                y: insets.top + (size.height - insets.top - insets.bottom) / 2)
+    /// Center of the canvas — the point the image grows around.
+    private static func anchor(in size: CGSize) -> CGPoint {
+        CGPoint(x: size.width / 2, y: size.height / 2)
     }
 
     /// Pan clamped per axis: while the image fits in the window it stays fully
     /// visible; once it overflows, no gap may open at an edge. Shared with
     /// `EditorModel` so the stored pan never drifts off what can be shown.
-    static func clampedPan(drawn: CGSize, pan: CGSize,
-                           insets: NSEdgeInsets, in size: CGSize) -> CGSize {
-        let anchor = anchor(insets: insets, in: size)
+    static func clampedPan(drawn: CGSize, pan: CGSize, in size: CGSize) -> CGSize {
+        let anchor = anchor(in: size)
         func clamp(_ pan: CGFloat, anchor: CGFloat, drawn: CGFloat, full: CGFloat) -> CGFloat {
             let origin = anchor - drawn / 2 + pan
             let clamped = min(max(origin, min(0, full - drawn)), max(0, full - drawn))
@@ -44,12 +41,12 @@ struct CanvasFit {
     }
 
     init(pixelSize: CGSize, captureScale: CGFloat, zoom: CGFloat, pan: CGSize,
-         insets: NSEdgeInsets, in size: CGSize) {
+         in size: CGSize) {
         let scale = Self.baseScale(pixelSize: pixelSize, captureScale: captureScale,
-                                   insets: insets, in: size) * zoom
+                                   in: size) * zoom
         let drawn = CGSize(width: pixelSize.width * scale, height: pixelSize.height * scale)
-        let anchor = Self.anchor(insets: insets, in: size)
-        let pan = Self.clampedPan(drawn: drawn, pan: pan, insets: insets, in: size)
+        let anchor = Self.anchor(in: size)
+        let pan = Self.clampedPan(drawn: drawn, pan: pan, in: size)
         self.scale = scale
         self.imageRect = CGRect(x: anchor.x - drawn.width / 2 + pan.width,
                                 y: anchor.y - drawn.height / 2 + pan.height,
@@ -144,8 +141,7 @@ struct EditorCanvas: View {
     var body: some View {
         GeometryReader { geo in
             let fit = CanvasFit(pixelSize: model.pixelSize, captureScale: model.captureScale,
-                                zoom: model.zoom, pan: model.pan,
-                                insets: EditorController.canvasPadding(for: model), in: geo.size)
+                                zoom: model.zoom, pan: model.pan, in: geo.size)
 
             ZStack(alignment: .topLeading) {
                 canvas(fit: fit)

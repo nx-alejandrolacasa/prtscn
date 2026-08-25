@@ -27,13 +27,6 @@ final class EditorModel {
     /// Used to display the image at native size and to show sizes in points.
     let captureScale: CGFloat
 
-    /// Insets (in points) of the capture's *opaque* content within its bounds.
-    /// Window shots in "margins" mode keep their transparent shadow surround —
-    /// the editor's frame margins subtract these so the visible breathing room
-    /// around the content stays consistent for every capture type. Zero for
-    /// opaque captures. Recomputed after a crop.
-    private(set) var contentInsets = NSEdgeInsets()
-
     /// Called after the image geometry changes (a crop) so the controller can
     /// resize the window to fit.
     var onGeometryChange: (() -> Void)?
@@ -101,7 +94,6 @@ final class EditorModel {
     private var fittedPercent: CGFloat {
         guard canvasSize.width > 0, pixelSize.width > 0 else { return 100 }
         let base = CanvasFit.baseScale(pixelSize: pixelSize, captureScale: captureScale,
-                                       insets: EditorController.canvasPadding(for: self),
                                        in: canvasSize)
         return base * captureScale * 100
     }
@@ -138,11 +130,10 @@ final class EditorModel {
     private func clampPan() {
         guard canvasSize.width > 0, canvasSize.height > 0,
               pixelSize.width > 0, pixelSize.height > 0 else { return }
-        let insets = EditorController.canvasPadding(for: self)
         let scale = CanvasFit.baseScale(pixelSize: pixelSize, captureScale: captureScale,
-                                        insets: insets, in: canvasSize) * zoom
+                                        in: canvasSize) * zoom
         let drawn = CGSize(width: pixelSize.width * scale, height: pixelSize.height * scale)
-        pan = CanvasFit.clampedPan(drawn: drawn, pan: pan, insets: insets, in: canvasSize)
+        pan = CanvasFit.clampedPan(drawn: drawn, pan: pan, in: canvasSize)
     }
 
     private func showTip(_ message: String) {
@@ -288,56 +279,7 @@ final class EditorModel {
         self.fontSize = 18 * self.captureScale
         self.counterSize = 21 * self.captureScale
         self.measureSize = 18 * self.captureScale
-        self.contentInsets = Self.opaqueInsets(of: image, dividedBy: self.captureScale)
         if tool.isShape { lastShapeTool = tool }
-    }
-
-    /// Bounding box of the pixels with meaningful alpha, as insets from the
-    /// image edges, converted to points. Zero if the capture is fully opaque
-    /// (the common case: the first row/column scanned is already opaque) or
-    /// fully transparent.
-    private static func opaqueInsets(of image: NSImage, dividedBy scale: CGFloat) -> NSEdgeInsets {
-        guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
-            return NSEdgeInsets()
-        }
-        let w = cg.width, h = cg.height
-        guard w > 0, h > 0 else { return NSEdgeInsets() }
-        // No alpha channel → nothing transparent to inset. Scrolling captures
-        // are stitched onto an alpha-less canvas precisely so their huge
-        // bitmaps skip this scan (which allocates w·h·4 bytes); window shots
-        // keep their alpha and still get the shadow trim.
-        switch cg.alphaInfo {
-        case .none, .noneSkipLast, .noneSkipFirst: return NSEdgeInsets()
-        default: break
-        }
-        var data = [UInt8](repeating: 0, count: w * h * 4)
-        guard let context = CGContext(
-            data: &data, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return NSEdgeInsets() }
-        context.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
-
-        // Row 0 of the buffer is the top scanline. "Opaque" = alpha ≥ 10%,
-        // so a whisper of shadow doesn't count as content.
-        func rowHasContent(_ y: Int) -> Bool {
-            let base = y * w * 4
-            for x in 0..<w where data[base + x * 4 + 3] >= 26 { return true }
-            return false
-        }
-        func columnHasContent(_ x: Int) -> Bool {
-            for y in 0..<h where data[(y * w + x) * 4 + 3] >= 26 { return true }
-            return false
-        }
-        guard let top = (0..<h).first(where: rowHasContent),
-              let bottom = (0..<h).reversed().first(where: rowHasContent),
-              let left = (0..<w).first(where: columnHasContent),
-              let right = (0..<w).reversed().first(where: columnHasContent)
-        else { return NSEdgeInsets() }
-        return NSEdgeInsets(top: CGFloat(top) / scale,
-                            left: CGFloat(left) / scale,
-                            bottom: CGFloat(h - 1 - bottom) / scale,
-                            right: CGFloat(w - 1 - right) / scale)
     }
 
     /// A pixel size shown to the user as logical points.
@@ -532,7 +474,6 @@ final class EditorModel {
 
         baseImage = NSImage(cgImage: cropped, size: rect.size)
         pixelSize = rect.size
-        contentInsets = Self.opaqueInsets(of: baseImage, dividedBy: captureScale)
         eyedropperRep = nil
         mosaicCache.removeAll()
         zoom = 1

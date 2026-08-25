@@ -30,10 +30,9 @@ struct EditorView: View {
     }
 
     var body: some View {
-        // The canvas spans the whole content area; the frame margins around the
-        // fitted capture (and their reduction by a window shot's transparent
-        // surround) live inside `CanvasFit`, so a zoomed image can grow out of
-        // its framed rectangle and bleed edge-to-edge.
+        // The canvas spans the whole content area; the fitted capture runs
+        // edge-to-edge, centered by `CanvasFit` when it's smaller than the
+        // minimum window.
         EditorCanvas(model: model)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             // A Photoshop-style transparency checkerboard, so transparent
@@ -137,7 +136,7 @@ struct EditorView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .glassEffect(.regular, in: Capsule())
-        .padding(.bottom, EditorController.contentMargin)
+        .padding(.bottom, EditorController.paletteMargin)
     }
 
     // MARK: - Crop bar
@@ -155,7 +154,7 @@ struct EditorView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .glassEffect(.regular, in: Capsule())
-        .padding(.bottom, EditorController.contentMargin)
+        .padding(.bottom, EditorController.paletteMargin)
     }
 
     // MARK: - Toast
