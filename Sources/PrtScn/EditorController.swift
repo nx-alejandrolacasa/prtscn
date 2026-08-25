@@ -139,17 +139,20 @@ final class EditorController: NSObject, NSWindowDelegate {
         window.orderFrontRegardless()
 
         // The hand-back has no fixed timing — it can land later than any
-        // runloop-turn deferral — so don't guess: the moment the app is
-        // deactivated (that *is* the hand-back), take activation right back.
-        // One shot, and disarmed after a second in case no hand-back comes,
-        // so the user deliberately switching away isn't fought.
+        // runloop-turn deferral — and modern activation is cooperative, so a
+        // re-`activate()` from the freshly deactivated app can be denied
+        // outright. Don't bet the window on winning that fight: float it above
+        // everything while the hand-back plays out (a floating window can't be
+        // buried even if the other app stays active), and re-claim activation
+        // on *every* deactivation in that span — the hand-back can land after
+        // a first re-claim. Everything disarms after 1.5s, so the user
+        // deliberately switching away isn't fought for long.
+        window.level = .floating
         let observer = NotificationCenter.default.addObserver(
             forName: NSApplication.didResignActiveNotification, object: NSApp, queue: .main
         ) { _ in
             MainActor.assumeIsolated {
-                let controller = Self.shared
-                controller.clearReactivationObserver()
-                guard let window = controller.window else { return }
+                guard let window = Self.shared.window else { return }
                 DispatchQueue.main.async {
                     NSApp.activate()
                     window.makeKeyAndOrderFront(nil)
@@ -157,9 +160,11 @@ final class EditorController: NSObject, NSWindowDelegate {
             }
         }
         reactivationObserver = observer
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
-            guard let self, self.reactivationObserver === observer else { return }
-            self.clearReactivationObserver()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self, weak window] in
+            if let self, self.reactivationObserver === observer {
+                self.clearReactivationObserver()
+            }
+            if let window, window.level == .floating { window.level = .normal }
         }
 
         // Deferred a runloop turn: the readout anchors to the zoom control's
