@@ -296,14 +296,16 @@ struct EditorCanvas: View {
             context.stroke(path, with: .color(annotation.color), style: style)
             drawMeasureLabel(geometry, in: &context, fit: fit, color: annotation.color,
                              fontSize: annotation.fontSize, captureScale: model.captureScale)
-        case .rectangle:
-            shape.stroke(Path(rect), with: .color(annotation.color), style: style)
         case .roundedRect:
             let radius = annotation.cornerRadius * fit.scale
             shape.stroke(Path(roundedRect: rect, cornerRadius: radius, style: .continuous),
                          with: .color(annotation.color), style: style)
         case .ellipse:
             shape.stroke(Path(ellipseIn: rect), with: .color(annotation.color), style: style)
+        case .diamond:
+            let radius = annotation.diamondCornerRadius * fit.scale
+            shape.stroke(Path(diamondPath(in: rect, cornerRadius: radius)),
+                         with: .color(annotation.color), style: style)
         case .pixelate:
             if let mosaic = model.pixelatedRegion(for: annotation) {
                 var image = Image(decorative: mosaic, scale: 1)

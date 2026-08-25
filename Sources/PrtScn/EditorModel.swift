@@ -182,7 +182,7 @@ final class EditorModel {
         didSet { SettingsStore.shared.editorLineEndCap = lineEndCap }
     }
     /// What the palette's merged shape button re-arms: the last shape used.
-    private(set) var lastShapeTool: EditTool = .rectangle
+    private(set) var lastShapeTool: EditTool = .roundedRect
 
     /// Selects one of the closed-shape tools (via the shape button's expansion).
     func selectShape(_ shape: EditTool) {
@@ -920,8 +920,6 @@ final class EditorModel {
                 context.strokePath()
                 drawMeasureLabel(geometry, color: annotation.color, fontSize: annotation.fontSize,
                                  in: context, imageHeight: h)
-            case .rectangle:
-                context.stroke(flippedRect(annotation.boundingRect, in: h))
             case .roundedRect:
                 let path = CGPath(roundedRect: flippedRect(annotation.boundingRect, in: h),
                                   cornerWidth: annotation.cornerRadius,
@@ -930,6 +928,10 @@ final class EditorModel {
                 context.strokePath()
             case .ellipse:
                 context.strokeEllipse(in: flippedRect(annotation.boundingRect, in: h))
+            case .diamond:
+                context.addPath(diamondPath(in: flippedRect(annotation.boundingRect, in: h),
+                                            cornerRadius: annotation.diamondCornerRadius))
+                context.strokePath()
             case .pixelate:
                 if let mosaic = pixelatedRegion(for: annotation) {
                     context.draw(mosaic, in: flippedRect(annotation.boundingRect, in: h))

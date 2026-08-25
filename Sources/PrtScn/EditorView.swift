@@ -61,7 +61,7 @@ struct EditorView: View {
     private func section(for tool: EditTool) -> PaletteSection? {
         switch tool {
         case .line: .line
-        case .rectangle, .roundedRect, .ellipse: .shapes
+        case .roundedRect, .ellipse, .diamond: .shapes
         case .text: .text
         case .counter: .counter
         case .measure: .measure
@@ -409,9 +409,9 @@ private struct LineToolControl: View {
     }
 }
 
-/// The merged shape tool (rectangle / rounded rectangle / ellipse): one button
-/// in the bar that, while active, expands the three shapes inline. The button
-/// itself re-arms the last shape used.
+/// The merged shape tool (rectangle / ellipse / diamond): one button in the
+/// bar that, while active, expands the shapes inline. The button itself
+/// re-arms the last shape used.
 private struct ShapeToolControl: View {
     let model: EditorModel
     let isExpanded: Bool

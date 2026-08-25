@@ -10,9 +10,9 @@ enum EditTool: String, CaseIterable, Identifiable {
     case move
     case line
     case measure
-    case rectangle
     case roundedRect
     case ellipse
+    case diamond
     case pixelate
     case counter
     case text
@@ -24,9 +24,9 @@ enum EditTool: String, CaseIterable, Identifiable {
         case .move: "Move"
         case .line: "Line"
         case .measure: "Measure"
-        case .rectangle: "Rectangle"
-        case .roundedRect: "Rounded Rectangle"
+        case .roundedRect: "Rectangle"
         case .ellipse: "Ellipse"
+        case .diamond: "Diamond"
         case .pixelate: "Pixelate"
         case .counter: "Step Number"
         case .text: "Text"
@@ -38,9 +38,9 @@ enum EditTool: String, CaseIterable, Identifiable {
         case .move: "hand.raised"
         case .line: "line.diagonal"
         case .measure: "ruler"
-        case .rectangle: "rectangle"
         case .roundedRect: "rectangle"   // overridden by `icon`
         case .ellipse: "circle"
+        case .diamond: "diamond"
         case .pixelate: "eye.slash"
         case .counter: "1.circle.fill"
         case .text: "textformat"
@@ -48,7 +48,7 @@ enum EditTool: String, CaseIterable, Identifiable {
     }
 
     /// The closed-shape tools grouped behind the palette's single shape button.
-    static let shapes: [EditTool] = [.rectangle, .roundedRect, .ellipse]
+    static let shapes: [EditTool] = [.roundedRect, .ellipse, .diamond]
 
     var isShape: Bool { Self.shapes.contains(self) }
 
@@ -324,12 +324,43 @@ struct Annotation: Identifiable {
         return copy
     }
 
-    /// Corner radius for the rounded-rectangle tool, proportional to the
-    /// shorter side and clamped so it reads as a squircle, not a stadium.
+    /// Corner radius for the rounded-rectangle tool. Proportional to the
+    /// stroke width (which carries the capture scale), *not* the shape's size,
+    /// so growing a shape keeps its corners constant; capped only so a tiny
+    /// shape can't out-round its own sides.
     var cornerRadius: CGFloat {
-        let r = min(boundingRect.width, boundingRect.height) * 0.18
-        return min(max(r, 4), 64)
+        min(lineWidth * 4, min(boundingRect.width, boundingRect.height) / 2)
     }
+
+    /// Corner radius for the diamond tool — deliberately subtler than the
+    /// rounded rectangle's, just enough to soften the points. Constant across
+    /// shape sizes, like `cornerRadius`.
+    var diamondCornerRadius: CGFloat { lineWidth * 2 }
+}
+
+/// The diamond tool's outline: a rhombus inscribed in `rect` (vertices at the
+/// edge midpoints) with softly rounded corners — shared by the on-screen
+/// canvas and the export so they can never disagree. The radius is capped per
+/// aspect ratio so the tangent arcs at the sharp corners of a skewed diamond
+/// can't overrun their edges.
+func diamondPath(in rect: CGRect, cornerRadius: CGFloat) -> CGPath {
+    let top = CGPoint(x: rect.midX, y: rect.minY)
+    let right = CGPoint(x: rect.maxX, y: rect.midY)
+    let bottom = CGPoint(x: rect.midX, y: rect.maxY)
+    let left = CGPoint(x: rect.minX, y: rect.midY)
+
+    let w = max(rect.width, 0.0001), h = max(rect.height, 0.0001)
+    let edge = hypot(w, h) / 2
+    let maxRadius = min(h / w, w / h) * edge / 2
+    let radius = min(cornerRadius, maxRadius)
+
+    let path = CGMutablePath()
+    path.move(to: CGPoint(x: (left.x + top.x) / 2, y: (left.y + top.y) / 2))
+    for (corner, next) in [(top, right), (right, bottom), (bottom, left), (left, top)] {
+        path.addArc(tangent1End: corner, tangent2End: next, radius: radius)
+    }
+    path.closeSubpath()
+    return path
 }
 
 /// Geometry for a bold, modern arrow drawn as a single-weight stroke (round
@@ -351,7 +382,7 @@ extension Annotation {
     /// Measure has its own pixel-count label; pixelate/counter/text don't apply.
     var supportsLabel: Bool {
         switch kind {
-        case .line, .rectangle, .roundedRect, .ellipse: return true
+        case .line, .roundedRect, .ellipse, .diamond: return true
         default: return false
         }
     }
@@ -388,10 +419,11 @@ extension Annotation {
 
 extension Annotation {
     /// Shapes a line end can bind to. The ellipse binds at its bounding rect's
-    /// side midpoints, which lie exactly on the ellipse itself.
+    /// side midpoints, which lie exactly on the ellipse itself; the diamond's
+    /// side midpoints are its vertices.
     var isBindable: Bool {
         switch kind {
-        case .rectangle, .roundedRect, .ellipse: return true
+        case .roundedRect, .ellipse, .diamond: return true
         default: return false
         }
     }
@@ -456,7 +488,7 @@ extension Annotation {
         switch kind {
         case .line, .measure:
             return [(.start, start), (.end, end)]
-        case .rectangle, .roundedRect, .ellipse, .pixelate:
+        case .roundedRect, .ellipse, .diamond, .pixelate:
             let r = boundingRect
             return [(.topLeft, CGPoint(x: r.minX, y: r.minY)),
                     (.topRight, CGPoint(x: r.maxX, y: r.minY)),
@@ -488,7 +520,7 @@ extension Annotation {
         switch kind {
         case .line, .measure:
             return distanceFromPoint(point, toSegment: start, end) <= tolerance + lineWidth / 2
-        case .rectangle, .roundedRect, .ellipse, .pixelate:
+        case .roundedRect, .ellipse, .diamond, .pixelate:
             return boundingRect.insetBy(dx: -tolerance, dy: -tolerance).contains(point)
         case .text:
             return textRect.insetBy(dx: -tolerance, dy: -tolerance).contains(point)
