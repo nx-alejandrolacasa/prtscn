@@ -7,10 +7,10 @@ import AppKit
 /// the preview panel and register global hotkeys.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // `.accessory` = lives in the menu bar only, no Dock icon and no
-        // app menu. This is the native equivalent of Glaze's
-        // `activationPolicy: "accessory"`.
-        NSApp.setActivationPolicy(.accessory)
+        // Menu-bar app by default (`.accessory`: no Dock icon, no app menu),
+        // but the Dock-icon setting can keep it `.regular` — always, or only
+        // while the editor is open.
+        SettingsStore.shared.applyDockIcon()
 
         // Apply the saved Light/Dark/Auto preference on launch.
         SettingsStore.shared.applyAppearance()

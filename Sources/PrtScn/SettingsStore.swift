@@ -23,6 +23,14 @@ final class SettingsStore {
         didSet { applyLaunchAtLogin() }
     }
 
+    /// When the Dock icon (and ⌘Tab presence) shows — applied immediately.
+    var dockIcon: DockIconMode {
+        didSet {
+            defaults.set(dockIcon.rawValue, forKey: Keys.dockIcon)
+            applyDockIcon()
+        }
+    }
+
     /// Auto / Light / Dark — applied to the whole app immediately.
     var appearance: Appearance {
         didSet {
@@ -226,6 +234,37 @@ final class SettingsStore {
         min(max(value, 2_000), 16_000)
     }
 
+    /// Blank-canvas dimensions, in pixels. Same self-assignment clamping
+    /// dance as `scrollMaxHeight` (see the note there).
+    var canvasWidth: Int {
+        didSet {
+            let clamped = Self.clampedCanvasDimension(canvasWidth)
+            if clamped != canvasWidth {
+                canvasWidth = clamped
+                return
+            }
+            defaults.set(canvasWidth, forKey: Keys.canvasWidth)
+        }
+    }
+
+    var canvasHeight: Int {
+        didSet {
+            let clamped = Self.clampedCanvasDimension(canvasHeight)
+            if clamped != canvasHeight {
+                canvasHeight = clamped
+                return
+            }
+            defaults.set(canvasHeight, forKey: Keys.canvasHeight)
+        }
+    }
+
+    static let defaultCanvasWidth = 1_200
+    static let defaultCanvasHeight = 800
+
+    static func clampedCanvasDimension(_ value: Int) -> Int {
+        min(max(value, 100), 16_000)
+    }
+
     /// Global capture shortcuts, per mode. Saving re-registers the hotkeys.
     var shortcuts: [CaptureMode: Shortcut] {
         didSet {
@@ -238,6 +277,7 @@ final class SettingsStore {
 
     private enum Keys {
         static let appearance = "appearance"
+        static let dockIcon = "dockIcon"
         static let previewTimeout = "previewTimeout"
         static let previewStyle = "previewStyle"
         static let defaultAction = "defaultAction"
@@ -266,6 +306,8 @@ final class SettingsStore {
         static let fixedSizeUnit = "fixedSizeUnit"
         static let fixedSizePresets = "fixedSizePresets"
         static let scrollMaxHeight = "scrollMaxHeight"
+        static let canvasWidth = "canvasWidth"
+        static let canvasHeight = "canvasHeight"
         static let scrollingShortcutMigrated = "scrollingShortcutMigrated"
         static let fixedSizeShortcutMigrated = "fixedSizeShortcutMigrated"
     }
@@ -278,6 +320,7 @@ final class SettingsStore {
 
     private init() {
         appearance = Appearance(rawValue: defaults.string(forKey: Keys.appearance) ?? "") ?? .auto
+        dockIcon = DockIconMode(rawValue: defaults.string(forKey: Keys.dockIcon) ?? "") ?? .whileEditing
         previewTimeout = defaults.object(forKey: Keys.previewTimeout) as? Double ?? 5.0
         previewStyle = PreviewStyle(rawValue: defaults.string(forKey: Keys.previewStyle) ?? "") ?? .islands
         defaultAction = DefaultAction(rawValue: defaults.string(forKey: Keys.defaultAction) ?? "") ?? .save
@@ -308,6 +351,10 @@ final class SettingsStore {
         fixedSizePresets = Self.loadFixedSizePresets(from: defaults) ?? Self.defaultFixedSizePresets
         scrollMaxHeight = Self.clampedScrollMaxHeight(
             defaults.object(forKey: Keys.scrollMaxHeight) as? Int ?? Self.defaultScrollMaxHeight)
+        canvasWidth = Self.clampedCanvasDimension(
+            defaults.object(forKey: Keys.canvasWidth) as? Int ?? Self.defaultCanvasWidth)
+        canvasHeight = Self.clampedCanvasDimension(
+            defaults.object(forKey: Keys.canvasHeight) as? Int ?? Self.defaultCanvasHeight)
         shortcuts = Self.loadShortcuts(from: defaults) ?? Self.defaultShortcuts
         // Reflect the real system login-item state rather than a stored guess.
         launchAtLogin = (SMAppService.mainApp.status == .enabled)
@@ -437,6 +484,20 @@ final class SettingsStore {
     /// Re-applies the saved appearance. Call once at launch (see AppDelegate).
     func applyAppearance() {
         NSApp.appearance = appearance.nsAppearance
+    }
+
+    /// Applies the activation policy `dockIcon` calls for right now. Called at
+    /// launch, on a setting change, and when the editor opens/closes (the
+    /// input that makes `.whileEditing` flip).
+    func applyDockIcon() {
+        let policy: NSApplication.ActivationPolicy = switch dockIcon {
+        case .always: .regular
+        case .never: .accessory
+        case .whileEditing: EditorController.shared.isOpen ? .regular : .accessory
+        }
+        if NSApp.activationPolicy() != policy {
+            NSApp.setActivationPolicy(policy)
+        }
     }
 
     private func applyLaunchAtLogin() {

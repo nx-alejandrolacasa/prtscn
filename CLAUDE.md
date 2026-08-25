@@ -42,6 +42,8 @@ Sources/PrtScn/
   MenuBarState.swift           menu-bar icon "shot taken" flash state
   UpdateChecker.swift          GitHub Releases update check + DMG self-install
   CaptureMode.swift            region/window/full/fixed → screencapture flags
+  BlankCanvas.swift            white scratch image opened straight in the editor
+  DockIconMode.swift           Dock icon / ⌘Tab presence: while editing / always / never
   FixedSizePrompt.swift        width × height dialog for fixed-size capture
   FixedSizeOverlay.swift       cursor-following fixed-size capture rectangle
   ScrollCaptureOverlay.swift   drag-select region overlay for scrolling capture

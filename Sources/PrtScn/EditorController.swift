@@ -19,8 +19,15 @@ final class EditorController: NSObject, NSWindowDelegate {
     /// Local right-mouse event monitor that pans the zoomed capture.
     private var panMonitor: Any?
     private var isPanning = false
+    /// One-shot observer that re-claims activation when the closing menu-bar
+    /// menu hands focus back to the previous app (see `show`).
+    private var reactivationObserver: NSObjectProtocol?
 
     private override init() {}
+
+    /// Whether an editor window is open — what `DockIconMode.whileEditing`
+    /// keys the Dock icon on.
+    var isOpen: Bool { window != nil }
 
     /// Opens the editor for a capture. Takes ownership of `imageURL` (the temp
     /// file): the editor reuses it as its working file and deletes it on close.
@@ -117,16 +124,51 @@ final class EditorController: NSObject, NSWindowDelegate {
             return consumed ? nil : event
         }
 
+        // Give the app a Dock icon / ⌘Tab slot while editing, if the Dock-icon
+        // setting says so — the policy must be regular *before* activating.
+        SettingsStore.shared.applyDockIcon()
+
         // Accessory (menu-bar) apps need an explicit activate for a normal
-        // window to come forward and accept keyboard focus.
+        // window to come forward and accept keyboard focus. When the editor
+        // opens straight from the menu-bar dropdown (New Blank Canvas), the
+        // closing menu hands focus back to the previous app *after* this runs,
+        // burying the window — so order it front regardless of activation, and
+        // re-assert the activation below once the menu's hand-back is done.
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+
+        // The hand-back has no fixed timing — it can land later than any
+        // runloop-turn deferral — so don't guess: the moment the app is
+        // deactivated (that *is* the hand-back), take activation right back.
+        // One shot, and disarmed after a second in case no hand-back comes,
+        // so the user deliberately switching away isn't fought.
+        let observer = NotificationCenter.default.addObserver(
+            forName: NSApplication.didResignActiveNotification, object: NSApp, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                let controller = Self.shared
+                controller.clearReactivationObserver()
+                guard let window = controller.window else { return }
+                DispatchQueue.main.async {
+                    NSApp.activate()
+                    window.makeKeyAndOrderFront(nil)
+                }
+            }
+        }
+        reactivationObserver = observer
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            guard let self, self.reactivationObserver === observer else { return }
+            self.clearReactivationObserver()
+        }
 
         // Deferred a runloop turn: the readout anchors to the zoom control's
         // view, which AppKit only installs in the window hierarchy once the
         // title bar has been laid out — synchronously it isn't there yet.
         DispatchQueue.main.async { [weak self] in
             guard let self, let window = self.window, let model = self.model else { return }
+            NSApp.activate()
+            window.makeKeyAndOrderFront(nil)
             self.installSizeReadout(in: window, model: model)
         }
     }
@@ -272,7 +314,15 @@ final class EditorController: NSObject, NSWindowDelegate {
         teardown()
     }
 
+    private func clearReactivationObserver() {
+        if let reactivationObserver {
+            NotificationCenter.default.removeObserver(reactivationObserver)
+        }
+        reactivationObserver = nil
+    }
+
     private func teardown() {
+        clearReactivationObserver()
         window = nil
         model = nil
         toolbarDelegate = nil
@@ -288,6 +338,8 @@ final class EditorController: NSObject, NSWindowDelegate {
             panel.setAction(nil)
             if panel.isVisible { panel.orderOut(nil) }
         }
+        // Drop the "while editing" Dock icon now that no editor is open.
+        SettingsStore.shared.applyDockIcon()
     }
 
     /// Breathing room around the capture (left / top / right), so the floating

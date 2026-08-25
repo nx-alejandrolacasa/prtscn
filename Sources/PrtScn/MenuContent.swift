@@ -49,6 +49,14 @@ struct MenuContent: View {
 
         Divider()
 
+        Button {
+            BlankCanvas.open()
+        } label: {
+            Label("New Blank Canvas", systemImage: "plus.rectangle")
+        }
+
+        Divider()
+
         if pinned.hasPins {
             Button {
                 pinned.closeAll()

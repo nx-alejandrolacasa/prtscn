@@ -173,6 +173,18 @@ private struct GeneralSettingsView: View {
                 Toggle("Launch PrtScn at login", isOn: $settings.launchAtLogin)
             }
 
+            Section {
+                Picker("Show Dock icon", selection: $settings.dockIcon) {
+                    ForEach(DockIconMode.allCases) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+            } header: {
+                Text("Dock")
+            } footer: {
+                Text("The Dock icon is also what makes PrtScn reachable with ⌘Tab. While Editing shows it only while the editor window is open.")
+            }
+
             Section("Files") {
                 LabeledContent("Save to") {
                     HStack(spacing: 8) {
@@ -582,8 +594,33 @@ private struct EditorSettingsView: View {
                 }
                 Toggle("Show a magnifier loupe while measuring", isOn: $settings.measureLoupe)
             }
+            Section {
+                LabeledContent("Size") {
+                    HStack(spacing: 6) {
+                        canvasField("Width", value: $settings.canvasWidth)
+                        Text("×")
+                            .foregroundStyle(.secondary)
+                            .accessibilityHidden(true)
+                        canvasField("Height", value: $settings.canvasHeight)
+                        Text("px")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } header: {
+                Text("Blank canvas")
+            } footer: {
+                Text("The size of the white image New Blank Canvas opens in the editor.")
+            }
         }
         .formStyle(.grouped)
+    }
+
+    private func canvasField(_ label: String, value: Binding<Int>) -> some View {
+        TextField(label, value: value, format: .number.grouping(.never))
+            .textFieldStyle(.roundedBorder)
+            .labelsHidden()
+            .multilineTextAlignment(.center)
+            .frame(width: 64)
     }
 }
 
