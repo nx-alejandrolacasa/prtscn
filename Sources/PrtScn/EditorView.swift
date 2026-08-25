@@ -73,6 +73,16 @@ struct EditorView: View {
 
     private var palette: some View {
         HStack(spacing: 6) {
+            // The move tool draws nothing — it selects, moves and resizes
+            // what's already there, without the drawing tools' risk of
+            // dropping a stray shape.
+            PaletteButton(help: EditTool.move.label, isOn: model.tool == .move,
+                          action: { model.tool = .move; setExpanded(nil) }) {
+                EditTool.move.icon
+            }
+
+            Divider().frame(height: 20)
+
             // Tool buttons only ever *open* their section (switching tools
             // swaps it via `onChange`); the explicit `setExpanded` here covers
             // re-opening it over the color expander without a tool change.

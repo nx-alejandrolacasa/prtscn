@@ -3,9 +3,11 @@ import CoreGraphics
 import Foundation
 import SwiftUI
 
-/// The drawing tools offered in the editor. A tool maps 1:1 to the kind of
-/// annotation it produces.
+/// The drawing tools offered in the editor. Each drawing tool maps 1:1 to the
+/// kind of annotation it produces; `move` is the exception — it draws nothing
+/// and only selects, moves and resizes what's already there.
 enum EditTool: String, CaseIterable, Identifiable {
+    case move
     case line
     case measure
     case rectangle
@@ -19,6 +21,7 @@ enum EditTool: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
+        case .move: "Move"
         case .line: "Line"
         case .measure: "Measure"
         case .rectangle: "Rectangle"
@@ -32,6 +35,7 @@ enum EditTool: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
+        case .move: "hand.raised"
         case .line: "line.diagonal"
         case .measure: "ruler"
         case .rectangle: "rectangle"
@@ -241,6 +245,18 @@ func annotationNSFont(size: CGFloat, design: FontDesign) -> NSFont {
     return base
 }
 
+/// A side of a bindable shape an arrow endpoint can attach to.
+enum BindingSide: String {
+    case top, bottom, left, right
+}
+
+/// Ties one end of a line to the middle of a shape's side, so moving or
+/// resizing the shape carries the line end with it.
+struct ShapeBinding {
+    var shapeID: UUID
+    var side: BindingSide
+}
+
 /// One drawn annotation, stored in the capture's **pixel** coordinate space
 /// (origin top-left) so it maps cleanly to both the on-screen canvas and the
 /// full-resolution export. Non-destructive: shapes live as data until flattened.
@@ -264,6 +280,10 @@ struct Annotation: Identifiable {
     /// End decorations — line tool only.
     var startCap: LineCap = .none
     var endCap: LineCap = .arrow
+    /// Ties an end to a shape's side so the end follows the shape — line tool
+    /// only. Cleared when the line is dragged bodily off its shapes.
+    var startBinding: ShapeBinding?
+    var endBinding: ShapeBinding?
 
     /// Bounding rect of `start`/`end`, normalized so width/height are positive.
     var boundingRect: CGRect {
@@ -289,7 +309,8 @@ struct Annotation: Identifiable {
 
     /// A copy with a fresh identity, shifted by `offset` (pixel coords) so it
     /// doesn't sit exactly atop the original. All style/content is preserved;
-    /// the caller re-numbers a duplicated step counter.
+    /// the caller re-numbers a duplicated step counter. Bindings are not
+    /// copied — the duplicate lands offset, no longer on the shape's side.
     func duplicated(offsetBy offset: CGPoint) -> Annotation {
         var copy = Annotation(kind: kind,
                               start: CGPoint(x: start.x + offset.x, y: start.y + offset.y),
@@ -363,6 +384,57 @@ extension Annotation {
     }
 }
 
+// MARK: - Shape binding
+
+extension Annotation {
+    /// Shapes a line end can bind to. The ellipse binds at its bounding rect's
+    /// side midpoints, which lie exactly on the ellipse itself.
+    var isBindable: Bool {
+        switch kind {
+        case .rectangle, .roundedRect, .ellipse: return true
+        default: return false
+        }
+    }
+
+    /// The midpoint of `side` of the bounding rect — where a bound line end sits.
+    func anchorPoint(for side: BindingSide) -> CGPoint {
+        let r = boundingRect
+        switch side {
+        case .top: return CGPoint(x: r.midX, y: r.minY)
+        case .bottom: return CGPoint(x: r.midX, y: r.maxY)
+        case .left: return CGPoint(x: r.minX, y: r.midY)
+        case .right: return CGPoint(x: r.maxX, y: r.midY)
+        }
+    }
+
+    fileprivate var sideSegments: [(side: BindingSide, a: CGPoint, b: CGPoint)] {
+        let r = boundingRect
+        return [(.top, CGPoint(x: r.minX, y: r.minY), CGPoint(x: r.maxX, y: r.minY)),
+                (.bottom, CGPoint(x: r.minX, y: r.maxY), CGPoint(x: r.maxX, y: r.maxY)),
+                (.left, CGPoint(x: r.minX, y: r.minY), CGPoint(x: r.minX, y: r.maxY)),
+                (.right, CGPoint(x: r.maxX, y: r.minY), CGPoint(x: r.maxX, y: r.maxY))]
+    }
+}
+
+/// The bindable shape side within `tolerance` of `point` (image coords), if
+/// any: approaching a side offers its midpoint as the snap anchor. The topmost
+/// such shape wins; `excluding` skips the shape the line's other end is bound
+/// to, so one line can't collapse onto a single shape.
+func bindingCandidate(at point: CGPoint, in annotations: [Annotation],
+                      excluding excluded: UUID? = nil, tolerance: CGFloat)
+    -> (binding: ShapeBinding, anchor: CGPoint)? {
+    for shape in annotations.reversed() where shape.isBindable && shape.id != excluded {
+        let nearest = shape.sideSegments
+            .map { (side: $0.side, distance: distanceFromPoint(point, toSegment: $0.a, $0.b)) }
+            .min { $0.distance < $1.distance }
+        if let nearest, nearest.distance <= tolerance {
+            return (ShapeBinding(shapeID: shape.id, side: nearest.side),
+                    shape.anchorPoint(for: nearest.side))
+        }
+    }
+    return nil
+}
+
 // MARK: - Selection & manipulation
 
 /// A draggable handle on a selected annotation.
@@ -390,7 +462,7 @@ extension Annotation {
                     (.topRight, CGPoint(x: r.maxX, y: r.minY)),
                     (.bottomLeft, CGPoint(x: r.minX, y: r.maxY)),
                     (.bottomRight, CGPoint(x: r.maxX, y: r.maxY))]
-        case .text, .counter:
+        case .text, .counter, .move:
             return []
         }
     }
@@ -422,6 +494,8 @@ extension Annotation {
             return textRect.insetBy(dx: -tolerance, dy: -tolerance).contains(point)
         case .counter:
             return hypot(point.x - start.x, point.y - start.y) <= counterRadius + tolerance
+        case .move:
+            return false   // never an annotation kind
         }
     }
 }

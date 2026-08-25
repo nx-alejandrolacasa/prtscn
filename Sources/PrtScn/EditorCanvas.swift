@@ -70,6 +70,8 @@ struct CanvasFit {
 private struct DragSession {
     enum Kind {
         case draw
+        /// A press on empty space with the move tool — deselect only.
+        case idle
         case placeText
         case placeCounter
         case finishingEdit
@@ -80,6 +82,8 @@ private struct DragSession {
 
     let kind: Kind
     let pressImage: CGPoint
+    /// The shape side the line's start snapped to at press, if any.
+    var startBinding: ShapeBinding?
     /// The annotation's endpoints at press, so move/resize stay anchored.
     var originalStart: CGPoint = .zero
     var originalEnd: CGPoint = .zero
@@ -122,10 +126,16 @@ struct EditorCanvas: View {
     /// armed but not yet dragging — the loupe shows here too, so the *first*
     /// endpoint can be aimed precisely, not just the second.
     @State private var hoverPoint: CGPoint?
+    /// The shape-side anchor (image coords) a line end would bind to right
+    /// now — the little dot shown while hovering or dragging with the line
+    /// tool near a shape's side. `nil` when nothing is in snapping range.
+    @State private var snapAnchor: CGPoint?
 
     /// Hit slop in view points.
     private let handleHitRadius: CGFloat = 11
     private let bodyTolerance: CGFloat = 8
+    /// How close (view points) to a shape's side the binding dot engages.
+    private let bindSnapRadius: CGFloat = 20
 
     var body: some View {
         GeometryReader { geo in
@@ -154,8 +164,10 @@ struct EditorCanvas: View {
                             } else if hoverPoint != nil {
                                 hoverPoint = nil
                             }
+                            updateHoverSnap(at: location, fit: fit)
                         case .ended:
                             hoverPoint = nil
+                            if session == nil { snapAnchor = nil }
                             if model.isPickingColor {
                                 NSCursor.arrow.set()
                                 model.updateHoverColor(at: nil)
@@ -175,6 +187,7 @@ struct EditorCanvas: View {
         .onChange(of: model.tool) { _, _ in
             if model.editingTextID != nil { model.finishTextEditing() }
             hoverPoint = nil
+            snapAnchor = nil
         }
         // Restore the arrow the moment picking ends (a lingering crosshair would
         // otherwise stay until the next mouse move).
@@ -220,12 +233,22 @@ struct EditorCanvas: View {
             } else if let selected = model.selectedAnnotation, selected.id != model.editingTextID {
                 drawSelection(selected, in: &context, fit: fit)
             }
+            if let snapAnchor, !model.isCropping {
+                drawSnapDot(at: fit.toView(snapAnchor), in: &context)
+            }
         }
         .contentShape(Rectangle())
-        // Marquee pointer while cropping. (The color picker uses NSCursor's
-        // crosshair instead — see the hover handler — as SwiftUI's PointerStyle
-        // has no crosshair.)
-        .pointerStyle(model.isCropping ? .rectSelection : nil)
+        // Marquee pointer while cropping, hand while the move tool is armed.
+        // (The color picker uses NSCursor's crosshair instead — see the hover
+        // handler — as SwiftUI's PointerStyle has no crosshair.)
+        .pointerStyle(pointerStyle)
+    }
+
+    private var pointerStyle: PointerStyle? {
+        if model.isCropping { return .rectSelection }
+        guard model.tool == .move, !model.isPickingColor else { return nil }
+        if case .move = session?.kind { return .grabActive }
+        return .grabIdle
     }
 
     private func draw(_ annotation: Annotation, in context: inout GraphicsContext,
@@ -305,6 +328,8 @@ struct EditorCanvas: View {
                               design: annotation.fontDesign.swiftUIDesign))
                 .foregroundStyle(annotation.color)
             context.draw(text, at: fit.toView(annotation.start), anchor: .topLeading)
+        case .move:
+            break   // never an annotation kind
         }
 
         // The label itself, centered in the knockout (the TextField draws it
@@ -488,6 +513,17 @@ struct EditorCanvas: View {
                         end = snapped(end)
                         loupePoint = end
                     }
+                    var endBinding: ShapeBinding?
+                    if model.tool == .line {
+                        if let candidate = bindingCandidate(
+                            at: image, in: model.annotations,
+                            excluding: current.startBinding?.shapeID,
+                            tolerance: bindSnapRadius / fit.scale) {
+                            end = candidate.anchor
+                            endBinding = candidate.binding
+                        }
+                        snapAnchor = endBinding != nil ? end : nil
+                    }
                     let labelSize = isMeasure ? model.measureSize : model.fontSize
                     // Measure keeps its defaults — its label shrinks/relocates
                     // per segment instead, and should stay readable in exports.
@@ -499,11 +535,19 @@ struct EditorCanvas: View {
                     if model.tool == .line {
                         draft.startCap = model.lineStartCap
                         draft.endCap = model.lineEndCap
+                        draft.startBinding = current.startBinding
+                        draft.endBinding = endBinding
                     }
                     model.draft = draft
                 case .move(let id):
                     guard moved else { return }
-                    if !current.didMutate { model.snapshot(); current.didMutate = true; session = current }
+                    if !current.didMutate {
+                        model.snapshot()
+                        // A line dragged bodily detaches from its shapes.
+                        if annotationKind(id) == .line { model.clearBindings(id: id) }
+                        current.didMutate = true
+                        session = current
+                    }
                     var dx = image.x - current.pressImage.x, dy = image.y - current.pressImage.y
                     // Keep a measure line's endpoints on the pixel grid across moves.
                     if annotationKind(id) == .measure { dx = dx.rounded(); dy = dy.rounded() }
@@ -520,16 +564,24 @@ struct EditorCanvas: View {
                         var p = image
                         if shiftDown, let kind, axisLocks(kind) { p = axisLocked(p, relativeTo: current.originalEnd) }
                         if isMeasure { p = snapped(p); loupePoint = p }
-                        model.setPoints(id: id, start: p, end: current.originalEnd)
+                        if kind == .line {
+                            resizeLineEndpoint(id: id, handle: .start, to: p, fit: fit)
+                        } else {
+                            model.setPoints(id: id, start: p, end: current.originalEnd)
+                        }
                     case .end:
                         var p = image
                         if shiftDown, let kind, axisLocks(kind) { p = axisLocked(p, relativeTo: current.originalStart) }
                         if isMeasure { p = snapped(p); loupePoint = p }
-                        model.setPoints(id: id, start: current.originalStart, end: p)
+                        if kind == .line {
+                            resizeLineEndpoint(id: id, handle: .end, to: p, fit: fit)
+                        } else {
+                            model.setPoints(id: id, start: current.originalStart, end: p)
+                        }
                     default:
                         model.setPoints(id: id, start: current.anchor ?? current.originalStart, end: image)
                     }
-                case .placeText, .placeCounter, .finishingEdit, .pickColor:
+                case .idle, .placeText, .placeCounter, .finishingEdit, .pickColor:
                     break
                 }
             }
@@ -539,6 +591,7 @@ struct EditorCanvas: View {
                 // stale position until the mouse next moves.
                 if let point = loupePoint { hoverPoint = point }
                 loupePoint = nil
+                snapAnchor = nil
                 if model.isCropping {
                     // Discard a too-small drag so we stay in the "draw a region" phase.
                     if let r = model.cropRect, r.width < 8 || r.height < 8 { model.cropRect = nil }
@@ -559,7 +612,7 @@ struct EditorCanvas: View {
                     model.finishTextEditing()
                 case .pickColor:
                     model.commitPickedColor()
-                case .move, .resize:
+                case .idle, .move, .resize:
                     break
                 }
             }
@@ -589,7 +642,20 @@ struct EditorCanvas: View {
             }
         }
 
-        // 2. The body of any annotation (topmost = last drawn) — select + move.
+        // 2. With the line tool armed, a press near a bindable shape's side
+        // starts a line bound there — taking precedence over selecting the
+        // shape underneath, since the aim is clearly to connect it. Pressing
+        // deeper inside the shape still selects it.
+        if model.tool == .line,
+           let candidate = bindingCandidate(at: pressImage, in: model.annotations,
+                                            tolerance: bindSnapRadius / fit.scale) {
+            model.selectedID = nil
+            var session = DragSession(kind: .draw, pressImage: candidate.anchor)
+            session.startBinding = candidate.binding
+            return session
+        }
+
+        // 3. The body of any annotation (topmost = last drawn) — select + move.
         let tolerance = bodyTolerance / fit.scale
         if let hit = model.annotations.last(where: { $0.bodyContains(pressImage, tolerance: tolerance) }) {
             model.selectedID = hit.id
@@ -597,10 +663,12 @@ struct EditorCanvas: View {
                                originalStart: hit.start, originalEnd: hit.end)
         }
 
-        // 3. Empty space — deselect, then draw / place text / stamp a counter.
+        // 4. Empty space — deselect, then draw / place text / stamp a counter.
+        // The move tool draws nothing, so its press ends there.
         model.selectedID = nil
         let kind: DragSession.Kind
         switch model.tool {
+        case .move: kind = .idle
         case .text: kind = .placeText
         case .counter: kind = .placeCounter
         default: kind = .draw
@@ -624,6 +692,46 @@ struct EditorCanvas: View {
 
     private func annotationKind(_ id: UUID) -> EditTool? {
         model.annotations.first(where: { $0.id == id })?.kind
+    }
+
+    /// Re-snaps a dragged line endpoint to any shape side in range, updating
+    /// its binding (or freeing it when nothing is nearby). The other end's
+    /// shape is excluded so both ends can't land on the same shape.
+    private func resizeLineEndpoint(id: UUID, handle: ResizeHandle, to point: CGPoint, fit: CanvasFit) {
+        let line = model.annotations.first { $0.id == id }
+        let otherShape = handle == .start ? line?.endBinding?.shapeID : line?.startBinding?.shapeID
+        let candidate = bindingCandidate(at: point, in: model.annotations, excluding: otherShape,
+                                         tolerance: bindSnapRadius / fit.scale)
+        snapAnchor = candidate?.anchor
+        model.setLineEndpoint(id: id, handle: handle, point: candidate?.anchor ?? point,
+                              binding: candidate?.binding)
+    }
+
+    /// Tracks the binding dot while the line tool is armed but not dragging.
+    private func updateHoverSnap(at location: CGPoint, fit: CanvasFit) {
+        guard session == nil else { return }
+        guard model.tool == .line, !model.isCropping, !model.isPickingColor,
+              model.editingTextID == nil else {
+            if snapAnchor != nil { snapAnchor = nil }
+            return
+        }
+        let point = fit.toImage(location, clampedTo: model.pixelSize)
+        let anchor = bindingCandidate(at: point, in: model.annotations,
+                                      tolerance: bindSnapRadius / fit.scale)?.anchor
+        if anchor != snapAnchor { snapAnchor = anchor }
+    }
+
+    /// The binding dot on a shape side's midpoint: pressing or releasing a
+    /// line end while it shows snaps (and binds) the end there.
+    private func drawSnapDot(at center: CGPoint, in context: inout GraphicsContext) {
+        context.stroke(Path(ellipseIn: CGRect(x: center.x - 9, y: center.y - 9,
+                                              width: 18, height: 18)),
+                       with: .color(.accentColor.opacity(0.45)), lineWidth: 1.5)
+        context.fill(Path(ellipseIn: CGRect(x: center.x - 5.5, y: center.y - 5.5,
+                                            width: 11, height: 11)),
+                     with: .color(.white))
+        context.fill(Path(ellipseIn: CGRect(x: center.x - 4, y: center.y - 4, width: 8, height: 8)),
+                     with: .color(.accentColor))
     }
 
     /// Measure endpoints snap to integer pixel *boundaries* (not centers), so

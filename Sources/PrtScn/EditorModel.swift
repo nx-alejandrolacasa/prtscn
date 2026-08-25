@@ -368,6 +368,39 @@ final class EditorModel {
         guard let index = annotations.firstIndex(where: { $0.id == id }) else { return }
         annotations[index].start = start
         annotations[index].end = end
+        if annotations[index].isBindable { syncBoundLines(to: annotations[index]) }
+    }
+
+    /// Re-anchors every line end bound to `shape` after it moved or resized.
+    private func syncBoundLines(to shape: Annotation) {
+        for index in annotations.indices {
+            if let binding = annotations[index].startBinding, binding.shapeID == shape.id {
+                annotations[index].start = shape.anchorPoint(for: binding.side)
+            }
+            if let binding = annotations[index].endBinding, binding.shapeID == shape.id {
+                annotations[index].end = shape.anchorPoint(for: binding.side)
+            }
+        }
+    }
+
+    /// Updates one end of a line, rebinding or freeing it. The caller takes
+    /// the undo `snapshot()` once, when the drag first moves.
+    func setLineEndpoint(id: UUID, handle: ResizeHandle, point: CGPoint, binding: ShapeBinding?) {
+        guard let index = annotations.firstIndex(where: { $0.id == id }) else { return }
+        if handle == .start {
+            annotations[index].start = point
+            annotations[index].startBinding = binding
+        } else {
+            annotations[index].end = point
+            annotations[index].endBinding = binding
+        }
+    }
+
+    /// A line dragged by its body detaches from its shapes.
+    func clearBindings(id: UUID) {
+        guard let index = annotations.firstIndex(where: { $0.id == id }) else { return }
+        annotations[index].startBinding = nil
+        annotations[index].endBinding = nil
     }
 
     /// Duplicates the selected annotation, offset slightly so the copy is
@@ -391,6 +424,11 @@ final class EditorModel {
         guard let id = selectedID, annotations.contains(where: { $0.id == id }) else { return }
         snapshot()
         annotations.removeAll { $0.id == id }
+        // Lines bound to a deleted shape stay where they are, just unbound.
+        for index in annotations.indices {
+            if annotations[index].startBinding?.shapeID == id { annotations[index].startBinding = nil }
+            if annotations[index].endBinding?.shapeID == id { annotations[index].endBinding = nil }
+        }
         selectedID = nil
     }
 
@@ -900,6 +938,8 @@ final class EditorModel {
                 drawCounter(annotation, in: context, imageHeight: h)
             case .text:
                 drawText(annotation, in: context, imageHeight: h)
+            case .move:
+                break   // never an annotation kind
             }
 
             if hasLabel {
