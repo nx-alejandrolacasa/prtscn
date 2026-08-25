@@ -491,7 +491,7 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
         case Self.crop:
             spec = ("crop", "Crop", "Crop", #selector(cropAction))
         case Self.pixelate:
-            spec = ("eye.slash", "Pixelate", "Pixelate", #selector(pixelateAction))
+            spec = ("eye.slash", "Pixelate", "Pixelate (P)", #selector(pixelateAction))
         case Self.eyedropper:
             spec = ("eyedropper", "Pick Color", "Pick Color", #selector(eyedropperAction))
         case Self.copy:

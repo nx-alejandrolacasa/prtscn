@@ -76,7 +76,7 @@ struct EditorView: View {
             // The move tool draws nothing — it selects, moves and resizes
             // what's already there, without the drawing tools' risk of
             // dropping a stray shape.
-            PaletteButton(help: EditTool.move.label, isOn: model.tool == .move,
+            PaletteButton(help: EditTool.move.hint, isOn: model.tool == .move,
                           action: { model.tool = .move; setExpanded(nil) }) {
                 EditTool.move.icon
             }
@@ -220,10 +220,30 @@ struct EditorView: View {
                 else { model.selectedID = nil }
             }
             .keyboardShortcut(.cancelAction)
+            toolShortcuts
         }
         .opacity(0)
         .frame(width: 0, height: 0)
         .accessibilityHidden(true)
+    }
+
+    /// Single-letter tool switching (never fired while a text field has
+    /// focus — typing wins). A and L arm the merged line tool's two flavors;
+    /// E doubles for the ellipse alongside C.
+    private var toolShortcuts: some View {
+        Group {
+            Button("", action: { model.tool = .move }).keyboardShortcut("h", modifiers: [])
+            Button("", action: { model.selectLineTool(arrow: true) }).keyboardShortcut("a", modifiers: [])
+            Button("", action: { model.selectLineTool(arrow: false) }).keyboardShortcut("l", modifiers: [])
+            Button("", action: { model.selectShape(.roundedRect) }).keyboardShortcut("s", modifiers: [])
+            Button("", action: { model.selectShape(.ellipse) }).keyboardShortcut("c", modifiers: [])
+            Button("", action: { model.selectShape(.ellipse) }).keyboardShortcut("e", modifiers: [])
+            Button("", action: { model.selectShape(.diamond) }).keyboardShortcut("d", modifiers: [])
+            Button("", action: { model.tool = .text }).keyboardShortcut("t", modifiers: [])
+            Button("", action: { model.tool = .measure }).keyboardShortcut("m", modifiers: [])
+            Button("", action: { model.tool = .counter }).keyboardShortcut("n", modifiers: [])
+            Button("", action: { model.tool = .pixelate }).keyboardShortcut("p", modifiers: [])
+        }
     }
 }
 
@@ -346,7 +366,7 @@ private struct LineToolControl: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            PaletteButton(help: hasArrow ? "Arrow" : "Line", isOn: model.tool == .line,
+            PaletteButton(help: hasArrow ? "Arrow (A)" : "Line (L)", isOn: model.tool == .line,
                           action: onToggle) {
                 toolIcon
             }
@@ -427,7 +447,7 @@ private struct ShapeToolControl: View {
             if isExpanded {
                 SubToolbar {
                     ForEach(EditTool.shapes) { shape in
-                        PaletteButton(help: shape.label, isOn: model.tool == shape,
+                        PaletteButton(help: shape.hint, isOn: model.tool == shape,
                                       segmented: true) {
                             model.selectShape(shape)
                         } icon: { shape.icon }
@@ -453,7 +473,7 @@ private struct TextToolControl: View {
         HStack(spacing: 6) {
             // Toolbar button shows "Aa" in the current font; tapping selects the
             // text tool and toggles the controls.
-            PaletteButton(help: EditTool.text.label, isOn: model.tool == .text, action: onToggle) {
+            PaletteButton(help: EditTool.text.hint, isOn: model.tool == .text, action: onToggle) {
                 Text("Aa").font(.system(size: 14, weight: .semibold,
                                         design: model.fontDesign.swiftUIDesign))
             }
@@ -499,7 +519,7 @@ private struct CounterToolControl: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            PaletteButton(help: EditTool.counter.label, isOn: model.tool == .counter, action: onToggle) {
+            PaletteButton(help: EditTool.counter.hint, isOn: model.tool == .counter, action: onToggle) {
                 ZStack {
                     // `.foreground` so it's black like the other icons (white when active).
                     Circle().fill(.foreground)
@@ -530,7 +550,7 @@ private struct MeasureToolControl: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            PaletteButton(help: EditTool.measure.label, isOn: model.tool == .measure, action: onToggle) {
+            PaletteButton(help: EditTool.measure.hint, isOn: model.tool == .measure, action: onToggle) {
                 EditTool.measure.icon
             }
 

@@ -47,6 +47,26 @@ enum EditTool: String, CaseIterable, Identifiable {
         }
     }
 
+    /// The unmodified key that arms the tool from the keyboard. The line tool
+    /// also answers to A, which arms it with an arrow head; E doubles for the
+    /// ellipse.
+    var shortcutKey: Character {
+        switch self {
+        case .move: "H"
+        case .line: "L"
+        case .measure: "M"
+        case .roundedRect: "S"
+        case .ellipse: "C"
+        case .diamond: "D"
+        case .pixelate: "P"
+        case .counter: "N"
+        case .text: "T"
+        }
+    }
+
+    /// Tooltip text: the label with its shortcut key.
+    var hint: String { "\(label) (\(shortcutKey))" }
+
     /// The closed-shape tools grouped behind the palette's single shape button.
     static let shapes: [EditTool] = [.roundedRect, .ellipse, .diamond]
 

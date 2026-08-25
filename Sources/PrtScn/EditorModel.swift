@@ -184,6 +184,15 @@ final class EditorModel {
     /// What the palette's merged shape button re-arms: the last shape used.
     private(set) var lastShapeTool: EditTool = .roundedRect
 
+    /// Arms the line tool as an arrow (A) or a plain line (L) — the two
+    /// keyboard flavors of the one merged tool. Only arms; a selected line's
+    /// caps are edited via the palette's cap menus.
+    func selectLineTool(arrow: Bool) {
+        tool = .line
+        lineStartCap = .none
+        lineEndCap = arrow ? .arrow : .none
+    }
+
     /// Selects one of the closed-shape tools (via the shape button's expansion).
     func selectShape(_ shape: EditTool) {
         guard shape.isShape else { return }
