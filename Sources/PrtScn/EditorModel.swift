@@ -44,11 +44,20 @@ final class EditorModel {
     /// Transient hint shown in the toast slot (e.g. how to pan while zoomed).
     private(set) var tipMessage: String?
 
-    /// The −/+ buttons move in steps of this many percentage points.
-    private static let zoomStepPercent: CGFloat = 50
+    /// The −/+ buttons step 25 percentage points up to this boundary, 50 above.
+    private static let fineZoomUpToPercent: CGFloat = 200
     private static let maxZoom: CGFloat = 8
+    /// Zooming out stops once the capture is displayed this small.
+    private static let minZoomPercent: CGFloat = 25
 
-    var canZoomOut: Bool { zoom > 1 }
+    /// Whether the image overflows the canvas, i.e. there is anywhere to pan.
+    var canPan: Bool { zoom > 1 }
+
+    /// Never above 1 (fitted always stays reachable), even when a huge capture
+    /// is fitted below `minZoomPercent` already.
+    private var minZoom: CGFloat {
+        min(1, Self.minZoomPercent / max(fittedPercent, 1))
+    }
 
     func zoomIn() { stepZoom(by: 1) }
 
@@ -56,15 +65,20 @@ final class EditorModel {
 
     func resetZoom() { setZoom(1) }
 
-    /// Steps the displayed percentage to the next multiple of 50 in the given
-    /// direction. From an in-between state (a pinch), the first step lands on
-    /// the nearest multiple in that direction; a hair's distance from a
-    /// multiple (float noise from a previous step) counts as being on it.
+    /// Steps the displayed percentage to the next stop in the given direction —
+    /// multiples of 25 up to 200%, multiples of 50 above. From an in-between
+    /// state (a pinch), the first step lands on the nearest stop in that
+    /// direction; a hair's distance from a stop (float noise from a previous
+    /// step) counts as being on it.
     private func stepZoom(by direction: CGFloat) {
         let unit = fittedPercent
         guard unit > 0 else { return }
-        let step = Self.zoomStepPercent
         let current = zoom * unit
+        // The step matches the segment being moved through: leaving 200%
+        // upward is a 50 step, arriving at 200% from above a 50 step too.
+        let boundary = Self.fineZoomUpToPercent
+        let coarse = direction > 0 ? current >= boundary - 1 : current > boundary + 1
+        let step: CGFloat = coarse ? 50 : 25
         let nearest = (current / step).rounded() * step
         let target: CGFloat
         if abs(current - nearest) < 1 {
@@ -78,14 +92,14 @@ final class EditorModel {
     /// Sets an absolute zoom (clamped) — the continuous path used by pinching;
     /// the stepped buttons funnel through it too.
     func setZoom(_ value: CGFloat) {
-        let new = min(max(value, 1), Self.maxZoom)
+        let new = min(max(value, minZoom), Self.maxZoom)
         guard new != zoom else { return }
-        if zoom == 1, new > 1 { showTip("Scroll to move around · ⌘-scroll to zoom") }
+        if zoom <= 1, new > 1 { showTip("Scroll to move around · ⌘-scroll to zoom") }
         // Scale the pan proportionally so the point at the anchor stays put
         // while zooming.
         pan = CGSize(width: pan.width * new / zoom, height: pan.height * new / zoom)
         zoom = new
-        if zoom == 1 { pan = .zero } else { clampPan() }
+        if zoom <= 1 { pan = .zero } else { clampPan() }
     }
 
     /// The percentage shown at zoom 1 — the fitted scale relative to the
@@ -113,7 +127,7 @@ final class EditorModel {
 
     /// Right-click-drag panning; deltas in view points.
     func panBy(dx: CGFloat, dy: CGFloat) {
-        guard zoom > 1 else { return }
+        guard canPan else { return }
         pan.width += dx
         pan.height += dy
         clampPan()
@@ -160,7 +174,7 @@ final class EditorModel {
         ? SettingsStore.shared.editorTool : .line {
         didSet {
             SettingsStore.shared.editorTool = tool
-            if tool == .measure, zoom == 1 { showTip("Zoom in to measure small distances") }
+            if tool == .measure, zoom <= 1 { showTip("Zoom in to measure small distances") }
         }
     }
     /// The line tool's end decorations (a plain tail and an arrow head by

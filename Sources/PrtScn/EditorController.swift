@@ -184,7 +184,7 @@ final class EditorController: NSObject, NSWindowDelegate {
     private func handlePan(type: NSEvent.EventType, windowID: ObjectIdentifier?,
                            location: NSPoint, dx: CGFloat, dy: CGFloat) -> Bool {
         guard let window, let model, windowID == ObjectIdentifier(window),
-              model.canZoomOut else { return false }
+              model.canPan else { return false }
         switch type {
         case .rightMouseDown:
             guard let content = window.contentView,
@@ -222,7 +222,7 @@ final class EditorController: NSObject, NSWindowDelegate {
             model.setZoom(model.zoom * pow(1.004, step))
             return true
         }
-        guard model.canZoomOut else { return false }   // fitted — nothing to pan
+        guard model.canPan else { return false }   // fitted or smaller — nothing to pan
         model.panBy(dx: dx, dy: dy)
         return true
     }
