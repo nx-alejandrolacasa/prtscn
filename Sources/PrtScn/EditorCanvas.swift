@@ -775,6 +775,14 @@ struct EditorCanvas: View {
             return DragSession(kind: .finishingEdit, pressImage: pressImage)
         }
 
+        // The counter tool always stamps — clicking on top of a figure adds
+        // the next number there instead of selecting it. Repositioning a
+        // badge is the select tool's job.
+        if model.tool == .counter, !toggling {
+            model.selectedID = nil
+            return DragSession(kind: .placeCounter, pressImage: pressImage)
+        }
+
         // 1. A handle of the currently selected annotation.
         if let selected = model.selectedAnnotation {
             for handle in selected.handles where distance(pressView, fit.toView(handle.point)) <= handleHitRadius {
@@ -1042,6 +1050,9 @@ struct EditorCanvas: View {
                     updateDraggedBendDots(id: line.id)
                     return
                 }
+                // With the counter tool armed both clicks stamped a badge —
+                // don't also open the figure's label underneath.
+                guard model.tool != .counter else { return }
                 if let hit = model.annotations.last(where: {
                     ($0.kind == .text || $0.supportsLabel)
                         && $0.bodyContains(point, tolerance: tolerance)
@@ -1199,8 +1210,16 @@ struct EditorCanvas: View {
                 }
             }
             .focused($textFieldFocused)
-            // Focus once the field is actually in the hierarchy.
-            .task(id: id) { textFieldFocused = true }
+            // Focus once the field is actually in the hierarchy — and keep
+            // poking until it sticks: the first attempt can lose the race
+            // for first responder with the placing click or double-click.
+            .task(id: id) {
+                for _ in 0..<20 {
+                    textFieldFocused = true
+                    try? await Task.sleep(for: .milliseconds(50))
+                    if textFieldFocused || model.editingTextID != id { return }
+                }
+            }
             .onSubmit { model.finishTextEditing() }
             .onExitCommand { model.finishTextEditing() }   // Esc
             .onChange(of: textFieldFocused) { _, focused in

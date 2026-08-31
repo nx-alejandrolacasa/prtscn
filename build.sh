@@ -106,7 +106,7 @@ fi
 # number comes from git (commit count — monotonic and reproducible), so the
 # About tab and Finder always show which build this actually is. CI overrides
 # the version from the pushed tag via PRTSCN_VERSION.
-VERSION="${PRTSCN_VERSION:-0.18.0}"
+VERSION="${PRTSCN_VERSION:-0.18.1}"
 BUILD_NUMBER="$(git rev-list --count HEAD 2>/dev/null || echo 0)"
 
 # Stamp the variant's identity and the version into the bundle.
