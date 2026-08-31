@@ -67,8 +67,11 @@ struct CanvasFit {
 private struct DragSession {
     enum Kind {
         case draw
-        /// A press on empty space with the move tool — deselect only.
+        /// A press on empty space with the move tool, or a shift/⌘-click that
+        /// only toggled the selection — nothing to drag.
         case idle
+        /// A select-tool drag on empty space — rubber-band selection.
+        case marquee
         case placeText
         case placeCounter
         case finishingEdit
@@ -84,6 +87,9 @@ private struct DragSession {
     /// The annotation's endpoints at press, so move/resize stay anchored.
     var originalStart: CGPoint = .zero
     var originalEnd: CGPoint = .zero
+    /// Every selected annotation's endpoints at press when a `.move` drags a
+    /// multi-selection — the whole group translates together.
+    var groupOriginals: [UUID: (start: CGPoint, end: CGPoint)] = [:]
     /// Fixed corner for a corner-resize (nil for arrow endpoints).
     var anchor: CGPoint?
     /// Set once the drag actually moves, so a plain click doesn't snapshot.
@@ -131,12 +137,15 @@ struct EditorCanvas: View {
     /// stroke itself: the curve's midpoint, or the elbow runs' midpoints in
     /// corner mode. Dragging one reshapes the line. Empty when none hovered.
     @State private var bendDots: [CGPoint] = []
+    /// The select tool's rubber band (image coords) while dragging over empty
+    /// space; everything it touches is selected live.
+    @State private var marqueeRect: CGRect?
 
     /// Hit slop in view points.
     private let handleHitRadius: CGFloat = 11
     private let bodyTolerance: CGFloat = 8
     /// How close (view points) to a shape's side the binding dot engages.
-    private let bindSnapRadius: CGFloat = 20
+    private let bindSnapRadius: CGFloat = 16
 
     var body: some View {
         GeometryReader { geo in
@@ -237,6 +246,13 @@ struct EditorCanvas: View {
                 drawCropOverlay(in: &context, fit: fit)
             } else if let selected = model.selectedAnnotation, selected.id != model.editingTextID {
                 drawSelection(selected, in: &context, fit: fit)
+            } else if model.selectedIDs.count > 1 {
+                for annotation in model.annotations where model.selectedIDs.contains(annotation.id) {
+                    drawMultiSelection(annotation, in: &context, fit: fit)
+                }
+            }
+            if let marqueeRect {
+                drawMarquee(marqueeRect, in: &context, fit: fit)
             }
             if let snapAnchor, !model.isCropping {
                 drawSnapDot(at: fit.toView(snapAnchor), in: &context)
@@ -360,8 +376,8 @@ struct EditorCanvas: View {
                               design: annotation.fontDesign.swiftUIDesign))
                 .foregroundStyle(annotation.color)
             context.draw(text, at: fit.toView(annotation.start), anchor: .topLeading)
-        case .move:
-            break   // never an annotation kind
+        case .move, .select:
+            break   // never annotation kinds
         }
 
         // The label itself, centered in the knockout (the TextField draws it
@@ -520,6 +536,27 @@ struct EditorCanvas: View {
         }
     }
 
+    /// A thin outline around each member of a multi-selection — no handles;
+    /// resizing needs a single selection.
+    private func drawMultiSelection(_ annotation: Annotation, in context: inout GraphicsContext,
+                                    fit: CanvasFit) {
+        let bounds = annotation.selectionBounds
+        let rect = CGRect(origin: fit.toView(bounds.origin),
+                          size: CGSize(width: bounds.width * fit.scale,
+                                       height: bounds.height * fit.scale))
+            .insetBy(dx: -4, dy: -4)
+        context.stroke(Path(roundedRect: rect, cornerRadius: 5),
+                       with: .color(.accentColor.opacity(0.8)), style: StrokeStyle(lineWidth: 1.5))
+    }
+
+    /// The select tool's rubber band while dragging over empty space.
+    private func drawMarquee(_ box: CGRect, in context: inout GraphicsContext, fit: CanvasFit) {
+        let rect = CGRect(origin: fit.toView(box.origin),
+                          size: CGSize(width: box.width * fit.scale, height: box.height * fit.scale))
+        context.fill(Path(rect), with: .color(.accentColor.opacity(0.08)))
+        context.stroke(Path(rect), with: .color(.accentColor.opacity(0.7)), lineWidth: 1)
+    }
+
     // MARK: - Drag: draw / select / move / resize
 
     private func drawGesture(fit: CanvasFit) -> some Gesture {
@@ -566,6 +603,7 @@ struct EditorCanvas: View {
                             endBinding = candidate.binding
                             snapAnchor = candidate.anchor
                         } else {
+                            end = axisMagnet(end, relativeTo: start)
                             snapAnchor = nil
                         }
                     }
@@ -586,19 +624,38 @@ struct EditorCanvas: View {
                     model.draft = draft
                 case .move(let id):
                     guard moved else { return }
+                    let group = current.groupOriginals
                     if !current.didMutate {
                         model.snapshot()
-                        // A line dragged bodily detaches from its shapes.
-                        if annotationKind(id) == .line { model.clearBindings(id: id) }
+                        // A line dragged bodily detaches from its shapes —
+                        // unless the shape is moving along in the group.
+                        if group.count > 1 {
+                            for lineID in group.keys where annotationKind(lineID) == .line {
+                                model.detachBindings(id: lineID, keepingShapesIn: Set(group.keys))
+                            }
+                        } else if annotationKind(id) == .line {
+                            model.clearBindings(id: id)
+                        }
                         current.didMutate = true
                         session = current
                     }
-                    var dx = image.x - current.pressImage.x, dy = image.y - current.pressImage.y
-                    // Keep a measure line's endpoints on the pixel grid across moves.
-                    if annotationKind(id) == .measure { dx = dx.rounded(); dy = dy.rounded() }
-                    model.setPoints(id: id,
-                                    start: CGPoint(x: current.originalStart.x + dx, y: current.originalStart.y + dy),
-                                    end: CGPoint(x: current.originalEnd.x + dx, y: current.originalEnd.y + dy))
+                    let dx = image.x - current.pressImage.x, dy = image.y - current.pressImage.y
+                    let targets = group.count > 1 ? group
+                        : [id: (current.originalStart, current.originalEnd)]
+                    for (targetID, original) in targets {
+                        var tdx = dx, tdy = dy
+                        // Keep a measure line's endpoints on the pixel grid across moves.
+                        if annotationKind(targetID) == .measure { tdx = tdx.rounded(); tdy = tdy.rounded() }
+                        model.setPoints(id: targetID,
+                                        start: CGPoint(x: original.start.x + tdx, y: original.start.y + tdy),
+                                        end: CGPoint(x: original.end.x + tdx, y: original.end.y + tdy))
+                    }
+                case .marquee:
+                    let box = rect(from: current.pressImage, to: image)
+                    marqueeRect = box
+                    let hits = Set(model.annotations
+                        .filter { $0.selectionBounds.intersects(box) }.map(\.id))
+                    if hits != model.selectedIDs { model.selectedIDs = hits }
                 case .resize(let id, let handle):
                     guard moved else { return }
                     if !current.didMutate { model.snapshot(); current.didMutate = true; session = current }
@@ -679,6 +736,8 @@ struct EditorCanvas: View {
                     model.finishTextEditing()
                 case .pickColor:
                     model.commitPickedColor()
+                case .marquee:
+                    marqueeRect = nil
                 case .idle, .move, .resize:
                     break
                 }
@@ -688,6 +747,9 @@ struct EditorCanvas: View {
     /// Decides, on press, what this drag will do.
     private func makeSession(pressView: CGPoint, fit: CanvasFit) -> DragSession {
         let pressImage = fit.toImage(pressView, clampedTo: model.pixelSize)
+        // Shift/⌘-click toggles annotations in and out of the selection.
+        let toggling = NSEvent.modifierFlags.contains(.shift)
+            || NSEvent.modifierFlags.contains(.command)
 
         // Picking mode takes over every click on the canvas until it commits
         // or is cancelled — it doesn't select/move/draw annotations.
@@ -716,7 +778,7 @@ struct EditorCanvas: View {
         // dot that already holds a line end grabs that end to re-route it —
         // a second line from the same anchor is still possible by pressing
         // elsewhere along the side.
-        if model.tool == .line,
+        if model.tool == .line, !toggling,
            let candidate = bindingCandidate(at: pressImage, in: model.annotations,
                                             tolerance: bindSnapRadius / fit.scale) {
             if distance(pressView, fit.toView(candidate.anchor)) <= handleHitRadius,
@@ -749,18 +811,37 @@ struct EditorCanvas: View {
                                originalStart: line.start, originalEnd: line.end)
         }
 
-        // 4. The body of any annotation (topmost = last drawn) — select + move.
+        // 4. The body of any annotation (topmost = last drawn). A toggle-click
+        // adds it to / removes it from the selection; a plain press selects it
+        // (keeping a multi-selection it's already part of) and drags everything
+        // selected together.
         if let hit = model.annotations.last(where: { $0.bodyContains(pressImage, tolerance: tolerance) }) {
-            model.selectedID = hit.id
-            return DragSession(kind: .move(hit.id), pressImage: pressImage,
-                               originalStart: hit.start, originalEnd: hit.end)
+            if toggling {
+                if model.selectedIDs.contains(hit.id) {
+                    model.selectedIDs.remove(hit.id)
+                } else {
+                    model.selectedIDs.insert(hit.id)
+                }
+                return DragSession(kind: .idle, pressImage: pressImage)
+            }
+            if !model.selectedIDs.contains(hit.id) { model.selectedID = hit.id }
+            var session = DragSession(kind: .move(hit.id), pressImage: pressImage,
+                                      originalStart: hit.start, originalEnd: hit.end)
+            if model.selectedIDs.count > 1 {
+                for annotation in model.annotations where model.selectedIDs.contains(annotation.id) {
+                    session.groupOriginals[annotation.id] = (annotation.start, annotation.end)
+                }
+            }
+            return session
         }
 
-        // 5. Empty space — deselect, then draw / place text / stamp a counter.
-        // The move tool draws nothing, so its press ends there.
-        model.selectedID = nil
+        // 5. Empty space — deselect (a toggle-click leaves the selection
+        // alone), then draw / place text / stamp a counter. The select tool
+        // starts a marquee; the move tool draws nothing, so its press ends there.
+        if !toggling { model.selectedID = nil }
         let kind: DragSession.Kind
         switch model.tool {
+        case .select: kind = .marquee
         case .move: kind = .idle
         case .text: kind = .placeText
         case .counter: kind = .placeCounter
@@ -805,9 +886,12 @@ struct EditorCanvas: View {
         let candidate = bindingCandidate(at: point, in: model.annotations, excluding: otherEnd,
                                          tolerance: bindSnapRadius / fit.scale)
         snapAnchor = candidate?.anchor
-        let snapped = candidate.map {
+        var snapped = candidate.map {
             boundEndpoint(anchor: $0.anchor, side: $0.binding.side,
                           lineWidth: line?.lineWidth ?? model.lineWidth)
+        }
+        if snapped == nil, let line {
+            snapped = axisMagnet(point, relativeTo: handle == .start ? line.end : line.start)
         }
         model.setLineEndpoint(id: id, handle: handle, point: snapped ?? point,
                               binding: candidate?.binding)
@@ -879,6 +963,17 @@ struct EditorCanvas: View {
         abs(p.x - anchor.x) >= abs(p.y - anchor.y)
             ? CGPoint(x: p.x, y: anchor.y)
             : CGPoint(x: anchor.x, y: p.y)
+    }
+
+    /// Magnetic pull for line endpoints: within a few degrees of horizontal or
+    /// vertical, `p` snaps onto the axis through `anchor` so near-straight
+    /// lines come out exactly straight. Beyond the threshold it's untouched.
+    private func axisMagnet(_ p: CGPoint, relativeTo anchor: CGPoint) -> CGPoint {
+        let slope = tan(4 * CGFloat.pi / 180)
+        let dx = abs(p.x - anchor.x), dy = abs(p.y - anchor.y)
+        if dy <= dx * slope { return CGPoint(x: p.x, y: anchor.y) }
+        if dx <= dy * slope { return CGPoint(x: anchor.x, y: p.y) }
+        return p
     }
 
     // MARK: - Double-click: edit text / shape label

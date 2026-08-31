@@ -72,12 +72,17 @@ struct EditorView: View {
 
     private var palette: some View {
         HStack(spacing: 6) {
-            // The move tool draws nothing — it selects, moves and resizes
-            // what's already there, without the drawing tools' risk of
-            // dropping a stray shape.
+            // Move and select draw nothing. Move grabs and adjusts one thing;
+            // select picks what's already there — several at once via
+            // drag-marquee or shift/⌘-click — and moves it, without the
+            // drawing tools' risk of dropping a stray shape.
             PaletteButton(help: EditTool.move.hint, isOn: model.tool == .move,
                           action: { model.tool = .move; setExpanded(nil) }) {
                 EditTool.move.icon
+            }
+            PaletteButton(help: EditTool.select.hint, isOn: model.tool == .select,
+                          action: { model.tool = .select; setExpanded(nil) }) {
+                EditTool.select.icon
             }
 
             Divider().frame(height: 20)
@@ -231,6 +236,7 @@ struct EditorView: View {
     /// E doubles for the ellipse alongside C.
     private var toolShortcuts: some View {
         Group {
+            Button("", action: { model.tool = .select }).keyboardShortcut("s", modifiers: [])
             Button("", action: { model.tool = .move }).keyboardShortcut("h", modifiers: [])
             Button("", action: { model.selectLineTool(arrow: true) }).keyboardShortcut("a", modifiers: [])
             Button("", action: { model.selectLineTool(arrow: false) }).keyboardShortcut("l", modifiers: [])

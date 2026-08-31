@@ -4,10 +4,12 @@ import Foundation
 import SwiftUI
 
 /// The drawing tools offered in the editor. Each drawing tool maps 1:1 to the
-/// kind of annotation it produces; `move` is the exception — it draws nothing
-/// and only selects, moves and resizes what's already there.
+/// kind of annotation it produces; `select` and `move` are the exceptions —
+/// they draw nothing. Move grabs and adjusts what's already there; select does
+/// too, and adds marquee and shift/⌘-click multi-selection.
 enum EditTool: String, CaseIterable, Identifiable {
     case move
+    case select
     case line
     case measure
     case roundedRect
@@ -21,6 +23,7 @@ enum EditTool: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
+        case .select: "Select"
         case .move: "Move"
         case .line: "Line"
         case .measure: "Measure"
@@ -35,7 +38,8 @@ enum EditTool: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
-        case .move: "hand.raised"
+        case .select: "rectangle.dashed"
+        case .move: "cursorarrow"
         case .line: "line.diagonal"
         case .measure: "ruler"
         case .roundedRect: "rectangle"   // overridden by `icon`
@@ -52,6 +56,7 @@ enum EditTool: String, CaseIterable, Identifiable {
     /// ellipse.
     var shortcutKey: Character {
         switch self {
+        case .select: "S"
         case .move: "H"
         case .line: "L"
         case .measure: "M"
@@ -839,8 +844,32 @@ extension Annotation {
                     (.topRight, CGPoint(x: r.maxX, y: r.minY)),
                     (.bottomLeft, CGPoint(x: r.minX, y: r.maxY)),
                     (.bottomRight, CGPoint(x: r.maxX, y: r.maxY))]
-        case .text, .counter, .move:
+        case .text, .counter, .move, .select:
             return []
+        }
+    }
+
+    /// The drawn extent used by marquee hits and multi-selection outlines
+    /// (image coords) — wider than `boundingRect` where the mark reaches past
+    /// the two stored points (elbow routes, bowed shafts, badges, text).
+    var selectionBounds: CGRect {
+        switch kind {
+        case .text:
+            return textRect
+        case .counter:
+            return CGRect(x: start.x - counterRadius, y: start.y - counterRadius,
+                          width: counterRadius * 2, height: counterRadius * 2)
+        case .line, .measure:
+            var points = isCorner ? cornerRoute : [start, end]
+            if isCurved { points.append(curveMidpoint) }
+            let xs = points.map(\.x), ys = points.map(\.y)
+            // Inflated by the stroke so a perfectly horizontal or vertical
+            // line isn't a zero-area rect no marquee could intersect.
+            return CGRect(x: xs.min()!, y: ys.min()!,
+                          width: xs.max()! - xs.min()!, height: ys.max()! - ys.min()!)
+                .insetBy(dx: -max(lineWidth / 2, 1), dy: -max(lineWidth / 2, 1))
+        default:
+            return boundingRect
         }
     }
 
@@ -881,8 +910,8 @@ extension Annotation {
             return textRect.insetBy(dx: -tolerance, dy: -tolerance).contains(point)
         case .counter:
             return hypot(point.x - start.x, point.y - start.y) <= counterRadius + tolerance
-        case .move:
-            return false   // never an annotation kind
+        case .move, .select:
+            return false   // never annotation kinds
         }
     }
 }

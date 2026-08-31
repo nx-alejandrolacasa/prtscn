@@ -222,14 +222,25 @@ final class EditorModel {
     private(set) var annotations: [Annotation] = []
     /// The shape currently being dragged out (not yet committed).
     var draft: Annotation?
-    /// The currently selected annotation, if any. Selecting a line surfaces
-    /// the bend-dot hint — the dot only shows on hover, so it needs one.
-    var selectedID: UUID? {
+    /// The selected annotations. Several come from the select tool's marquee
+    /// or shift/⌘-clicks; the single-annotation affordances (handles, style
+    /// editing) act through `selectedID` and stand down while more than one is
+    /// selected. Selecting a single line surfaces the bend-dot hint — the dot
+    /// only shows on hover, so it needs one.
+    var selectedIDs: Set<UUID> = [] {
         didSet {
-            guard selectedID != oldValue, let id = selectedID,
+            guard selectedIDs != oldValue, selectedIDs.count == 1,
+                  let id = selectedIDs.first, !oldValue.contains(id),
                   annotations.first(where: { $0.id == id })?.kind == .line else { return }
             showBendTip()
         }
+    }
+
+    /// The single selected annotation's id — `nil` when none or several are
+    /// selected. Setting it replaces the whole selection.
+    var selectedID: UUID? {
+        get { selectedIDs.count == 1 ? selectedIDs.first : nil }
+        set { selectedIDs = newValue.map { [$0] } ?? [] }
     }
     /// The bend hint runs once per editor session — it teaches a persistent
     /// feature, so repeating it on every line selection would just be noise.
@@ -320,9 +331,8 @@ final class EditorModel {
     }
 
     private func clearSelectionIfMissing() {
-        if let id = selectedID, !annotations.contains(where: { $0.id == id }) {
-            selectedID = nil
-        }
+        let live = selectedIDs.filter { id in annotations.contains { $0.id == id } }
+        if live != selectedIDs { selectedIDs = live }
     }
 
     /// Commits a freshly drawn shape and selects it.
@@ -446,33 +456,56 @@ final class EditorModel {
         annotations[index].endBinding = nil
     }
 
-    /// Duplicates the selected annotation, offset slightly so the copy is
-    /// visible, and selects it (so ⌘D again keeps cascading). A duplicated step
-    /// counter takes the next sequential number rather than repeating the badge.
+    /// Clears a group-moved line's bindings to shapes that aren't moving with
+    /// it; bindings within the group survive, so connected clusters move whole.
+    func detachBindings(id: UUID, keepingShapesIn kept: Set<UUID>) {
+        guard let index = annotations.firstIndex(where: { $0.id == id }) else { return }
+        if let binding = annotations[index].startBinding, !kept.contains(binding.shapeID) {
+            annotations[index].startBinding = nil
+        }
+        if let binding = annotations[index].endBinding, !kept.contains(binding.shapeID) {
+            annotations[index].endBinding = nil
+        }
+    }
+
+    /// Duplicates the selected annotations, offset slightly so the copies are
+    /// visible, and selects them (so ⌘D again keeps cascading). A duplicated
+    /// step counter takes the next sequential number rather than repeating
+    /// the badge.
     func duplicateSelected() {
         finishTextEditing()
-        guard let original = selectedAnnotation else { return }
+        let originals = annotations.filter { selectedIDs.contains($0.id) }
+        guard !originals.isEmpty else { return }
         snapshot()
         let offset = 16 * captureScale
-        var copy = original.duplicated(offsetBy: CGPoint(x: offset, y: offset))
-        if copy.kind == .counter {
-            copy.number = nextCounter
-            nextCounter += 1
+        var copies: [Annotation] = []
+        for original in originals {
+            var copy = original.duplicated(offsetBy: CGPoint(x: offset, y: offset))
+            if copy.kind == .counter {
+                copy.number = nextCounter
+                nextCounter += 1
+            }
+            copies.append(copy)
         }
-        annotations.append(copy)
-        selectedID = copy.id
+        annotations.append(contentsOf: copies)
+        selectedIDs = Set(copies.map(\.id))
     }
 
     func deleteSelected() {
-        guard let id = selectedID, annotations.contains(where: { $0.id == id }) else { return }
+        let ids = selectedIDs.filter { id in annotations.contains { $0.id == id } }
+        guard !ids.isEmpty else { return }
         snapshot()
-        annotations.removeAll { $0.id == id }
+        annotations.removeAll { ids.contains($0.id) }
         // Lines bound to a deleted shape stay where they are, just unbound.
         for index in annotations.indices {
-            if annotations[index].startBinding?.shapeID == id { annotations[index].startBinding = nil }
-            if annotations[index].endBinding?.shapeID == id { annotations[index].endBinding = nil }
+            if let binding = annotations[index].startBinding, ids.contains(binding.shapeID) {
+                annotations[index].startBinding = nil
+            }
+            if let binding = annotations[index].endBinding, ids.contains(binding.shapeID) {
+                annotations[index].endBinding = nil
+            }
         }
-        selectedID = nil
+        selectedIDs = []
     }
 
     // MARK: - Crop
@@ -1029,8 +1062,8 @@ final class EditorModel {
                 drawCounter(annotation, in: context, imageHeight: h)
             case .text:
                 drawText(annotation, in: context, imageHeight: h)
-            case .move:
-                break   // never an annotation kind
+            case .move, .select:
+                break   // never annotation kinds
             }
 
             if hasLabel {
