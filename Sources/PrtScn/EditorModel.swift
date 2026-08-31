@@ -1062,8 +1062,8 @@ final class EditorModel {
                 drawCounter(annotation, in: context, imageHeight: h)
             case .text:
                 drawText(annotation, in: context, imageHeight: h)
-            case .move, .select:
-                break   // never annotation kinds
+            case .select:
+                break   // never an annotation kind
             }
 
             if hasLabel {

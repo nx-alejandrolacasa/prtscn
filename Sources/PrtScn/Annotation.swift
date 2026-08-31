@@ -4,11 +4,10 @@ import Foundation
 import SwiftUI
 
 /// The drawing tools offered in the editor. Each drawing tool maps 1:1 to the
-/// kind of annotation it produces; `select` and `move` are the exceptions —
-/// they draw nothing. Move grabs and adjusts what's already there; select does
-/// too, and adds marquee and shift/⌘-click multi-selection.
+/// kind of annotation it produces; `select` is the exception — it draws
+/// nothing: it selects (several at once via marquee or shift/⌘-click), moves
+/// and resizes what's already there.
 enum EditTool: String, CaseIterable, Identifiable {
-    case move
     case select
     case line
     case measure
@@ -24,7 +23,6 @@ enum EditTool: String, CaseIterable, Identifiable {
     var label: String {
         switch self {
         case .select: "Select"
-        case .move: "Move"
         case .line: "Line"
         case .measure: "Measure"
         case .roundedRect: "Rectangle"
@@ -38,8 +36,7 @@ enum EditTool: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
-        case .select: "rectangle.dashed"
-        case .move: "cursorarrow"
+        case .select: "pointer.arrow.ipad"
         case .line: "line.diagonal"
         case .measure: "ruler"
         case .roundedRect: "rectangle"   // overridden by `icon`
@@ -57,7 +54,6 @@ enum EditTool: String, CaseIterable, Identifiable {
     var shortcutKey: Character {
         switch self {
         case .select: "S"
-        case .move: "H"
         case .line: "L"
         case .measure: "M"
         case .roundedRect: "R"
@@ -69,8 +65,9 @@ enum EditTool: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Tooltip text: the label with its shortcut key.
-    var hint: String { "\(label) (\(shortcutKey))" }
+    /// Tooltip text: the label with its shortcut key. Select also answers to
+    /// V, Figma's shortcut for the same tool.
+    var hint: String { self == .select ? "Select (S, V)" : "\(label) (\(shortcutKey))" }
 
     /// The closed-shape tools grouped behind the palette's single shape button.
     static let shapes: [EditTool] = [.roundedRect, .ellipse, .diamond]
@@ -85,6 +82,11 @@ enum EditTool: String, CaseIterable, Identifiable {
             RoundedRectangle(cornerRadius: 4, style: .continuous)
                 .strokeBorder(lineWidth: 1.8)
                 .frame(width: 17, height: 13)
+        case .select:
+            // The iPadOS pointer glyph sits down-left of where it reads
+            // centered; nudge it so it looks centered in the round button.
+            Image(systemName: systemImage).font(.system(size: 15, weight: .medium))
+                .offset(x: 1, y: -0.5)
         default:
             Image(systemName: systemImage).font(.system(size: 15, weight: .medium))
         }
@@ -844,7 +846,7 @@ extension Annotation {
                     (.topRight, CGPoint(x: r.maxX, y: r.minY)),
                     (.bottomLeft, CGPoint(x: r.minX, y: r.maxY)),
                     (.bottomRight, CGPoint(x: r.maxX, y: r.maxY))]
-        case .text, .counter, .move, .select:
+        case .text, .counter, .select:
             return []
         }
     }
@@ -910,8 +912,8 @@ extension Annotation {
             return textRect.insetBy(dx: -tolerance, dy: -tolerance).contains(point)
         case .counter:
             return hypot(point.x - start.x, point.y - start.y) <= counterRadius + tolerance
-        case .move, .select:
-            return false   // never annotation kinds
+        case .select:
+            return false   // never an annotation kind
         }
     }
 }

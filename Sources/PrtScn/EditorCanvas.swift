@@ -67,8 +67,7 @@ struct CanvasFit {
 private struct DragSession {
     enum Kind {
         case draw
-        /// A press on empty space with the move tool, or a shift/⌘-click that
-        /// only toggled the selection — nothing to drag.
+        /// A shift/⌘-click that only toggled the selection — nothing to drag.
         case idle
         /// A select-tool drag on empty space — rubber-band selection.
         case marquee
@@ -140,6 +139,9 @@ struct EditorCanvas: View {
     /// The select tool's rubber band (image coords) while dragging over empty
     /// space; everything it touches is selected live.
     @State private var marqueeRect: CGRect?
+    /// Whether the cursor is over something the select tool could grab — it
+    /// shows an open hand there, a plain arrow everywhere else.
+    @State private var hoverMovable = false
 
     /// Hit slop in view points.
     private let handleHitRadius: CGFloat = 11
@@ -175,8 +177,10 @@ struct EditorCanvas: View {
                             }
                             updateHoverSnap(at: location, fit: fit)
                             updateBendDots(at: location, fit: fit)
+                            updateHoverMovable(at: location, fit: fit)
                         case .ended:
                             hoverPoint = nil
+                            hoverMovable = false
                             if session == nil {
                                 snapAnchor = nil
                                 bendDots = []
@@ -264,17 +268,22 @@ struct EditorCanvas: View {
             }
         }
         .contentShape(Rectangle())
-        // Marquee pointer while cropping, hand while the move tool is armed.
-        // (The color picker uses NSCursor's crosshair instead — see the hover
-        // handler — as SwiftUI's PointerStyle has no crosshair.)
+        // Marquee pointer while cropping or rubber-banding; with the select
+        // tool, an open hand over anything grabbable, a closed one while
+        // dragging it, the plain arrow elsewhere. (The color picker uses
+        // NSCursor's crosshair instead — see the hover handler — as SwiftUI's
+        // PointerStyle has no crosshair.)
         .pointerStyle(pointerStyle)
     }
 
     private var pointerStyle: PointerStyle? {
         if model.isCropping { return .rectSelection }
-        guard model.tool == .move, !model.isPickingColor else { return nil }
-        if case .move = session?.kind { return .grabActive }
-        return .grabIdle
+        guard model.tool == .select, !model.isPickingColor else { return nil }
+        switch session?.kind {
+        case .move: return .grabActive
+        case .marquee: return .rectSelection
+        default: return hoverMovable ? .grabIdle : nil
+        }
     }
 
     private func draw(_ annotation: Annotation, in context: inout GraphicsContext,
@@ -376,8 +385,8 @@ struct EditorCanvas: View {
                               design: annotation.fontDesign.swiftUIDesign))
                 .foregroundStyle(annotation.color)
             context.draw(text, at: fit.toView(annotation.start), anchor: .topLeading)
-        case .move, .select:
-            break   // never annotation kinds
+        case .select:
+            break   // never an annotation kind
         }
 
         // The label itself, centered in the knockout (the TextField draws it
@@ -841,12 +850,11 @@ struct EditorCanvas: View {
 
         // 5. Empty space — deselect (a toggle-click leaves the selection
         // alone), then draw / place text / stamp a counter. The select tool
-        // starts a marquee; the move tool draws nothing, so its press ends there.
+        // starts a marquee instead.
         if !toggling { model.selectedID = nil }
         let kind: DragSession.Kind
         switch model.tool {
         case .select: kind = .marquee
-        case .move: kind = .idle
         case .text: kind = .placeText
         case .counter: kind = .placeCounter
         default: kind = .draw
@@ -929,6 +937,24 @@ struct EditorCanvas: View {
             $0.kind == .line && $0.bodyContains(point, tolerance: tolerance)
         }?.bendDots.map(\.point) ?? []
         if dots != bendDots { bendDots = dots }
+    }
+
+    /// Tracks whether the select tool's cursor is over something grabbable:
+    /// an annotation body, or a handle of the selected annotation.
+    private func updateHoverMovable(at location: CGPoint, fit: CanvasFit) {
+        guard session == nil else { return }
+        guard model.tool == .select, !model.isCropping, !model.isPickingColor,
+              model.editingTextID == nil else {
+            if hoverMovable { hoverMovable = false }
+            return
+        }
+        let point = fit.toImage(location, clampedTo: model.pixelSize)
+        let tolerance = bodyTolerance / fit.scale
+        let over = model.annotations.contains { $0.bodyContains(point, tolerance: tolerance) }
+            || model.selectedAnnotation?.handles.contains {
+                distance(location, fit.toView($0.point)) <= handleHitRadius
+            } == true
+        if over != hoverMovable { hoverMovable = over }
     }
 
     /// Re-seeds the dots from the model mid-drag (hover doesn't fire then).
