@@ -586,6 +586,7 @@ struct EditorCanvas: View {
                     var start = current.pressImage
                     var end = image
                     if shiftDown, axisLocks(model.tool) { end = axisLocked(end, relativeTo: start) }
+                    if squareSnaps(model.tool) { end = diagonalMagnet(end, relativeTo: start) }
                     if isMeasure {
                         start = snapped(start)
                         end = snapped(end)
@@ -703,7 +704,10 @@ struct EditorCanvas: View {
                             updateDraggedBendDots(id: id)
                         }
                     default:
-                        model.setPoints(id: id, start: current.anchor ?? current.originalStart, end: image)
+                        let anchor = current.anchor ?? current.originalStart
+                        var p = image
+                        if let kind, squareSnaps(kind) { p = diagonalMagnet(p, relativeTo: anchor) }
+                        model.setPoints(id: id, start: anchor, end: p)
                     }
                 case .idle, .placeText, .placeCounter, .finishingEdit, .pickColor:
                     break
@@ -974,6 +978,23 @@ struct EditorCanvas: View {
         if dy <= dx * slope { return CGPoint(x: p.x, y: anchor.y) }
         if dx <= dy * slope { return CGPoint(x: anchor.x, y: p.y) }
         return p
+    }
+
+    /// Which tools pull toward a square bounding box while drawing/resizing.
+    private func squareSnaps(_ kind: EditTool) -> Bool {
+        kind == .roundedRect || kind == .ellipse || kind == .diamond
+    }
+
+    /// The same pull toward the 45° diagonals: a box corner dragged within a
+    /// few degrees of square snaps onto the diagonal through `anchor`, so
+    /// ellipses become circles and rectangles/diamonds become squares.
+    private func diagonalMagnet(_ p: CGPoint, relativeTo anchor: CGPoint) -> CGPoint {
+        let slope = tan(4 * CGFloat.pi / 180)
+        let dx = p.x - anchor.x, dy = p.y - anchor.y
+        guard abs(abs(dx) - abs(dy)) <= (abs(dx) + abs(dy)) * slope else { return p }
+        let side = (abs(dx) + abs(dy)) / 2
+        return CGPoint(x: anchor.x + (dx < 0 ? -side : side),
+                       y: anchor.y + (dy < 0 ? -side : side))
     }
 
     // MARK: - Double-click: edit text / shape label
