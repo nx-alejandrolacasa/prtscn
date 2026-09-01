@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <defs>
     <linearGradient id="back-bar" gradientUnits="userSpaceOnUse" x1="0" y1="-235.52" x2="0" y2="-122.47">
-      <stop offset="0" stop-color="#EDF2F0"/>
-      <stop offset="1" stop-color="#E0E8E6"/>
+      <stop offset="0" stop-color="#EDF2F7"/>
+      <stop offset="1" stop-color="#E0E8F0"/>
     </linearGradient>
   </defs>
   <g transform="translate(442.368 392.192) rotate(-5)">

@@ -2,10 +2,10 @@ import AppKit
 import CoreText
 
 // PrtScn app icon: two overlapping macOS windows — a screenshot of a screenshot.
-// Style and palette are shared with the "Stuff" app icon: a muted gradient tile
-// (pale sage → cool gray) carrying glassy white cards with soft shadows, a top
-// sheen and a hairline edge. The front window's title bar picks up the warm
-// purple → orange brand ramp so both hues sing.
+// Style and palette are shared with the "insert" app icon: a muted gradient tile
+// (sage-teal → steel blue) carrying glassy white cards with soft shadows, a top
+// sheen and a hairline edge. The front window's title bar picks up insert's
+// light-blue → deep-blue accent ramp.
 //
 // This generator emits BOTH representations of that one design:
 //
@@ -24,22 +24,19 @@ import CoreText
 //
 // Regeneration recipe: CLAUDE.md → "App icon".
 
-// MARK: - Palette (muted sage-gray background, warm brand accents)
+// MARK: - Palette (insert's sage-teal / steel-blue background, blue accents)
 
-private let bgTop = NSColor(srgbRed: 0.78824, green: 0.85882, blue: 0.83529, alpha: 1)    // pale sage #C9DBD5
-private let bgBottom = NSColor(srgbRed: 0.79216, green: 0.81569, blue: 0.82353, alpha: 1) // cool gray #CAD0D2
-// Fraction of the ramp the sage holds before blending into the gray.
-private let bgTopHold: CGFloat = 0.45
+private let bgTop = NSColor(srgbRed: 0.533, green: 0.667, blue: 0.710, alpha: 1)    // sage-teal (#88AAB5)
+private let bgBottom = NSColor(srgbRed: 0.447, green: 0.565, blue: 0.655, alpha: 1) // steel blue (#7290A7)
 private let cardFront = NSColor(srgbRed: 1.00, green: 1.00, blue: 1.00, alpha: 1)   // clean white
 private let cardBack = NSColor(srgbRed: 0.97, green: 0.96, blue: 1.00, alpha: 1)    // faint lilac-white
 private let lineTint = NSColor(srgbRed: 0.80, green: 0.81, blue: 0.87, alpha: 1)    // soft gray text lines
-// The back window's chrome: a whisper of sage-gray so it reads as an inactive window.
-private let barBackTop = NSColor(srgbRed: 0.93, green: 0.95, blue: 0.94, alpha: 1)
-private let barBackBottom = NSColor(srgbRed: 0.88, green: 0.91, blue: 0.90, alpha: 1)
-// Brand ramp, used for the front window's title bar: slate blue #88AAB5 with a
-// lighter top stop so the bar keeps some depth against the background.
-private let brandTop = NSColor(srgbRed: 0.62745, green: 0.73333, blue: 0.76863, alpha: 1)  // #A0BBC4
-private let brandBottom = NSColor(srgbRed: 0.53333, green: 0.66667, blue: 0.70980, alpha: 1) // #88AAB5
+// The back window's chrome: a whisper of blue-gray so it reads as an inactive window.
+private let barBackTop = NSColor(srgbRed: 0.93, green: 0.95, blue: 0.97, alpha: 1)
+private let barBackBottom = NSColor(srgbRed: 0.88, green: 0.91, blue: 0.94, alpha: 1)
+// Accent ramp, used for the front window's title bar: insert's badge blues.
+private let brandTop = NSColor(srgbRed: 0.498, green: 0.639, blue: 0.820, alpha: 1)    // light blue (#7FA3D1)
+private let brandBottom = NSColor(srgbRed: 0.208, green: 0.314, blue: 0.498, alpha: 1) // deep blue (#35507F)
 // Traffic lights: the familiar macOS red / amber / green.
 private let trafficDots = [
     NSColor(srgbRed: 1.00, green: 0.37, blue: 0.35, alpha: 1),
@@ -242,12 +239,11 @@ private func drawIcon(_ cg: CGContext) {
     cg.addPath(tilePath); cg.setFillColor(bgBottom.cgColor); cg.fillPath()
     cg.restoreGState()
 
-    // Diagonal gradient tile (sage top-left → cool gray bottom-right), with the
-    // sage holding for the first stretch so it dominates.
+    // Diagonal gradient tile (sage-teal top-left → steel blue bottom-right).
     cg.saveGState(); cg.addPath(tilePath); cg.clip()
     let bgGrad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                            colors: [bgTop.cgColor, bgTop.cgColor, bgBottom.cgColor] as CFArray,
-                            locations: [0, bgTopHold, 1])!
+                            colors: [bgTop.cgColor, bgBottom.cgColor] as CFArray,
+                            locations: [0, 1])!
     cg.drawLinearGradient(bgGrad,
                           start: CGPoint(x: content.minX, y: content.maxY),
                           end: CGPoint(x: content.maxX, y: content.minY), options: [])
@@ -360,8 +356,8 @@ private func iconDocument() -> IconDocument {
             translucency: IconDocument.Translucency(enabled: false, value: 0.5))
     }
     return IconDocument(
-        // Icon Composer allows exactly two stops, so the flat icon's bgTopHold
-        // bias can't be expressed here; the plain ramp is close enough.
+        // Icon Composer gradients run top-to-bottom, so the flat icon's diagonal
+        // ramp becomes a vertical one here — the one intentional difference.
         fill: IconDocument.Fill(linearGradient: [iconColor(bgTop), iconColor(bgBottom)]),
         groups: groups,
         supportedPlatforms: IconDocument.Platforms(squares: "shared"))

@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <defs>
     <linearGradient id="front-bar" gradientUnits="userSpaceOnUse" x1="-256" y1="-215.04" x2="256" y2="-111.821">
-      <stop offset="0" stop-color="#A0BBC4"/>
-      <stop offset="1" stop-color="#88AAB5"/>
+      <stop offset="0" stop-color="#7FA3D1"/>
+      <stop offset="1" stop-color="#35507F"/>
     </linearGradient>
   </defs>
   <g transform="translate(616.448 628.736) rotate(4)">
