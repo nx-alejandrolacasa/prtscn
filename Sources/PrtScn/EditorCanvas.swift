@@ -588,6 +588,7 @@ struct EditorCanvas: View {
                                   value.location.y - value.startLocation.y) > 2
                 let image = fit.toImage(value.location, clampedTo: model.pixelSize)
                 let shiftDown = NSEvent.modifierFlags.contains(.shift)
+                let optionDown = NSEvent.modifierFlags.contains(.option)
 
                 switch current.kind {
                 case .draw:
@@ -595,7 +596,7 @@ struct EditorCanvas: View {
                     var start = current.pressImage
                     var end = image
                     if shiftDown, axisLocks(model.tool) { end = axisLocked(end, relativeTo: start) }
-                    if squareSnaps(model.tool) { end = diagonalMagnet(end, relativeTo: start) }
+                    if squareSnaps(model.tool), !optionDown { end = diagonalMagnet(end, relativeTo: start) }
                     if isMeasure {
                         start = snapped(start)
                         end = snapped(end)
@@ -603,7 +604,7 @@ struct EditorCanvas: View {
                     }
                     var endBinding: ShapeBinding?
                     if model.tool == .line {
-                        if let candidate = bindingCandidate(
+                        if !optionDown, let candidate = bindingCandidate(
                             at: image, in: model.annotations,
                             excluding: current.startBinding,
                             tolerance: bindSnapRadius / fit.scale) {
@@ -613,7 +614,7 @@ struct EditorCanvas: View {
                             endBinding = candidate.binding
                             snapAnchor = candidate.anchor
                         } else {
-                            end = axisMagnet(end, relativeTo: start)
+                            if !optionDown { end = axisMagnet(end, relativeTo: start) }
                             snapAnchor = nil
                         }
                     }
@@ -695,27 +696,27 @@ struct EditorCanvas: View {
                         // back flat so the bow is easy to undo.
                         let value = curvatureValue(of: image, chordStart: current.originalStart,
                                                    chordEnd: current.originalEnd)
-                        model.setCurvature(id: id, abs(value) * fit.scale < 5 ? 0 : value)
+                        model.setCurvature(id: id, !optionDown && abs(value) * fit.scale < 5 ? 0 : value)
                         updateDraggedBendDots(id: id)
                     case .cornerH:
                         // The horizontal run follows the cursor's y, snapping
                         // back onto its baseline when close.
                         if let line = model.annotations.first(where: { $0.id == id }) {
                             let offset = image.y - line.elbowHBase
-                            model.setElbowH(id: id, abs(offset) * fit.scale < 5 ? 0 : offset)
+                            model.setElbowH(id: id, !optionDown && abs(offset) * fit.scale < 5 ? 0 : offset)
                             updateDraggedBendDots(id: id)
                         }
                     case .cornerV:
                         // The vertical trunk follows the cursor's x — likewise.
                         if let line = model.annotations.first(where: { $0.id == id }) {
                             let offset = image.x - line.elbowVBase
-                            model.setElbowV(id: id, abs(offset) * fit.scale < 5 ? 0 : offset)
+                            model.setElbowV(id: id, !optionDown && abs(offset) * fit.scale < 5 ? 0 : offset)
                             updateDraggedBendDots(id: id)
                         }
                     default:
                         let anchor = current.anchor ?? current.originalStart
                         var p = image
-                        if let kind, squareSnaps(kind) { p = diagonalMagnet(p, relativeTo: anchor) }
+                        if let kind, squareSnaps(kind), !optionDown { p = diagonalMagnet(p, relativeTo: anchor) }
                         model.setPoints(id: id, start: anchor, end: p)
                     }
                 case .idle, .placeText, .placeCounter, .finishingEdit, .pickColor:
@@ -799,7 +800,7 @@ struct EditorCanvas: View {
         // dot that already holds a line end grabs that end to re-route it —
         // a second line from the same anchor is still possible by pressing
         // elsewhere along the side.
-        if model.tool == .line, !toggling,
+        if model.tool == .line, !toggling, !NSEvent.modifierFlags.contains(.option),
            let candidate = bindingCandidate(at: pressImage, in: model.annotations,
                                             tolerance: bindSnapRadius / fit.scale) {
             if distance(pressView, fit.toView(candidate.anchor)) <= handleHitRadius,
@@ -902,6 +903,11 @@ struct EditorCanvas: View {
     /// exact spot is excluded so both ends can't land on the same point.
     private func resizeLineEndpoint(id: UUID, handle: ResizeHandle, to point: CGPoint, fit: CanvasFit) {
         let line = model.annotations.first { $0.id == id }
+        if NSEvent.modifierFlags.contains(.option) {
+            snapAnchor = nil
+            model.setLineEndpoint(id: id, handle: handle, point: point, binding: nil)
+            return
+        }
         let otherEnd = handle == .start ? line?.endBinding : line?.startBinding
         let candidate = bindingCandidate(at: point, in: model.annotations, excluding: otherEnd,
                                          tolerance: bindSnapRadius / fit.scale)
@@ -921,7 +927,8 @@ struct EditorCanvas: View {
     private func updateHoverSnap(at location: CGPoint, fit: CanvasFit) {
         guard session == nil else { return }
         guard model.tool == .line, !model.isCropping, !model.isPickingColor,
-              model.editingTextID == nil else {
+              model.editingTextID == nil,
+              !NSEvent.modifierFlags.contains(.option) else {
             if snapAnchor != nil { snapAnchor = nil }
             return
         }
