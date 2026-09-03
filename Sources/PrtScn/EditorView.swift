@@ -221,10 +221,32 @@ struct EditorView: View {
             }
             .keyboardShortcut(.cancelAction)
             toolShortcuts
+            nudgeShortcuts
         }
         .opacity(0)
         .frame(width: 0, height: 0)
         .accessibilityHidden(true)
+    }
+
+    /// Arrow keys fine-tune the selected annotations' position — one point per
+    /// press, ten with Shift — so a shape can be placed exactly without
+    /// fighting the mouse.
+    private var nudgeShortcuts: some View {
+        Group {
+            nudgeButtons(.leftArrow, dx: -1, dy: 0)
+            nudgeButtons(.rightArrow, dx: 1, dy: 0)
+            nudgeButtons(.upArrow, dx: 0, dy: -1)
+            nudgeButtons(.downArrow, dx: 0, dy: 1)
+        }
+    }
+
+    private func nudgeButtons(_ key: KeyEquivalent, dx: CGFloat, dy: CGFloat) -> some View {
+        Group {
+            Button("") { model.nudgeSelected(dx: dx, dy: dy, coarse: false) }
+                .keyboardShortcut(key, modifiers: [])
+            Button("") { model.nudgeSelected(dx: dx, dy: dy, coarse: true) }
+                .keyboardShortcut(key, modifiers: .shift)
+        }
     }
 
     /// Single-letter tool switching (never fired while a text field has

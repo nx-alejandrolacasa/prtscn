@@ -505,6 +505,44 @@ final class EditorModel {
         selectedIDs = Set(copies.map(\.id))
     }
 
+    /// The in-progress arrow-key burst: which annotations it moves, the undo
+    /// depth it started at, and when it last moved — a run of presses
+    /// coalesces into one undo entry, and anything else touching the
+    /// annotations (a draw, an undo) changes the depth and ends it.
+    private var nudgeBurst: (ids: Set<UUID>, undoDepth: Int, time: TimeInterval)?
+
+    /// Arrow-key fine positioning: shifts the selection one point per press
+    /// (ten with `coarse`), in the same pixel space drags move in. `dx`/`dy`
+    /// are unit steps, y growing downwards.
+    func nudgeSelected(dx: CGFloat, dy: CGFloat, coarse: Bool) {
+        guard editingTextID == nil, !isCropping, !isPickingColor else { return }
+        let ids = selectedIDs.filter { id in annotations.contains { $0.id == id } }
+        guard !ids.isEmpty else { return }
+
+        let now = ProcessInfo.processInfo.systemUptime
+        let continuing = nudgeBurst.map {
+            $0.ids == ids && $0.undoDepth == undoStack.count && now - $0.time < 1.5
+        } ?? false
+        if !continuing {
+            snapshot()
+            // Same rule as a bodily drag: a line nudged off its shape lets go,
+            // unless the shape is moving along with it.
+            for id in ids where annotations.first(where: { $0.id == id })?.kind == .line {
+                detachBindings(id: id, keepingShapesIn: ids)
+            }
+        }
+        nudgeBurst = (ids, undoStack.count, now)
+
+        let step = (coarse ? 10 : 1) * captureScale
+        for annotation in annotations where ids.contains(annotation.id) {
+            setPoints(id: annotation.id,
+                      start: CGPoint(x: annotation.start.x + dx * step,
+                                     y: annotation.start.y + dy * step),
+                      end: CGPoint(x: annotation.end.x + dx * step,
+                                   y: annotation.end.y + dy * step))
+        }
+    }
+
     func deleteSelected() {
         let ids = selectedIDs.filter { id in annotations.contains { $0.id == id } }
         guard !ids.isEmpty else { return }
