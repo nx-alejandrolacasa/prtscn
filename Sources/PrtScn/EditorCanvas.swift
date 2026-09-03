@@ -132,10 +132,12 @@ struct EditorCanvas: View {
     /// now — the little dot shown while hovering or dragging with the line
     /// tool near a shape's side. `nil` when nothing is in snapping range.
     @State private var snapAnchor: CGPoint?
-    /// The bend dots (image coords) of the hovered line, all sitting on the
-    /// stroke itself: the curve's midpoint, or the elbow runs' midpoints in
-    /// corner mode. Dragging one reshapes the line. Empty when none hovered.
-    @State private var bendDots: [CGPoint] = []
+    /// The line whose bend dots are on offer — the hovered one. Its dots all
+    /// sit on the stroke itself: the curve's midpoint, or the elbow runs'
+    /// midpoints in corner mode. Dragging one reshapes the line. Held by id,
+    /// not as points, so the dots follow the line when it moves (a keyboard
+    /// nudge doesn't fire hover). `nil` when none is hovered.
+    @State private var bendDotsLineID: UUID?
     /// The select tool's rubber band (image coords) while dragging over empty
     /// space; everything it touches is selected live.
     @State private var marqueeRect: CGRect?
@@ -183,7 +185,7 @@ struct EditorCanvas: View {
                             hoverMovable = false
                             if session == nil {
                                 snapAnchor = nil
-                                bendDots = []
+                                bendDotsLineID = nil
                             }
                             if model.isPickingColor {
                                 NSCursor.arrow.set()
@@ -205,7 +207,7 @@ struct EditorCanvas: View {
             if model.editingTextID != nil { model.finishTextEditing() }
             hoverPoint = nil
             snapAnchor = nil
-            bendDots = []
+            bendDotsLineID = nil
         }
         // Restore the arrow the moment picking ends (a lingering crosshair would
         // otherwise stay until the next mouse move).
@@ -261,9 +263,9 @@ struct EditorCanvas: View {
             if let snapAnchor, !model.isCropping {
                 drawSnapDot(at: fit.toView(snapAnchor), in: &context)
             }
-            if !model.isCropping {
-                for dot in bendDots {
-                    drawSnapDot(at: fit.toView(dot), in: &context)
+            if !model.isCropping, let line = bendDotsLine {
+                for dot in line.bendDots {
+                    drawSnapDot(at: fit.toView(dot.point), in: &context)
                 }
             }
         }
@@ -579,7 +581,7 @@ struct EditorCanvas: View {
                     // could move the line out from under stale dots.
                     switch session?.kind {
                     case .resize(_, .curve), .resize(_, .cornerH), .resize(_, .cornerV): break
-                    default: bendDots = []
+                    default: bendDotsLineID = nil
                     }
                 }
                 guard var current = session else { return }
@@ -697,21 +699,18 @@ struct EditorCanvas: View {
                         let value = curvatureValue(of: image, chordStart: current.originalStart,
                                                    chordEnd: current.originalEnd)
                         model.setCurvature(id: id, !optionDown && abs(value) * fit.scale < 5 ? 0 : value)
-                        updateDraggedBendDots(id: id)
                     case .cornerH:
                         // The horizontal run follows the cursor's y, snapping
                         // back onto its baseline when close.
                         if let line = model.annotations.first(where: { $0.id == id }) {
                             let offset = image.y - line.elbowHBase
                             model.setElbowH(id: id, !optionDown && abs(offset) * fit.scale < 5 ? 0 : offset)
-                            updateDraggedBendDots(id: id)
                         }
                     case .cornerV:
                         // The vertical trunk follows the cursor's x — likewise.
                         if let line = model.annotations.first(where: { $0.id == id }) {
                             let offset = image.x - line.elbowVBase
                             model.setElbowV(id: id, !optionDown && abs(offset) * fit.scale < 5 ? 0 : offset)
-                            updateDraggedBendDots(id: id)
                         }
                     default:
                         let anchor = current.anchor ?? current.originalStart
@@ -938,20 +937,25 @@ struct EditorCanvas: View {
         if anchor != snapAnchor { snapAnchor = anchor }
     }
 
+    /// The hovered line, if it still exists — the source of the drawn dots.
+    private var bendDotsLine: Annotation? {
+        bendDotsLineID.flatMap { id in model.annotations.first { $0.id == id } }
+    }
+
     /// Tracks the bend dots while hovering: approaching a line's shaft offers
     /// its dots — dragging one reshapes the line.
     private func updateBendDots(at location: CGPoint, fit: CanvasFit) {
         guard session == nil else { return }
         guard !model.isCropping, !model.isPickingColor, model.editingTextID == nil else {
-            if !bendDots.isEmpty { bendDots = [] }
+            if bendDotsLineID != nil { bendDotsLineID = nil }
             return
         }
         let point = fit.toImage(location, clampedTo: model.pixelSize)
         let tolerance = bodyTolerance / fit.scale
-        let dots = model.annotations.last {
+        let hovered = model.annotations.last {
             $0.kind == .line && $0.bodyContains(point, tolerance: tolerance)
-        }?.bendDots.map(\.point) ?? []
-        if dots != bendDots { bendDots = dots }
+        }?.id
+        if hovered != bendDotsLineID { bendDotsLineID = hovered }
     }
 
     /// Tracks whether the select tool's cursor is over something grabbable:
@@ -970,11 +974,6 @@ struct EditorCanvas: View {
                 distance(location, fit.toView($0.point)) <= handleHitRadius
             } == true
         if over != hoverMovable { hoverMovable = over }
-    }
-
-    /// Re-seeds the dots from the model mid-drag (hover doesn't fire then).
-    private func updateDraggedBendDots(id: UUID) {
-        bendDots = model.annotations.first { $0.id == id }?.bendDots.map(\.point) ?? []
     }
 
     /// The binding dot on a shape side's midpoint: pressing or releasing a
@@ -1054,7 +1053,7 @@ struct EditorCanvas: View {
                     distance(value.location, fit.toView($0.point)) <= handleHitRadius
                 }) {
                     model.toggleLineBend(id: line.id)
-                    updateDraggedBendDots(id: line.id)
+                    bendDotsLineID = line.id
                     return
                 }
                 // With the counter tool armed both clicks stamped a badge —

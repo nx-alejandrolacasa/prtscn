@@ -513,11 +513,12 @@ final class EditorModel {
 
     /// Arrow-key fine positioning: shifts the selection one point per press
     /// (ten with `coarse`), in the same pixel space drags move in. `dx`/`dy`
-    /// are unit steps, y growing downwards.
-    func nudgeSelected(dx: CGFloat, dy: CGFloat, coarse: Bool) {
-        guard editingTextID == nil, !isCropping, !isPickingColor else { return }
+    /// are unit steps, y growing downwards. Returns whether anything moved.
+    @discardableResult
+    func nudgeSelected(dx: CGFloat, dy: CGFloat, coarse: Bool) -> Bool {
+        guard editingTextID == nil, !isCropping, !isPickingColor else { return false }
         let ids = selectedIDs.filter { id in annotations.contains { $0.id == id } }
-        guard !ids.isEmpty else { return }
+        guard !ids.isEmpty else { return false }
 
         let now = ProcessInfo.processInfo.systemUptime
         let continuing = nudgeBurst.map {
@@ -541,6 +542,7 @@ final class EditorModel {
                       end: CGPoint(x: annotation.end.x + dx * step,
                                    y: annotation.end.y + dy * step))
         }
+        return true
     }
 
     func deleteSelected() {

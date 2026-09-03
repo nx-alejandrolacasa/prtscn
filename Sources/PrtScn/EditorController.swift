@@ -99,12 +99,18 @@ final class EditorController: NSObject, NSWindowDelegate {
         // `assumeIsolated`), but NSEvent isn't Sendable, so its payload is
         // unpacked before crossing in.
         panMonitor = NSEvent.addLocalMonitorForEvents(
-            matching: [.rightMouseDown, .rightMouseDragged, .rightMouseUp, .scrollWheel]
+            matching: [.rightMouseDown, .rightMouseDragged, .rightMouseUp, .scrollWheel, .keyDown]
         ) { event in
             let windowID = event.window.map(ObjectIdentifier.init)
             let location = event.locationInWindow
             let consumed: Bool
-            if event.type == .scrollWheel {
+            if event.type == .keyDown {
+                let key = event.specialKey?.rawValue
+                let shift = event.modifierFlags.contains(.shift)
+                consumed = MainActor.assumeIsolated {
+                    Self.shared.handleArrowKey(key: key, windowID: windowID, shift: shift)
+                }
+            } else if event.type == .scrollWheel {
                 let dx = event.scrollingDeltaX, dy = event.scrollingDeltaY
                 let precise = event.hasPreciseScrollingDeltas
                 let zooming = event.modifierFlags.contains(.command)
@@ -201,6 +207,26 @@ final class EditorController: NSObject, NSWindowDelegate {
             NSCursor.arrow.set()
         }
         return true
+    }
+
+    /// Arrow keys nudge the selected annotations — one point per press, ten
+    /// with Shift. Handled here rather than with SwiftUI keyboard shortcuts
+    /// because those fire for a plain arrow whatever the modifiers, so the
+    /// Shift-modified variant never gets its own step. Returns whether the
+    /// event was consumed — an arrow that moves nothing (no selection, or a
+    /// text annotation being typed into) falls through to the text caret.
+    private func handleArrowKey(key: Int?, windowID: ObjectIdentifier?, shift: Bool) -> Bool {
+        guard let window, let model, windowID == ObjectIdentifier(window),
+              let key else { return false }
+        let step: (dx: CGFloat, dy: CGFloat)
+        switch NSEvent.SpecialKey(rawValue: key) {
+        case .leftArrow: step = (-1, 0)
+        case .rightArrow: step = (1, 0)
+        case .upArrow: step = (0, -1)
+        case .downArrow: step = (0, 1)
+        default: return false
+        }
+        return model.nudgeSelected(dx: step.dx, dy: step.dy, coarse: shift)
     }
 
     /// Scrolling moves the capture (image tracks the gesture, like the
