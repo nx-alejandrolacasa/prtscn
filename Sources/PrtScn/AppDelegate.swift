@@ -22,4 +22,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // the About tab offer the update.
         Task { await UpdateChecker.shared.checkAutomatically() }
     }
+
+    /// ⌘Q with a window in front (editor, Settings, …) closes that window
+    /// instead of quitting — the app lives in the menu bar; only its explicit
+    /// Quit item (a click, not a key press) and system shutdown end it.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let event = NSApp.currentEvent, event.type == .keyDown,
+              event.modifierFlags.contains(.command),
+              event.charactersIgnoringModifiers?.lowercased() == "q",
+              let window = NSApp.keyWindow, window.styleMask.contains(.closable)
+        else { return .terminateNow }
+        window.performClose(nil)
+        return .terminateCancel
+    }
 }
