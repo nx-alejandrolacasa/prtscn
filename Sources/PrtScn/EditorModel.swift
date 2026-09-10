@@ -65,6 +65,16 @@ final class EditorModel {
 
     func resetZoom() { setZoom(1) }
 
+    /// Double-clicking the percentage readout: jump to true size, or back to
+    /// fitted when already there.
+    func toggleActualSize() {
+        if zoomPercent == 100 {
+            setZoom(1)
+        } else {
+            setZoom(100 / max(fittedPercent, 1))
+        }
+    }
+
     /// Steps the displayed percentage to the next stop in the given direction —
     /// multiples of 25 up to 200%, multiples of 50 above. From an in-between
     /// state (a pinch), the first step lands on the nearest stop in that

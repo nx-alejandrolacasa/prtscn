@@ -470,7 +470,7 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
         if id == Self.zoom {
             // One connected ( − | 100% | + ) control: a segmented control with
             // the live zoom percentage as a display-only middle segment.
-            let control = NSSegmentedControl()
+            let control = ZoomSegmentedControl()
             control.segmentCount = 3
             control.trackingMode = .momentary
             control.setImage(NSImage(systemSymbolName: "minus.magnifyingglass",
@@ -484,11 +484,12 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
                                      accessibilityDescription: "Zoom In"), forSegment: 2)
             control.target = self
             control.action = #selector(zoomAction(_:))
+            control.onReadoutDoubleClick = { [weak self] in self?.model.toggleActualSize() }
 
             let group = NSToolbarItemGroup(itemIdentifier: id)
             group.view = control
             group.label = "Zoom"
-            group.toolTip = "Zoom (⌘− / ⌘+, ⌘0 resets, or pinch)"
+            group.toolTip = "Zoom (⌘− / ⌘+, ⌘0 resets, or pinch · double-click for 100%)"
             zoomControl = control
             updateZoomLabel()
             observeZoomPercent()
@@ -567,5 +568,23 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
 
     func items(for pickerToolbarItem: NSSharingServicePickerToolbarItem) -> [Any] {
         [model.sharingItem()]
+    }
+}
+
+/// The ( − | 100% | + ) control. The middle segment is disabled so it reads as
+/// a label, which also means the cell never tracks clicks on it — so the
+/// double-click that toggles 100% ⇄ fitted is caught here, before tracking.
+/// The −/+ segments are symmetric, so the readout is the centered 58pt band.
+private final class ZoomSegmentedControl: NSSegmentedControl {
+    var onReadoutDoubleClick: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        let x = convert(event.locationInWindow, from: nil).x
+        let overReadout = abs(x - bounds.midX) <= width(forSegment: 1) / 2
+        if event.clickCount == 2, overReadout {
+            onReadoutDoubleClick?()
+            return
+        }
+        super.mouseDown(with: event)
     }
 }
