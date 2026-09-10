@@ -107,8 +107,10 @@ final class EditorController: NSObject, NSWindowDelegate {
             if event.type == .keyDown {
                 let key = event.specialKey?.rawValue
                 let shift = event.modifierFlags.contains(.shift)
+                let command = event.modifierFlags.contains(.command)
                 consumed = MainActor.assumeIsolated {
-                    Self.shared.handleArrowKey(key: key, windowID: windowID, shift: shift)
+                    Self.shared.handleReturnKey(key: key, windowID: windowID, command: command)
+                        || Self.shared.handleArrowKey(key: key, windowID: windowID, shift: shift)
                 }
             } else if event.type == .scrollWheel {
                 let dx = event.scrollingDeltaX, dy = event.scrollingDeltaY
@@ -206,6 +208,18 @@ final class EditorController: NSObject, NSWindowDelegate {
             isPanning = false
             NSCursor.arrow.set()
         }
+        return true
+    }
+
+    /// Return inserts a line break while a text annotation is being typed
+    /// into — only Esc (or clicking away) commits. The field editor treats a
+    /// bare Return as "submit", so it's told to insert the newline directly.
+    private func handleReturnKey(key: Int?, windowID: ObjectIdentifier?, command: Bool) -> Bool {
+        guard let window, let model, windowID == ObjectIdentifier(window),
+              !command, model.editingTextID != nil, let key,
+              [.carriageReturn, .enter].contains(NSEvent.SpecialKey(rawValue: key)),
+              let editor = window.firstResponder as? NSTextView else { return false }
+        editor.insertNewlineIgnoringFieldEditor(nil)
         return true
     }
 

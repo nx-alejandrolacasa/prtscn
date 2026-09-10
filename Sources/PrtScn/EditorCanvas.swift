@@ -1226,7 +1226,6 @@ struct EditorCanvas: View {
                     if textFieldFocused || model.editingTextID != id { return }
                 }
             }
-            .onSubmit { model.finishTextEditing() }
             .onExitCommand { model.finishTextEditing() }   // Esc
             .onChange(of: textFieldFocused) { _, focused in
                 // The placing click (and palette taps) steal first responder
