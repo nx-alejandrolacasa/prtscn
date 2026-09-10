@@ -1,6 +1,9 @@
 import AppKit
 import Observation
+import OSLog
 import SwiftUI
+
+private let log = Logger(subsystem: "com.alejandrolacasa.prtscn", category: "EditorModel")
 
 /// Observable state + behavior for the in-app screenshot editor.
 ///
@@ -26,6 +29,28 @@ final class EditorModel {
     /// Backing scale of the capture: pixels ÷ this = logical points (1:1 size).
     /// Used to display the image at native size and to show sizes in points.
     let captureScale: CGFloat
+
+    /// The `.prtscn` package this editor was opened from or last saved to;
+    /// Save Project writes there again without asking.
+    private(set) var documentURL: URL?
+    /// What the package on disk holds, to tell whether closing would lose work.
+    private var savedAnnotations: [Annotation] = []
+    private var savedCropGeneration = 0
+    private var cropGeneration = 0
+
+    /// Whether the project differs from its package on disk. Only a project
+    /// counts — a plain capture is exported, not saved, and is closed freely.
+    var hasUnsavedProjectChanges: Bool {
+        documentURL != nil
+            && (annotations != savedAnnotations || cropGeneration != savedCropGeneration)
+    }
+
+    var documentName: String {
+        documentURL?.deletingPathExtension().lastPathComponent ?? "Untitled"
+    }
+
+    /// The window hosting this editor, for sheets (the project save panel).
+    weak var hostWindow: NSWindow?
 
     /// Called after the image geometry changes (a crop) so the controller can
     /// resize the window to fit.
@@ -608,6 +633,7 @@ final class EditorModel {
 
         baseImage = NSImage(cgImage: cropped, size: rect.size)
         pixelSize = rect.size
+        cropGeneration += 1
         eyedropperRep = nil
         mosaicCache.removeAll()
         zoom = 1
@@ -826,6 +852,73 @@ final class EditorModel {
         completed("Text copied")
     }
 
+    // MARK: - Project documents
+
+    /// Seeds the editor from a reopened `.prtscn` package. Undo history starts
+    /// fresh — it isn't part of the document.
+    func restore(_ document: ProjectDocument, from url: URL) {
+        annotations = document.annotations
+        nextCounter = max(document.nextCounter, (annotations.map(\.number).max() ?? 0) + 1)
+        markSaved(to: url)
+    }
+
+    private func markSaved(to url: URL) {
+        documentURL = url
+        savedAnnotations = annotations
+        savedCropGeneration = cropGeneration
+        hostWindow?.title = documentName
+    }
+
+    /// Saves the project to its package, asking where the first time. Returns
+    /// whether the file was written — `false` while the panel is still up.
+    @discardableResult
+    func saveProject() -> Bool {
+        finishTextEditing()
+        guard let documentURL else {
+            saveProjectAs()
+            return false
+        }
+        return writeProject(to: documentURL)
+    }
+
+    func saveProjectAs() {
+        finishTextEditing()
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.prtscnProject]
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
+        panel.nameFieldStringValue = documentURL?.lastPathComponent
+            ?? "\(SettingsStore.shared.sanitizedFilenamePrefix) project.prtscn"
+        panel.directoryURL = documentURL?.deletingLastPathComponent()
+            ?? URL(fileURLWithPath: SettingsStore.shared.saveFolderPath, isDirectory: true)
+        let handler: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            self?.writeProject(to: url)
+        }
+        if let hostWindow {
+            panel.beginSheetModal(for: hostWindow, completionHandler: handler)
+        } else {
+            handler(panel.runModal())
+        }
+    }
+
+    @discardableResult
+    private func writeProject(to url: URL) -> Bool {
+        guard let base = baseImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return false }
+        let document = ProjectDocument(captureScale: captureScale, nextCounter: nextCounter,
+                                       annotations: annotations)
+        do {
+            try ProjectDocument.write(image: base, document: document, to: url)
+            markSaved(to: url)
+            flash("Project saved")
+            return true
+        } catch {
+            log.error("project save failed: \(String(describing: error), privacy: .public)")
+            flash("Couldn't save project")
+            return false
+        }
+    }
+
     /// Enters eyedropper picking mode: the canvas starts live-previewing the
     /// hovered pixel's color (see `updateHoverColor`) until a click commits it
     /// or Escape cancels.
@@ -999,7 +1092,8 @@ final class EditorModel {
     /// Finishes an action: closes the editor or shows a confirmation, per the
     /// user's "close editor after action" preference.
     private func completed(_ message: String) {
-        if SettingsStore.shared.closeEditorAfterAction {
+        // Auto-close would throw away a project's unsaved shapes; keep it open.
+        if SettingsStore.shared.closeEditorAfterAction, !hasUnsavedProjectChanges {
             close()
         } else {
             flash(message)

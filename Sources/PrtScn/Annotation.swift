@@ -281,7 +281,7 @@ func annotationNSFont(size: CGFloat, design: FontDesign) -> NSFont {
 }
 
 /// A side of a bindable shape an arrow endpoint can attach to.
-enum BindingSide: String, CaseIterable {
+enum BindingSide: String, CaseIterable, Codable {
     case top, bottom, left, right
 
     /// Outward unit direction of the side — where a bound line end backs off.
@@ -322,7 +322,7 @@ func boundEndpoint(anchor: CGPoint, side: BindingSide, lineWidth: CGFloat) -> CG
 
 /// Ties one end of a line to the middle of a shape's side, so moving or
 /// resizing the shape carries the line end with it.
-struct ShapeBinding: Equatable {
+struct ShapeBinding: Equatable, Codable {
     var shapeID: UUID
     var side: BindingSide
 }
@@ -330,8 +330,8 @@ struct ShapeBinding: Equatable {
 /// One drawn annotation, stored in the capture's **pixel** coordinate space
 /// (origin top-left) so it maps cleanly to both the on-screen canvas and the
 /// full-resolution export. Non-destructive: shapes live as data until flattened.
-struct Annotation: Identifiable {
-    let id = UUID()
+struct Annotation: Identifiable, Equatable {
+    var id = UUID()
     var kind: EditTool
     /// Drag anchor and current point (pixel coords). For shapes these are two
     /// opposite corners / line endpoints; for text, `start` is the top-left.

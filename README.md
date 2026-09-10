@@ -51,6 +51,11 @@ eating your battery — just system frameworks, doing exactly what you asked.
   shape with the stroke cleared away around it. The title bar always
   shows the image's pixel size — while cropping it previews the crop's
   size instead, and a click copies the dimensions.
+- 💾 **Save as a project** — ⇧⌘S writes a `.prtscn` document that keeps
+  every shape, line, label and step counter editable. Reopen it later from
+  the menu bar (Open Project…) or by double-clicking it in Finder, and carry
+  on where you left off — handy with **New Blank Canvas** for diagrams and
+  schemas that evolve over time.
 - 🪟 **Window backgrounds** — margins with a drop shadow, a
   solid color, your actual desktop wallpaper, or a tight trim — for
   screenshots that already look presentation-ready.

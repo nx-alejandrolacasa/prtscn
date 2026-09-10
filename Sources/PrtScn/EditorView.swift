@@ -202,6 +202,8 @@ struct EditorView: View {
         Group {
             Button("", action: model.copy).keyboardShortcut("c", modifiers: .command)
             Button("", action: model.save).keyboardShortcut("s", modifiers: .command)
+            Button("", action: { model.saveProject() }).keyboardShortcut("s", modifiers: [.command, .shift])
+            Button("", action: model.saveProjectAs).keyboardShortcut("s", modifiers: [.command, .shift, .option])
             Button("", action: model.copyText).keyboardShortcut("t", modifiers: .command)
             Button("", action: model.undo).keyboardShortcut("z", modifiers: .command)
             Button("", action: model.redo).keyboardShortcut("z", modifiers: [.command, .shift])

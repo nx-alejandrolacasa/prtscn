@@ -23,6 +23,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { await UpdateChecker.shared.checkAutomatically() }
     }
 
+    /// Finder double-click / drag-to-icon on a `.prtscn` project. One editor
+    /// window, so only the last URL is opened.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard let url = urls.last(where: { $0.pathExtension == "prtscn" }) else { return }
+        EditorController.shared.open(projectURL: url)
+    }
+
     /// ⌘Q with a window in front (editor, Settings, …) closes that window
     /// instead of quitting — the app lives in the menu bar; only its explicit
     /// Quit item (a click, not a key press) and system shutdown end it.
@@ -31,7 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               event.modifierFlags.contains(.command),
               event.charactersIgnoringModifiers?.lowercased() == "q",
               let window = NSApp.keyWindow, window.styleMask.contains(.closable)
-        else { return .terminateNow }
+        else { return EditorController.shared.confirmCloseForQuit() ? .terminateNow : .terminateCancel }
         window.performClose(nil)
         return .terminateCancel
     }

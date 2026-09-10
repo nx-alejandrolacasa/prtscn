@@ -1,5 +1,8 @@
 import AppKit
+import OSLog
 import SwiftUI
+
+private let log = Logger(subsystem: "com.alejandrolacasa.prtscn", category: "EditorController")
 
 /// Owns the (single, reused) editor window: builds it, sizes it to the capture,
 /// centers it, and tears it down — the larger, titled sibling of
@@ -33,9 +36,56 @@ final class EditorController: NSObject, NSWindowDelegate {
     /// file): the editor reuses it as its working file and deletes it on close.
     func show(imageURL: URL, captureScale: CGFloat) {
         guard let image = NSImage(contentsOf: imageURL) else { return }
-        close()   // dismiss any existing editor first
+        present(EditorModel(image: image, workingURL: imageURL, captureScale: captureScale))
+    }
 
-        let model = EditorModel(image: image, workingURL: imageURL, captureScale: captureScale)
+    /// Reopens a `.prtscn` project: its base image becomes a fresh temp working
+    /// file (the editor owns and deletes it, like a capture's) and the
+    /// annotations come back as editable data.
+    func open(projectURL: URL) {
+        let image: NSImage, document: ProjectDocument
+        do {
+            (image, document) = try ProjectDocument.read(from: projectURL)
+        } catch {
+            log.error("couldn't open project at \(projectURL.path, privacy: .public): \(String(describing: error), privacy: .public)")
+            let alert = NSAlert()
+            alert.messageText = "Couldn't open “\(projectURL.lastPathComponent)”"
+            alert.informativeText = "The file isn't a PrtScn project this version can read."
+            NSApp.activate()
+            alert.runModal()
+            return
+        }
+        let workingURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("prtscn-project-\(UUID().uuidString).png")
+        let model = EditorModel(image: image, workingURL: workingURL, captureScale: document.captureScale)
+        present(model)
+        model.restore(document, from: projectURL)
+    }
+
+    /// Lets the user pick a `.prtscn` project to reopen.
+    func openProjectWithPanel() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.prtscnProject]
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = URL(fileURLWithPath: SettingsStore.shared.saveFolderPath, isDirectory: true)
+        NSApp.activate()
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        open(projectURL: url)
+    }
+
+    private func present(_ model: EditorModel) {
+        // A dirty project is already open: the user decides before it goes.
+        if let current = self.model, current.hasUnsavedProjectChanges {
+            switch askUnsavedChanges(for: current) {
+            case .save: guard current.saveProject() else { fallthrough }
+            case .cancel:
+                ScreenshotService.shared.cleanup(model.workingURL)
+                return
+            case .discard: break
+            }
+        }
+        close()   // dismiss any existing editor first
         model.onClose = { [weak self] in self?.close() }
 
         let hosting = NSHostingController(rootView: EditorView(model: model))
@@ -90,6 +140,7 @@ final class EditorController: NSObject, NSWindowDelegate {
         self.window = window
         self.model = model
         self.toolbarDelegate = toolbarDelegate
+        model.hostWindow = window
 
         // Right-click drag and scrolling pan the capture while zoomed in, and
         // ⌘-scroll zooms. A local monitor (scoped to this window's content
@@ -352,6 +403,66 @@ final class EditorController: NSObject, NSWindowDelegate {
         teardown()
     }
 
+    /// Closing a project with unsaved changes asks first, as a sheet. The
+    /// answer comes back asynchronously, so the close is refused now and
+    /// done with `close()` — which skips this check — once the user has chosen.
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard let model, model.hasUnsavedProjectChanges else { return true }
+        askUnsavedChanges(for: model, sheetOn: sender) { [weak self, weak sender] decision in
+            guard let self, let sender else { return }
+            switch decision {
+            case .save: guard model.saveProject() else { return }
+            case .discard: break
+            case .cancel: return
+            }
+            sender.close()
+        }
+        return false
+    }
+
+    /// Whether the editor can close right now — quitting from the menu asks
+    /// about a dirty project the same way the close button does.
+    func confirmCloseForQuit() -> Bool {
+        guard let model, model.hasUnsavedProjectChanges else { return true }
+        switch askUnsavedChanges(for: model) {
+        case .save: return model.saveProject()
+        case .discard: return true
+        case .cancel: return false
+        }
+    }
+
+    private enum UnsavedDecision { case save, discard, cancel }
+
+    /// The standard "Do you want to save the changes…?" alert: Save is the
+    /// default, Don't Save answers to ⌘D like TextEdit's. With a window it runs
+    /// as a sheet and reports through `then`; without one it blocks and
+    /// returns the answer.
+    @discardableResult
+    private func askUnsavedChanges(for model: EditorModel, sheetOn window: NSWindow? = nil,
+                                   then: ((UnsavedDecision) -> Void)? = nil) -> UnsavedDecision {
+        let alert = NSAlert()
+        alert.messageText = "Do you want to save the changes made to the project “\(model.documentName)”?"
+        alert.informativeText = "Your changes will be lost if you don't save them."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Don't Save").keyEquivalent = "d"
+        alert.buttons[2].keyEquivalentModifierMask = .command
+        func decision(_ response: NSApplication.ModalResponse) -> UnsavedDecision {
+            switch response {
+            case .alertFirstButtonReturn: .save
+            case .alertThirdButtonReturn: .discard
+            default: .cancel
+            }
+        }
+        if let window {
+            alert.beginSheetModal(for: window) { then?(decision($0)) }
+            return .cancel
+        }
+        NSApp.activate()
+        let result = decision(alert.runModal())
+        then?(result)
+        return result
+    }
     /// The standard close button routes here — tear down through the model so
     /// the temp file is cleaned up exactly once.
     func windowWillClose(_ notification: Notification) {
@@ -401,7 +512,7 @@ final class EditorController: NSObject, NSWindowDelegate {
     /// size, capped to the screen; captures smaller than this open centered
     /// over the checkerboard. (The title text is hidden, so the width only
     /// has to cover the tool groups.)
-    static let minContentSize = NSSize(width: 760, height: 280)
+    static let minContentSize = NSSize(width: 800, height: 280)
 
     /// Sizes the window so the capture opens at full resolution: its true pixel
     /// dimensions mapped 1:1 to the screen's device pixels (pixels ÷ backing
@@ -445,6 +556,7 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
     private static let zoom = NSToolbarItem.Identifier("PrtScn.zoom")
     private static let copy = NSToolbarItem.Identifier("PrtScn.copy")
     private static let save = NSToolbarItem.Identifier("PrtScn.save")
+    private static let saveProject = NSToolbarItem.Identifier("PrtScn.saveProject")
     private static let copyText = NSToolbarItem.Identifier("PrtScn.copyText")
     private static let share = NSToolbarItem.Identifier("PrtScn.share")
 
@@ -458,7 +570,7 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
         // sets Share apart from the Copy/Save/Copy Text export group on the
         // trailing side.
         [Self.crop, Self.pixelate, Self.eyedropper, .space, Self.zoom, .flexibleSpace,
-         Self.copy, Self.save, Self.copyText, .space, Self.share]
+         Self.copy, Self.save, Self.saveProject, Self.copyText, .space, Self.share]
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { ordered }
@@ -518,6 +630,9 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
             spec = ("doc.on.doc", "Copy", "Copy (⌘C)", #selector(copyAction))
         case Self.save:
             spec = ("square.and.arrow.down", "Save", "Save (⌘S)", #selector(saveAction))
+        case Self.saveProject:
+            spec = ("square.and.arrow.down.on.square", "Save Project",
+                    "Save Project — keeps the shapes editable (⇧⌘S)", #selector(saveProjectAction))
         case Self.copyText:
             spec = ("text.viewfinder", "OCR", "Copy text with OCR (⌘T)", #selector(copyTextAction))
         default:
@@ -562,6 +677,7 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
     @objc private func eyedropperAction() { model.beginPickingColor() }
     @objc private func copyAction() { model.copy() }
     @objc private func saveAction() { model.save() }
+    @objc private func saveProjectAction() { model.saveProject() }
     @objc private func copyTextAction() { model.copyText() }
 
     // MARK: - Share

@@ -63,7 +63,8 @@ Sources/PrtScn/
   EditorModel.swift            editor state, undo/redo, export flattening
   EditorCanvas.swift           the SwiftUI Canvas: drawing + gestures
   EditorView.swift             editor window body + floating tool palette
-  EditorController.swift       editor NSWindow + title-bar toolbar
+  EditorController.swift       editor NSWindow + title-bar toolbar; opens .prtscn projects
+  ProjectDocument.swift        .prtscn package (image.png + document.json) + Annotation Codable
   SettingsStore.swift          @Observable settings, persisted to UserDefaults
   SettingsWindow.swift         AppKit NSSplitViewController settings window (full-height sidebar)
   SettingsView.swift           sidebar panes: General/Capture/Preview/Editor/Hotkeys/About
