@@ -255,9 +255,6 @@ private struct ClassicPreviewCard: View {
     /// Inner padding around the thumbnail; also the inset that makes the
     /// thumbnail's corners sit concentrically inside the card's corners.
     private let contentPadding: CGFloat = 8
-    /// Breathing room between the thumbnail's bottom edge and the toolbar, so
-    /// the last line of a shot doesn't sit right on top of the buttons.
-    private let toolbarGap: CGFloat = 12
     private let cardCornerRadius: CGFloat = 16
 
     /// Drives the cursor-anchored entrance (scale + fade up from the pointer).
@@ -282,7 +279,7 @@ private struct ClassicPreviewCard: View {
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, contentPadding)
                 .padding(.bottom, contentPadding)
-                .padding(.top, model.timeout > 0 ? 0 : contentPadding + toolbarGap)
+                .padding(.top, model.timeout > 0 ? 0 : contentPadding)
         }
         .frame(width: cardWidth)
         .glassEffect(.regular, in: shape)
@@ -310,6 +307,6 @@ private struct ClassicPreviewCard: View {
         }
         .frame(height: 3)
         .padding(.horizontal, contentPadding)
-        .padding(.bottom, toolbarGap)
+        .padding(.bottom, 4)
     }
 }
