@@ -92,7 +92,7 @@ final class SettingsStore {
         didSet { defaults.set(windowBackgroundColor.hexString, forKey: Keys.windowBackgroundColor) }
     }
 
-    /// Whether the editor closes automatically after Copy / Save / Copy Text.
+    /// Whether the editor closes automatically after Copy / Export / Copy Text.
     var closeEditorAfterAction: Bool {
         didSet { defaults.set(closeEditorAfterAction, forKey: Keys.closeEditorAfterAction) }
     }

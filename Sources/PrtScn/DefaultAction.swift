@@ -11,7 +11,7 @@ enum DefaultAction: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .save: "Save to disk"
+        case .save: "Export to disk"
         case .copy: "Copy to clipboard"
         case .edit: "Open in Editor"
         case .discard: "Discard"

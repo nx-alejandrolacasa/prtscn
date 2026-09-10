@@ -141,6 +141,7 @@ final class EditorController: NSObject, NSWindowDelegate {
         self.model = model
         self.toolbarDelegate = toolbarDelegate
         model.hostWindow = window
+        observeUnsavedChanges()
 
         // Right-click drag and scrolling pan the capture while zoomed in, and
         // ⌘-scroll zooms. A local monitor (scoped to this window's content
@@ -395,6 +396,19 @@ final class EditorController: NSObject, NSWindowDelegate {
         }
     }
 
+    /// Mirrors the dirty state onto the close button's dot, re-armed after
+    /// each change like the other Observation trackers here.
+    private func observeUnsavedChanges() {
+        withObservationTracking {
+            window?.isDocumentEdited = model?.hasUnsavedProjectChanges ?? false
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self, self.model != nil else { return }
+                self.observeUnsavedChanges()
+            }
+        }
+    }
+
     @objc private func copySizeAction() { model?.copySize() }
 
     func close() {
@@ -408,8 +422,8 @@ final class EditorController: NSObject, NSWindowDelegate {
     /// done with `close()` — which skips this check — once the user has chosen.
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         guard let model, model.hasUnsavedProjectChanges else { return true }
-        askUnsavedChanges(for: model, sheetOn: sender) { [weak self, weak sender] decision in
-            guard let self, let sender else { return }
+        askUnsavedChanges(for: model, sheetOn: sender) { [weak sender] decision in
+            guard let sender else { return }
             switch decision {
             case .save: guard model.saveProject() else { return }
             case .discard: break
@@ -538,7 +552,7 @@ final class EditorController: NSObject, NSWindowDelegate {
 
 }
 
-/// Supplies the editor window's toolbar items (Copy / Save / Copy Text) as
+/// Supplies the editor window's toolbar items (Copy / Export / Save / Copy Text) as
 /// native, bordered `NSToolbarItem`s — so the OS renders them in its current
 /// design language. A `.flexibleSpace` pushes them to the trailing edge.
 @MainActor
@@ -555,8 +569,8 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
     private static let eyedropper = NSToolbarItem.Identifier("PrtScn.eyedropper")
     private static let zoom = NSToolbarItem.Identifier("PrtScn.zoom")
     private static let copy = NSToolbarItem.Identifier("PrtScn.copy")
+    private static let export = NSToolbarItem.Identifier("PrtScn.export")
     private static let save = NSToolbarItem.Identifier("PrtScn.save")
-    private static let saveProject = NSToolbarItem.Identifier("PrtScn.saveProject")
     private static let copyText = NSToolbarItem.Identifier("PrtScn.copyText")
     private static let share = NSToolbarItem.Identifier("PrtScn.share")
 
@@ -567,10 +581,10 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
     private var ordered: [NSToolbarItem.Identifier] {
         // Crop + Pixelate + Eyedropper (all act on the image itself) sit on the
         // leading side, with the zoom −/+ group set apart next to them; a space
-        // sets Share apart from the Copy/Save/Copy Text export group on the
+        // sets Share apart from the Copy/Export/Save/Copy Text group on the
         // trailing side.
         [Self.crop, Self.pixelate, Self.eyedropper, .space, Self.zoom, .flexibleSpace,
-         Self.copy, Self.save, Self.saveProject, Self.copyText, .space, Self.share]
+         Self.copy, Self.export, Self.save, Self.copyText, .space, Self.share]
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { ordered }
@@ -628,11 +642,11 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
             spec = ("eyedropper", "Pick Color", "Pick Color", #selector(eyedropperAction))
         case Self.copy:
             spec = ("doc.on.doc", "Copy", "Copy (⌘C)", #selector(copyAction))
+        case Self.export:
+            spec = ("square.and.arrow.up", "Export", "Export as PNG (⌘E)", #selector(exportAction))
         case Self.save:
-            spec = ("square.and.arrow.down", "Save", "Save (⌘S)", #selector(saveAction))
-        case Self.saveProject:
-            spec = ("square.and.arrow.down.on.square", "Save Project",
-                    "Save Project — keeps the shapes editable (⇧⌘S)", #selector(saveProjectAction))
+            spec = ("square.and.arrow.down", "Save",
+                    "Save as a project — keeps the shapes editable (⌘S)", #selector(saveAction))
         case Self.copyText:
             spec = ("text.viewfinder", "OCR", "Copy text with OCR (⌘T)", #selector(copyTextAction))
         default:
@@ -676,8 +690,8 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
     @objc private func pixelateAction() { model.tool = .pixelate }
     @objc private func eyedropperAction() { model.beginPickingColor() }
     @objc private func copyAction() { model.copy() }
-    @objc private func saveAction() { model.save() }
-    @objc private func saveProjectAction() { model.saveProject() }
+    @objc private func exportAction() { model.export() }
+    @objc private func saveAction() { model.saveProject() }
     @objc private func copyTextAction() { model.copyText() }
 
     // MARK: - Share

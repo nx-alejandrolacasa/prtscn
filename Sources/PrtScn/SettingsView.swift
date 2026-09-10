@@ -583,7 +583,7 @@ private struct EditorSettingsView: View {
                 Toggle("Reopen with the last-used tool", isOn: $settings.rememberLastTool)
             }
             Section("After an action") {
-                Toggle("Close the editor after Copy, Save, or OCR",
+                Toggle("Close the editor after Copy, Export, or OCR",
                        isOn: $settings.closeEditorAfterAction)
             }
             Section("Measure tool") {

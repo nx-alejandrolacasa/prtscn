@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 /// The editor's window body: the annotation canvas with a floating tool palette
-/// over it. Copy / Save / Copy-Text live in the title-bar toolbar (see
+/// over it. Copy / Export / Save / Copy-Text live in the title-bar toolbar (see
 /// `EditorController`); the keyboard shortcuts for everything live here, in the
 /// content view's responder chain, so they fire wherever the buttons sit.
 struct EditorView: View {
@@ -201,9 +201,9 @@ struct EditorView: View {
     private var shortcuts: some View {
         Group {
             Button("", action: model.copy).keyboardShortcut("c", modifiers: .command)
-            Button("", action: model.save).keyboardShortcut("s", modifiers: .command)
-            Button("", action: { model.saveProject() }).keyboardShortcut("s", modifiers: [.command, .shift])
-            Button("", action: model.saveProjectAs).keyboardShortcut("s", modifiers: [.command, .shift, .option])
+            Button("", action: model.export).keyboardShortcut("e", modifiers: .command)
+            Button("", action: { model.saveProject() }).keyboardShortcut("s", modifiers: .command)
+            Button("", action: model.saveProjectAs).keyboardShortcut("s", modifiers: [.command, .shift])
             Button("", action: model.copyText).keyboardShortcut("t", modifiers: .command)
             Button("", action: model.undo).keyboardShortcut("z", modifiers: .command)
             Button("", action: model.redo).keyboardShortcut("z", modifiers: [.command, .shift])

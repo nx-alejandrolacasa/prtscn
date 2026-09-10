@@ -38,7 +38,7 @@ eating your battery — just system frameworks, doing exactly what you asked.
   Hold **⌘** while dragging to capture *upward* instead — perfect for chat
   history. Click or ⏎ finishes early, Esc cancels; it stops on its own at
   the end of the content (max height configurable in Settings → Capture).
-- 🪄 **Cursor-anchored preview** with Copy / Save / Edit / Copy Text (OCR),
+- 🪄 **Cursor-anchored preview** with Copy / Export / Edit / Copy Text (OCR),
   a hover-to-pause auto-dismiss countdown, and drag-to-export straight from
   the thumbnail.
 - ✏️ **In-app annotation editor** — lines/arrows with a configurable
@@ -51,10 +51,10 @@ eating your battery — just system frameworks, doing exactly what you asked.
   shape with the stroke cleared away around it. The title bar always
   shows the image's pixel size — while cropping it previews the crop's
   size instead, and a click copies the dimensions.
-- 💾 **Save as a project** — ⇧⌘S writes a `.prtscn` document that keeps
-  every shape, line, label and step counter editable. Reopen it later from
-  the menu bar (Open Project…) or by double-clicking it in Finder, and carry
-  on where you left off — handy with **New Blank Canvas** for diagrams and
+- 💾 **Save as a project** — ⌘S writes a `.prtscn` document that keeps
+  every shape, line, label and step counter editable (⌘E exports the flat
+  PNG as before). Reopen it later from the menu bar (Open Project…) or by
+  double-clicking it in Finder, and carry on where you left off — handy with **New Blank Canvas** for diagrams and
   schemas that evolve over time.
 - 🪟 **Window backgrounds** — margins with a drop shadow, a
   solid color, your actual desktop wallpaper, or a tight trim — for

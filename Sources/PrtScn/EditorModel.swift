@@ -8,7 +8,7 @@ private let log = Logger(subsystem: "com.alejandrolacasa.prtscn", category: "Edi
 /// Observable state + behavior for the in-app screenshot editor.
 ///
 /// Annotations are kept non-destructively as `[Annotation]` in the capture's
-/// pixel space; Copy / Save flatten them over `baseImage` via Core Graphics
+/// pixel space; Copy / Export flatten them over `baseImage` via Core Graphics
 /// (`prepareExport`), reusing `ScreenshotService`'s URL-based pipeline. OCR
 /// always runs on the original capture, not the annotated result.
 @MainActor
@@ -31,7 +31,7 @@ final class EditorModel {
     let captureScale: CGFloat
 
     /// The `.prtscn` package this editor was opened from or last saved to;
-    /// Save Project writes there again without asking.
+    /// Save writes there again without asking.
     private(set) var documentURL: URL?
     /// What the package on disk holds, to tell whether closing would lose work.
     private var savedAnnotations: [Annotation] = []
@@ -841,10 +841,12 @@ final class EditorModel {
         completed("Copied")
     }
 
-    func save() {
+    /// Writes the flattened PNG to the save folder — the capture as it looks,
+    /// shapes baked in. Saving the editable version is `saveProject`.
+    func export() {
         finishTextEditing()
         prepareExport()
-        if ScreenshotService.shared.save(workingURL, captureScale: captureScale) != nil { completed("Saved") }
+        if ScreenshotService.shared.save(workingURL, captureScale: captureScale) != nil { completed("Exported") }
     }
 
     func copyText() {
@@ -1114,7 +1116,7 @@ final class EditorModel {
     /// undoing every annotation.
     private func prepareExport() {
         // No side effects here — this is reachable from the share item's
-        // validation. Committing text is done by the Copy/Save actions instead.
+        // validation. Committing text is done by the Copy/Export actions instead.
         guard let cgImage = renderFlattened(),
               let png = NSBitmapImageRep(cgImage: cgImage).representation(using: .png, properties: [:])
         else { return }
