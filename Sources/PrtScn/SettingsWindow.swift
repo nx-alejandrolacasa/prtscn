@@ -27,6 +27,10 @@ final class SettingsWindowModel {
         }
     }
 
+    /// The sidebar search field's text. Filters the pane list; see
+    /// `SettingsPane.matches(_:)`.
+    var query = ""
+
     var canGoBack: Bool { cursor > 0 }
     var canGoForward: Bool { cursor + 1 < history.count }
 

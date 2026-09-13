@@ -249,3 +249,8 @@
 "Do you want to save the changes made to the project “%@”?" = "¿Quieres guardar los cambios realizados en el proyecto “%@”?";
 "Your changes will be lost if you don't save them." = "Si no los guardas, los cambios se perderán.";
 "Don't Save" = "No guardar";
+
+/* Settings → sidebar search */
+"Search" = "Buscar";
+"No Results" = "Sin resultados";
+"Clear" = "Borrar";

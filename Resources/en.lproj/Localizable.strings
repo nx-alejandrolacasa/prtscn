@@ -253,3 +253,8 @@
 "Do you want to save the changes made to the project “%@”?" = "Do you want to save the changes made to the project “%@”?";
 "Your changes will be lost if you don't save them." = "Your changes will be lost if you don't save them.";
 "Don't Save" = "Don't Save";
+
+/* Settings → sidebar search */
+"Search" = "Search";
+"No Results" = "No Results";
+"Clear" = "Clear";

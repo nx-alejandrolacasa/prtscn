@@ -172,7 +172,15 @@ echo "Built ${APP}"
 if [[ "${1:-}" == "run" ]]; then
   # Relaunch cleanly if an old dev instance is running (the installed
   # "PrtScn" is a different process name and is left alone).
+  # pkill returns as soon as the signal is sent; `open` right after finds the
+  # old process still tearing down and fails with LaunchServices -600
+  # (procNotFound). Wait for it to be gone — up to ~3 s, then force it.
   pkill -x "$APP_NAME" 2>/dev/null || true
+  for _ in $(seq 1 30); do
+    pgrep -x "$APP_NAME" >/dev/null 2>&1 || break
+    sleep 0.1
+  done
+  pkill -9 -x "$APP_NAME" 2>/dev/null || true
   open "$APP"
 fi
 

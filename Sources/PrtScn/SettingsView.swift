@@ -21,18 +21,61 @@ enum SettingsPane: String, CaseIterable, Identifiable {
 
     var icon: String {
         switch self {
-        case .general: "gearshape"
-        case .capture: "camera"
-        case .preview: "photo.on.rectangle"
+        case .general: "gearshape.fill"
+        case .capture: "camera.fill"
+        case .preview: "photo.fill.on.rectangle.fill"
         case .editor: "pencil.and.outline"
-        case .hotkeys: "keyboard"
+        case .hotkeys: "keyboard.fill"
         case .about: "info"
         }
     }
 
+    /// The labels of every setting the pane contains, for the sidebar search
+    /// field. Reuses the forms' own localized keys so a Spanish user can
+    /// search in Spanish. Keep in step when adding a control to a pane.
+    var searchTerms: [String] {
+        switch self {
+        case .general: [
+            "Appearance", "Theme", "Startup", "Launch PrtScn at login",
+            "Dock", "Show Dock icon", "Files", "Save to",
+        ].map { String(localized: String.LocalizationValue($0)) }
+        case .capture: [
+            "Window screenshots", "Background", "Color", "Resolution", "Save as",
+            "Copy as", "Scrolling screenshots", "Maximum height", "Options",
+            "Include the mouse pointer (full-screen captures)", "Play the shutter sound",
+            "Fixed-size capture", "Add preset",
+        ].map { String(localized: String.LocalizationValue($0)) }
+        case .preview: [
+            "Style", "Preview style", "Actions", "Dismissal", "Auto-dismiss after",
+            "If dismissed without action",
+        ].map { String(localized: String.LocalizationValue($0)) }
+        case .editor: [
+            "Tools", "Reopen with the last-used tool", "After an action",
+            "Close the editor after Copy, Export, or OCR", "Measure tool",
+            "Show distances in", "Show a magnifier loupe while measuring",
+            "Blank canvas", "Size",
+        ].map { String(localized: String.LocalizationValue($0)) }
+        case .hotkeys:
+            [String(localized: "Capture shortcuts"), String(localized: "Restore Defaults"),
+             String(localized: "Use System Shortcuts")] + CaptureMode.allCases.map(\.title)
+        case .about:
+            [String(localized: "Check for Updates…"), String(localized: "View on GitHub…")]
+        }
+    }
+
+    /// The setting labels matching `query` (case- and diacritic-insensitive),
+    /// or `nil` when nothing in the pane — including its name — matches.
+    /// An empty array means the pane name itself matched.
+    func matches(_ query: String) -> [String]? {
+        let query = query.trimmingCharacters(in: .whitespaces)
+        if query.isEmpty || title.localizedStandardContains(query) { return [] }
+        let hits = searchTerms.filter { $0.localizedStandardContains(query) }
+        return hits.isEmpty ? nil : hits
+    }
+
     var tint: Color {
         switch self {
-        case .general: .gray
+        case .general: Color(red: 0.55, green: 0.55, blue: 0.57)
         case .capture: .blue
         case .preview: .orange
         case .editor: .purple
@@ -49,12 +92,121 @@ enum SettingsPane: String, CaseIterable, Identifiable {
 struct SettingsSidebar: View {
     @Bindable var model: SettingsWindowModel
 
-    var body: some View {
-        List(SettingsPane.allCases, selection: $model.pane) { pane in
-            SettingsPaneLabel(pane: pane)
+    /// Panes that survive the search, each with the setting labels that
+    /// matched (empty when the pane name matched, so no subtitle is needed).
+    private var results: [(pane: SettingsPane, hits: [String])] {
+        SettingsPane.allCases.compactMap { pane in
+            pane.matches(model.query).map { (pane, $0) }
         }
-        .listStyle(.sidebar)
-        .scrollContentBackground(.hidden)
+    }
+
+    var body: some View {
+        // Not a `List`. The sidebar list style insets its content by the
+        // title bar it sits under, and re-evaluates that inset when the
+        // window becomes key — so anything placed above or inside it (a
+        // search field) saw the rows jump. `.searchable(placement: .sidebar)`
+        // would have owned that inset properly, but it only materialises in
+        // a `NavigationSplitView`, which can't give us the AppKit full-height
+        // sidebar this window is built on. So the rows are drawn by hand in
+        // a scroll view: every point of geometry here is ours and fixed.
+        VStack(spacing: 0) {
+            SettingsSearchField(text: $model.query)
+                .padding(.horizontal, 12)
+                .padding(.top, Self.fieldTop)
+                .padding(.bottom, 12)
+
+            let results = results
+            if results.isEmpty {
+                Text("No Results")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    VStack(spacing: 2) {
+                        ForEach(results, id: \.pane) { result in
+                            SettingsPaneRow(
+                                pane: result.pane, hits: result.hits,
+                                selected: model.pane == result.pane
+                            ) { model.pane = result.pane }
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                }
+                .scrollBounceBehavior(.basedOnSize)
+            }
+        }
+        .ignoresSafeArea(.container, edges: .top)
+    }
+
+    /// Distance from the window's top edge to the search field: clears the
+    /// traffic lights, which sit at the same height as the detail column's
+    /// header capsule.
+    private static let fieldTop: CGFloat = 46
+}
+
+/// One sidebar row, styled like the `.sidebar` list's: a rounded accent
+/// highlight when selected (grey while the window is inactive, as AppKit
+/// does), otherwise plain.
+private struct SettingsPaneRow: View {
+    let pane: SettingsPane
+    let hits: [String]
+    let selected: Bool
+    let select: () -> Void
+
+    @Environment(\.controlActiveState) private var activeState
+
+    var body: some View {
+        Button(action: select) {
+            SettingsPaneLabel(pane: pane, hits: hits)
+                .foregroundStyle(selected && activeState != .inactive ? .white : .primary)
+                .padding(.horizontal, 8)
+                .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
+                .background {
+                    if selected {
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(activeState == .inactive
+                                  ? AnyShapeStyle(.primary.opacity(0.12))
+                                  : AnyShapeStyle(.tint))
+                    }
+                }
+                .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// The sidebar's search field, in System Settings' shape: a Liquid Glass
+/// capsule with a leading magnifier and a clear button once there's text.
+private struct SettingsSearchField: View {
+    @Binding var text: String
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField(String(localized: "Search"), text: $text)
+                .textFieldStyle(.plain)
+                .focused($focused)
+            if !text.isEmpty {
+                Button {
+                    text = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(String(localized: "Clear"))
+            }
+        }
+        .font(.body)
+        .padding(.horizontal, 12)
+        .frame(height: 34)
+        .glassEffect(.regular.interactive(), in: Capsule())
+        .contentShape(Capsule())
+        .onTapGesture { focused = true }
+        .onExitCommand { text = "" }
     }
 }
 
@@ -137,19 +289,58 @@ struct SettingsDetail: View {
 
 /// A sidebar row in the System Settings style: the pane name next to a small
 /// white symbol on a rounded colored tile.
+///
+/// The tile mirrors System Settings' own: 20 pt, continuous corners, a
+/// top-lit gradient of the tint with a hairline highlight along the inside
+/// edge and a faint drop shadow so it sits on the sidebar material rather
+/// than floating flat. The symbol is pinned to 11 pt — the sidebar list
+/// style otherwise applies `.imageScale(.large)` to label icons, which is
+/// what made the glyphs overflow their tiles.
 private struct SettingsPaneLabel: View {
     let pane: SettingsPane
+    /// Setting labels that matched the search; shown under the pane name
+    /// so the user sees *why* the pane is still listed.
+    var hits: [String] = []
+
+    private static let tileSize: CGFloat = 20
+    private static let cornerRadius: CGFloat = 5.5
 
     var body: some View {
         Label {
-            Text(pane.title)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(pane.title)
+                if !hits.isEmpty {
+                    Text(hits.joined(separator: " · "))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
         } icon: {
-            Image(systemName: pane.icon)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.white)
-                .frame(width: 23, height: 23)
-                .background(pane.tint.gradient, in: RoundedRectangle(cornerRadius: 6))
+            tile
         }
+    }
+
+    private var tile: some View {
+        let shape = RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+        return Image(systemName: pane.icon)
+            .symbolRenderingMode(.monochrome)
+            .imageScale(.medium)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.white)
+            .shadow(color: .black.opacity(0.18), radius: 0.5, y: 0.5)
+            .frame(width: Self.tileSize, height: Self.tileSize)
+            .background(
+                LinearGradient(
+                    colors: [
+                        pane.tint.mix(with: .white, by: 0.18),
+                        pane.tint.mix(with: .black, by: 0.12),
+                    ],
+                    startPoint: .top, endPoint: .bottom),
+                in: shape)
+            .overlay(shape.strokeBorder(.white.opacity(0.28), lineWidth: 0.5))
+            .shadow(color: .black.opacity(0.22), radius: 0.75, y: 0.5)
+            .accessibilityHidden(true)
     }
 }
 
