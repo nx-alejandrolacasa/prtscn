@@ -63,6 +63,9 @@ eating your battery — just system frameworks, doing exactly what you asked.
   it anywhere, scroll to resize, and keep as many pinned as you like while
   you work.
 - 🔍 **Copy Text (OCR)** straight out of any capture, powered by Vision.
+- 🌐 **Speaks your language** — the whole interface follows the Mac's
+  language setting. English and Spanish today; adding another language is
+  one folder of strings (see *Localization* below).
 - 🚀 **Launch at login**, a native macOS 26 Liquid Glass interface, and a
   menu bar you'll forget is even running.
 
@@ -108,6 +111,21 @@ On the first capture, macOS will ask for **Screen Recording** permission
 (System Settings → Privacy & Security → Screen Recording). This is required for
 `screencapture` to produce non-blank output.
 
+### Localization
+
+PrtScn picks its language from **System Settings → General → Language &
+Region** (the first language it ships that appears in your list; English
+otherwise). Every UI string lives in `Resources/<lang>.lproj/Localizable.strings`,
+keyed by the English source text. To add a language:
+
+1. Copy `Resources/en.lproj` to `Resources/<code>.lproj` and translate the
+   right-hand side of every line in `Localizable.strings` (and the one line in
+   `InfoPlist.strings`). Keep placeholders like `%@` / `%lld`; reorder them with
+   `%1$@`, `%2$@` when your grammar needs to.
+2. Add the code to `CFBundleLocalizations` in `Resources/Info.plist`.
+3. Run `tools/check-localization.py` — it lists any key your table is missing
+   (or no longer used by the code) — then `./build.sh`.
+
 ## Sign once, grant once (stop the repeated permission prompts)
 
 By default the build is **ad-hoc** signed, whose identity changes on every
@@ -130,6 +148,23 @@ Verify it's there:
 ```sh
 security find-identity -v -p codesigning   # should list "PrtScn Dev"
 ```
+
+**If that shows "0 valid identities found":** on recent macOS, Certificate
+Assistant often creates the certificate but silently skips trusting it, so
+the identity exists but is rejected as `CSSMERR_TP_NOT_TRUSTED`. Trust it for
+code signing (expect a password dialog):
+
+```sh
+security find-certificate -c "PrtScn Dev" -p > /tmp/prtscn-dev.pem
+security add-trusted-cert -p codeSign /tmp/prtscn-dev.pem
+```
+
+(Equivalent GUI route: Keychain Access → double-click **PrtScn Dev** →
+**Trust** → **Code Signing: Always Trust**.) Also make sure there's only
+*one* "PrtScn Dev" — a duplicate from re-running the assistant makes
+`codesign` fail with an ambiguous match; delete the extra with
+`security delete-identity -Z <sha1>` (hashes are listed by
+`security find-identity -p codesigning`).
 
 Now `./build.sh` signs with it automatically. The next build will prompt for
 Screen Recording **one last time** (new identity) — grant it, and you won't be
