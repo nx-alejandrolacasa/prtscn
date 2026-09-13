@@ -301,7 +301,7 @@ struct EditorCanvas: View {
         // pixels. While editing an empty label, the hole is placeholder-sized.
         var shape = context
         if annotation.supportsLabel, annotation.hasLabel || editingLabel {
-            let sizingText = annotation.text.isEmpty ? "Text" : annotation.text
+            let sizingText = annotation.text.isEmpty ? String(localized: "Text") : annotation.text
             let hole = annotation.labelHoleRect(for: sizingText)
             let holeView = CGRect(origin: fit.toView(hole.origin),
                                   size: CGSize(width: hole.width * fit.scale,

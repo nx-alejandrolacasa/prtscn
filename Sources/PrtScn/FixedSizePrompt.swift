@@ -61,7 +61,7 @@ final class FixedSizePrompt: NSObject, NSWindowDelegate {
 
         let panel = NSPanel(contentViewController: NSHostingController(rootView: view))
         panel.styleMask = [.titled, .closable]
-        panel.title = "Fixed Size Capture"
+        panel.title = String(localized: "Fixed Size Capture")
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = false
         panel.level = .floating
@@ -157,10 +157,10 @@ private struct FixedSizePromptView: View {
 
                     LabeledContent("Size") {
                         HStack(spacing: 6) {
-                            sizeField("Width", value: $width, field: .width)
+                            sizeField(String(localized: "Width"), value: $width, field: .width)
                             Text("×")
                                 .foregroundStyle(.secondary)
-                            sizeField("Height", value: $height, field: .height)
+                            sizeField(String(localized: "Height"), value: $height, field: .height)
                         }
                     }
 
@@ -176,8 +176,8 @@ private struct FixedSizePromptView: View {
                     }
                 } footer: {
                     Text(unit == .pixels
-                        ? "The saved image will be exactly this many pixels."
-                        : "Size on screen — Retina displays save at 2×.")
+                        ? String(localized: "The saved image will be exactly this many pixels.")
+                        : String(localized: "Size on screen — Retina displays save at 2×."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -192,7 +192,7 @@ private struct FixedSizePromptView: View {
                 .keyboardShortcut(.cancelAction)
 
                 Button(action: submit) {
-                    Text("Capture").frame(maxWidth: .infinity)
+                    Text(String(localized: "fixed-size.capture-button", defaultValue: "Capture")).frame(maxWidth: .infinity)
                 }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)

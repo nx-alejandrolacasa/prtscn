@@ -14,9 +14,9 @@ enum SaveResolution: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .native: "Native"
-        case .downscaled: "Downscaled"
-        case .both: "Both"
+        case .native: String(localized: "Native")
+        case .downscaled: String(localized: "Downscaled")
+        case .both: String(localized: "export-resolution.both", defaultValue: "Both")
         }
     }
 }
@@ -29,8 +29,8 @@ enum CopyResolution: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .native: "Native"
-        case .downscaled: "Downscaled"
+        case .native: String(localized: "Native")
+        case .downscaled: String(localized: "Downscaled")
         }
     }
 }

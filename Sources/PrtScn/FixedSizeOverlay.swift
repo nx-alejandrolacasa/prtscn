@@ -224,7 +224,7 @@ private final class FixedSizeOverlayView: NSView {
     /// the rectangle (or inside it when there's no room below).
     private func drawLabel(near rect: CGRect) {
         let text = "\(Int(targetSize.width)) × \(Int(targetSize.height)) \(unit.label)" +
-            "   ·   Click to capture, Esc to cancel"
+            String(localized: "   ·   Click to capture, Esc to cancel")
         let string = NSAttributedString(string: text, attributes: [
             .font: NSFont.systemFont(ofSize: 12, weight: .medium),
             .foregroundColor: NSColor.white,

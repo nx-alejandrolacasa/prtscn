@@ -10,12 +10,12 @@ enum SettingsPane: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .general: "General"
-        case .capture: "Capture"
-        case .preview: "Preview"
-        case .editor: "Editor"
-        case .hotkeys: "Hotkeys"
-        case .about: "About"
+        case .general: String(localized: "General")
+        case .capture: String(localized: "Capture")
+        case .preview: String(localized: "Preview")
+        case .editor: String(localized: "Editor")
+        case .hotkeys: String(localized: "Hotkeys")
+        case .about: String(localized: "About")
         }
     }
 
@@ -89,9 +89,9 @@ struct SettingsPaneHeader: View {
     /// pill.
     private var historyChevrons: some View {
         HStack(spacing: 0) {
-            chevron("chevron.left", help: "Back", enabled: model.canGoBack) { model.goBack() }
+            chevron("chevron.left", help: String(localized: "Back"), enabled: model.canGoBack) { model.goBack() }
             Divider().frame(height: 16).opacity(0.5)
-            chevron("chevron.right", help: "Forward", enabled: model.canGoForward) { model.goForward() }
+            chevron("chevron.right", help: String(localized: "Forward"), enabled: model.canGoForward) { model.goForward() }
         }
         .glassEffect(.regular, in: Capsule())
     }
@@ -206,7 +206,7 @@ private struct GeneralSettingsView: View {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
-        panel.prompt = "Choose"
+        panel.prompt = String(localized: "Choose")
         panel.directoryURL = URL(fileURLWithPath: settings.saveFolderPath)
         if panel.runModal() == .OK, let url = panel.url {
             settings.saveFolderPath = url.path
@@ -354,11 +354,11 @@ private struct FixedSizePresetsSection: View {
             if !atCapacity {
                 LabeledContent("Add preset") {
                     HStack(spacing: 6) {
-                        presetField("Width", value: $newWidth, field: .width)
+                        presetField(String(localized: "Width"), value: $newWidth, field: .width)
                         Text("×")
                             .foregroundStyle(.secondary)
                             .accessibilityHidden(true)
-                        presetField("Height", value: $newHeight, field: .height)
+                        presetField(String(localized: "Height"), value: $newHeight, field: .height)
 
                         Button(action: add) {
                             Image(systemName: "plus.circle.fill")
@@ -552,8 +552,8 @@ private struct PreviewSettingsView: View {
             .buttonStyle(.borderless)
             .foregroundStyle(.secondary)
             .disabled(!hidden && atFloor)
-            .help(hidden ? "Show on the preview card" : "Hide from the preview card")
-            .accessibilityLabel(hidden ? "Show \(action.label)" : "Hide \(action.label)")
+            .help(hidden ? String(localized: "Show on the preview card") : String(localized: "Hide from the preview card"))
+            .accessibilityLabel(hidden ? String(localized: "Show \(action.label)") : String(localized: "Hide \(action.label)"))
         }
         .accessibilityElement(children: .combine)
         // The whole row is the drag surface — without an explicit content
@@ -597,11 +597,11 @@ private struct EditorSettingsView: View {
             Section {
                 LabeledContent("Size") {
                     HStack(spacing: 6) {
-                        canvasField("Width", value: $settings.canvasWidth)
+                        canvasField(String(localized: "Width"), value: $settings.canvasWidth)
                         Text("×")
                             .foregroundStyle(.secondary)
                             .accessibilityHidden(true)
-                        canvasField("Height", value: $settings.canvasHeight)
+                        canvasField(String(localized: "Height"), value: $settings.canvasHeight)
                         Text("px")
                             .foregroundStyle(.secondary)
                     }
@@ -733,11 +733,12 @@ private struct AboutSettingsView: View {
     private var version: String {
         let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
-        return "Version \(short) (\(build))"
+        return String(localized: "Version \(short) (\(build))")
     }
 
     private var copyright: String {
-        Bundle.main.object(forInfoDictionaryKey: "NSHumanReadableCopyright") as? String
+        (Bundle.main.localizedInfoDictionary?["NSHumanReadableCopyright"]
+            ?? Bundle.main.object(forInfoDictionaryKey: "NSHumanReadableCopyright")) as? String
             ?? "© 2026 Alejandro G. Lacasa"
     }
 
@@ -782,7 +783,7 @@ private struct AboutSettingsView: View {
             Button("Check for Updates…") { Task { await updater.check() } }
                 .controlSize(.small)
         case .checking:
-            progressLine("Checking…")
+            progressLine(String(localized: "Checking…"))
         case .upToDate:
             Text("You're up to date.")
                 .font(.caption)
@@ -791,16 +792,16 @@ private struct AboutSettingsView: View {
             HStack(spacing: 8) {
                 Text("Version \(updater.latest?.version ?? "?") is available.")
                     .font(.caption)
-                Button(isDevBuild ? "View on GitHub…" : "Install Update") {
+                Button(isDevBuild ? String(localized: "View on GitHub…") : String(localized: "Install Update")) {
                     Task { await updater.installLatest() }
                 }
                 .controlSize(.small)
                 .buttonStyle(.borderedProminent)
             }
         case .downloading:
-            progressLine("Downloading update…")
+            progressLine(String(localized: "Downloading update…"))
         case .installing:
-            progressLine("Installing… the app will relaunch.")
+            progressLine(String(localized: "Installing… the app will relaunch."))
         case .failed(let message):
             HStack(spacing: 8) {
                 Text(message)

@@ -15,12 +15,12 @@ enum PreviewAction: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .edit: "Edit"
-        case .copy: "Copy"
-        case .ocr: "OCR"
-        case .save: "Export"
-        case .pin: "Pin"
-        case .discard: "Discard"
+        case .edit: String(localized: "Edit")
+        case .copy: String(localized: "Copy")
+        case .ocr: String(localized: "OCR")
+        case .save: String(localized: "Export")
+        case .pin: String(localized: "Pin")
+        case .discard: String(localized: "Discard")
         }
     }
 

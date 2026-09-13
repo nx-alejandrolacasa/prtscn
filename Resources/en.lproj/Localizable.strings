@@ -1,0 +1,254 @@
+/* PrtScn — English (development language).
+   Keys are the English source strings themselves, so this table doubles as the
+   inventory every other language must cover. Keep it in sync with the code:
+   `tools/check-localization.py` diffs the keys used in Sources/ against this file
+   and every other .lproj. */
+
+/* Menu bar */
+"Capture Area" = "Capture Area";
+"Capture Window" = "Capture Window";
+"Capture Full Screen" = "Capture Full Screen";
+"Capture Fixed Size…" = "Capture Fixed Size…";
+"Capture Scrolling Area" = "Capture Scrolling Area";
+"New Blank Canvas" = "New Blank Canvas";
+"Open Project…" = "Open Project…";
+"Close All Pins" = "Close All Pins";
+"Update to %@…" = "Update to %@…";
+"Settings…" = "Settings…";
+"Quit PrtScn" = "Quit PrtScn";
+
+/* Capture modes */
+"Area" = "Area";
+"Window" = "Window";
+"Full Screen" = "Full Screen";
+"Fixed Size" = "Fixed Size";
+"Scrolling Area" = "Scrolling Area";
+
+/* Preview card actions */
+"Edit" = "Edit";
+"Copy" = "Copy";
+"OCR" = "OCR";
+"Export" = "Export";
+"Pin" = "Pin";
+"Discard" = "Discard";
+"Drop into any app" = "Drop into any app";
+
+/* Default action on dismiss */
+"Export to disk" = "Export to disk";
+"Copy to clipboard" = "Copy to clipboard";
+"Open in Editor" = "Open in Editor";
+
+/* Option labels */
+"Auto" = "Auto";
+"Light" = "Light";
+"Dark" = "Dark";
+"While Editing" = "While Editing";
+"Always" = "Always";
+"Never" = "Never";
+"With margins" = "With margins";
+"Solid color" = "Solid color";
+"Desktop background" = "Desktop background";
+"Without margins" = "Without margins";
+"Island" = "Island";
+"Archipelago" = "Archipelago";
+"Native" = "Native";
+"Downscaled" = "Downscaled";
+"export-resolution.both" = "Both";
+"measure-unit.both" = "Both";
+"Points (pt)" = "Points (pt)";
+"Pixels (px)" = "Pixels (px)";
+
+/* Pinned screenshots */
+"Copy Image" = "Copy Image";
+"Save" = "Save";
+"Edit…" = "Edit…";
+"Close Pin" = "Close Pin";
+
+/* Settings window */
+"PrtScn Settings" = "PrtScn Settings";
+"Back" = "Back";
+"Forward" = "Forward";
+"General" = "General";
+"Capture" = "Capture";
+"Preview" = "Preview";
+"Editor" = "Editor";
+"Hotkeys" = "Hotkeys";
+"About" = "About";
+
+/* Settings → General */
+"Appearance" = "Appearance";
+"Theme" = "Theme";
+"Startup" = "Startup";
+"Launch PrtScn at login" = "Launch PrtScn at login";
+"Show Dock icon" = "Show Dock icon";
+"Dock" = "Dock";
+"The Dock icon is also what makes PrtScn reachable with ⌘Tab. While Editing shows it only while the editor window is open." = "The Dock icon is also what makes PrtScn reachable with ⌘Tab. While Editing shows it only while the editor window is open.";
+"Files" = "Files";
+"Save to" = "Save to";
+"Choose…" = "Choose…";
+"Choose" = "Choose";
+"Filename prefix" = "Filename prefix";
+
+/* Settings → Capture */
+"Window screenshots" = "Window screenshots";
+"Background" = "Background";
+"Color" = "Color";
+"Save as" = "Save as";
+"Copy as" = "Copy as";
+"Resolution" = "Resolution";
+"Applies to captures from HiDPI (Retina) displays. Both saves the downscaled file alongside the native one." = "Applies to captures from HiDPI (Retina) displays. Both saves the downscaled file alongside the native one.";
+"Maximum height" = "Maximum height";
+"Reset" = "Reset";
+"Scrolling screenshots" = "Scrolling screenshots";
+"The capture stops once the stitched image reaches this height, in image pixels (a Retina capture packs 2 px per screen point). Capped at 16,000 px — macOS can't display taller images at full resolution." = "The capture stops once the stitched image reaches this height, in image pixels (a Retina capture packs 2 px per screen point). Capped at 16,000 px — macOS can't display taller images at full resolution.";
+"Options" = "Options";
+"Include the mouse pointer (full-screen captures)" = "Include the mouse pointer (full-screen captures)";
+"Play the shutter sound" = "Play the shutter sound";
+"Remove preset" = "Remove preset";
+"Remove %lld by %lld preset" = "Remove %lld by %lld preset";
+"Add preset" = "Add preset";
+"Width" = "Width";
+"Height" = "Height";
+"Fixed-size capture" = "Fixed-size capture";
+"Presets offered in the Capture Fixed Size dialog, up to %lld. Drag to reorder." = "Presets offered in the Capture Fixed Size dialog, up to %lld. Drag to reorder.";
+
+/* Settings → Preview */
+"Style" = "Style";
+"Preview style" = "Preview style";
+"Actions" = "Actions";
+"The buttons on the preview card. Drag to reorder; at least %lld stay visible. Hidden actions keep their keyboard shortcuts." = "The buttons on the preview card. Drag to reorder; at least %lld stay visible. Hidden actions keep their keyboard shortcuts.";
+"Show on the preview card" = "Show on the preview card";
+"Hide from the preview card" = "Hide from the preview card";
+"Show %@" = "Show %@";
+"Hide %@" = "Hide %@";
+"Dismissal" = "Dismissal";
+"Auto-dismiss after" = "Auto-dismiss after";
+"3 seconds" = "3 seconds";
+"5 seconds" = "5 seconds";
+"10 seconds" = "10 seconds";
+"If dismissed without action" = "If dismissed without action";
+
+/* Settings → Editor */
+"Tools" = "Tools";
+"Reopen with the last-used tool" = "Reopen with the last-used tool";
+"After an action" = "After an action";
+"Close the editor after Copy, Export, or OCR" = "Close the editor after Copy, Export, or OCR";
+"Measure tool" = "Measure tool";
+"Show distances in" = "Show distances in";
+"Show a magnifier loupe while measuring" = "Show a magnifier loupe while measuring";
+"Size" = "Size";
+"Blank canvas" = "Blank canvas";
+"The size of the white image New Blank Canvas opens in the editor." = "The size of the white image New Blank Canvas opens in the editor.";
+
+/* Settings → Hotkeys */
+"Capture shortcuts" = "Capture shortcuts";
+"Restore Defaults" = "Restore Defaults";
+"Use System Shortcuts" = "Use System Shortcuts";
+"⇧⌘3 full screen, ⇧⌘4 area, ⇧⌘5 window, ⇧⌘6 fixed size, ⇧⌘7 scrolling" = "⇧⌘3 full screen, ⇧⌘4 area, ⇧⌘5 window, ⇧⌘6 fixed size, ⇧⌘7 scrolling";
+"“Use System Shortcuts” takes over macOS's own screenshot combos (⇧⌘3, ⇧⌘4, …). Disable the built-in ones first under System Settings → Keyboard → Keyboard Shortcuts → Screenshots, or the system keeps them." = "“Use System Shortcuts” takes over macOS's own screenshot combos (⇧⌘3, ⇧⌘4, …). Disable the built-in ones first under System Settings → Keyboard → Keyboard Shortcuts → Screenshots, or the system keeps them.";
+"Open Keyboard Settings…" = "Open Keyboard Settings…";
+"Clear shortcut" = "Clear shortcut";
+"Clear %@ shortcut" = "Clear %@ shortcut";
+"Type shortcut…" = "Type shortcut…";
+"Click to record" = "Click to record";
+
+/* Settings → About + updates */
+"Version %@ (%@)" = "Version %@ (%@)";
+"The Print Screen key your Mac never had." = "The Print Screen key your Mac never had.";
+"Created by Alejandro G. Lacasa" = "Created by Alejandro G. Lacasa";
+"Check for Updates…" = "Check for Updates…";
+"Checking…" = "Checking…";
+"You're up to date." = "You're up to date.";
+"Version %@ is available." = "Version %@ is available.";
+"View on GitHub…" = "View on GitHub…";
+"Install Update" = "Install Update";
+"Downloading update…" = "Downloading update…";
+"Installing… the app will relaunch." = "Installing… the app will relaunch.";
+"Try Again" = "Try Again";
+"Couldn't check for updates." = "Couldn't check for updates.";
+"Update failed — install manually from GitHub." = "Update failed — install manually from GitHub.";
+
+/* Fixed-size capture dialog + overlay */
+"Fixed Size Capture" = "Fixed Size Capture";
+"Preset" = "Preset";
+"Custom" = "Custom";
+"Unit" = "Unit";
+"The saved image will be exactly this many pixels." = "The saved image will be exactly this many pixels.";
+"Size on screen — Retina displays save at 2×." = "Size on screen — Retina displays save at 2×.";
+"Cancel" = "Cancel";
+"fixed-size.capture-button" = "Capture";
+"   ·   Click to capture, Esc to cancel" = "   ·   Click to capture, Esc to cancel";
+
+/* Scrolling capture */
+"Drag over scrollable content   ·   Hold ⌘ to scroll up   ·   Esc to cancel" = "Drag over scrollable content   ·   Hold ⌘ to scroll up   ·   Esc to cancel";
+"   ·   ⌘ scrolling up ↑" = "   ·   ⌘ scrolling up ↑";
+"Capturing…  %@ px" = "Capturing…  %@ px";
+"Click or ⏎ to finish  ·  Esc to cancel" = "Click or ⏎ to finish  ·  Esc to cancel";
+"Scrolling Capture needs Accessibility access" = "Scrolling Capture needs Accessibility access";
+"PrtScn scrolls the page for you by sending scroll events, and macOS only allows that for apps with Accessibility permission.\n\nEnable PrtScn in System Settings → Privacy & Security → Accessibility, then try again." = "PrtScn scrolls the page for you by sending scroll events, and macOS only allows that for apps with Accessibility permission.\n\nEnable PrtScn in System Settings → Privacy & Security → Accessibility, then try again.";
+"Open System Settings" = "Open System Settings";
+
+/* Editor — tools */
+"Select" = "Select";
+"Select (S, V)" = "Select (S, V)";
+"Line" = "Line";
+"Line (L)" = "Line (L)";
+"Arrow (A)" = "Arrow (A)";
+"Measure" = "Measure";
+"Rectangle" = "Rectangle";
+"Ellipse" = "Ellipse";
+"Diamond" = "Diamond";
+"Pixelate" = "Pixelate";
+"Pixelate (P)" = "Pixelate (P)";
+"Step Number" = "Step Number";
+"Text" = "Text";
+"Shapes" = "Shapes";
+"None" = "None";
+"Arrow" = "Arrow";
+"Bar" = "Bar";
+"Start" = "Start";
+"End" = "End";
+"%@ cap: %@" = "%@ cap: %@";
+"Sans-serif" = "Sans-serif";
+"Serif" = "Serif";
+"Monospaced" = "Monospaced";
+"Font: %@" = "Font: %@";
+"Smaller" = "Smaller";
+"Larger" = "Larger";
+"Custom…" = "Custom…";
+"Undo (⌘Z)" = "Undo (⌘Z)";
+"Redo (⇧⌘Z)" = "Redo (⇧⌘Z)";
+"Crop" = "Crop";
+"Pick Color" = "Pick Color";
+"Hover the capture" = "Hover the capture";
+
+/* Editor — title bar */
+"Copy (⌘C)" = "Copy (⌘C)";
+"Export as PNG (⌘E)" = "Export as PNG (⌘E)";
+"Save as a project — keeps the shapes editable (⌘S)" = "Save as a project — keeps the shapes editable (⌘S)";
+"Copy text with OCR (⌘T)" = "Copy text with OCR (⌘T)";
+"Share" = "Share";
+"Zoom" = "Zoom";
+"Zoom In" = "Zoom In";
+"Zoom Out" = "Zoom Out";
+"Zoom (⌘− / ⌘+, ⌘0 resets, or pinch · double-click for 100%)" = "Zoom (⌘− / ⌘+, ⌘0 resets, or pinch · double-click for 100%)";
+"Image size in pixels — click to copy" = "Image size in pixels — click to copy";
+"Image size" = "Image size";
+"Crop size" = "Crop size";
+
+/* Editor — toasts, tips, dialogs */
+"Copied" = "Copied";
+"Exported" = "Exported";
+"Text copied" = "Text copied";
+"Size copied" = "Size copied";
+"Project saved" = "Project saved";
+"Couldn't save project" = "Couldn't save project";
+"Scroll to move around · ⌘-scroll to zoom" = "Scroll to move around · ⌘-scroll to zoom";
+"Zoom in to measure small distances" = "Zoom in to measure small distances";
+"Drag the middle dot to curve · double-click it for a 90° corner" = "Drag the middle dot to curve · double-click it for a 90° corner";
+"%@ project.prtscn" = "%@ project.prtscn";
+"Couldn't open “%@”" = "Couldn't open “%@”";
+"The file isn't a PrtScn project this version can read." = "The file isn't a PrtScn project this version can read.";
+"Do you want to save the changes made to the project “%@”?" = "Do you want to save the changes made to the project “%@”?";
+"Your changes will be lost if you don't save them." = "Your changes will be lost if you don't save them.";
+"Don't Save" = "Don't Save";

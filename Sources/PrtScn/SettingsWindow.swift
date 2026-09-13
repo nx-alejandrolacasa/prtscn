@@ -75,7 +75,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         window.styleMask = [.titled, .closable, .miniaturizable, .fullSizeContentView]
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
-        window.title = "PrtScn Settings"
+        window.title = String(localized: "PrtScn Settings")
         window.titlebarSeparatorStyle = .none
         window.isReleasedWhenClosed = false
         window.delegate = self

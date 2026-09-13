@@ -129,7 +129,7 @@ final class EditorModel {
     func setZoom(_ value: CGFloat) {
         let new = min(max(value, minZoom), Self.maxZoom)
         guard new != zoom else { return }
-        if zoom <= 1, new > 1 { showTip("Scroll to move around · ⌘-scroll to zoom") }
+        if zoom <= 1, new > 1 { showTip(String(localized: "Scroll to move around · ⌘-scroll to zoom")) }
         // Scale the pan proportionally so the point at the anchor stays put
         // while zooming.
         pan = CGSize(width: pan.width * new / zoom, height: pan.height * new / zoom)
@@ -209,7 +209,7 @@ final class EditorModel {
         ? SettingsStore.shared.editorTool : .line {
         didSet {
             SettingsStore.shared.editorTool = tool
-            if tool == .measure, zoom <= 1 { showTip("Zoom in to measure small distances") }
+            if tool == .measure, zoom <= 1 { showTip(String(localized: "Zoom in to measure small distances")) }
         }
     }
     /// The line tool's end decorations (a plain tail and an arrow head by
@@ -298,7 +298,7 @@ final class EditorModel {
     private func showBendTip() {
         guard !didShowBendTip else { return }
         didShowBendTip = true
-        showTip("Drag the middle dot to curve · double-click it for a 90° corner")
+        showTip(String(localized: "Drag the middle dot to curve · double-click it for a 90° corner"))
     }
     /// The text annotation being edited, if any.
     var editingTextID: UUID?
@@ -838,7 +838,7 @@ final class EditorModel {
         finishTextEditing()
         prepareExport()
         ScreenshotService.shared.copyToClipboard(workingURL, captureScale: captureScale)
-        completed("Copied")
+        completed(String(localized: "Copied"))
     }
 
     /// Writes the flattened PNG to the save folder — the capture as it looks,
@@ -846,12 +846,12 @@ final class EditorModel {
     func export() {
         finishTextEditing()
         prepareExport()
-        if ScreenshotService.shared.save(workingURL, captureScale: captureScale) != nil { completed("Exported") }
+        if ScreenshotService.shared.save(workingURL, captureScale: captureScale) != nil { completed(String(localized: "Exported")) }
     }
 
     func copyText() {
         ScreenshotService.shared.copyText(in: baseImage)
-        completed("Text copied")
+        completed(String(localized: "Text copied"))
     }
 
     // MARK: - Project documents
@@ -890,7 +890,7 @@ final class EditorModel {
         panel.canCreateDirectories = true
         panel.isExtensionHidden = false
         panel.nameFieldStringValue = documentURL?.lastPathComponent
-            ?? "\(SettingsStore.shared.sanitizedFilenamePrefix) project.prtscn"
+            ?? String(localized: "\(SettingsStore.shared.sanitizedFilenamePrefix) project.prtscn")
         panel.directoryURL = documentURL?.deletingLastPathComponent()
             ?? URL(fileURLWithPath: SettingsStore.shared.saveFolderPath, isDirectory: true)
         let handler: (NSApplication.ModalResponse) -> Void = { [weak self] response in
@@ -912,11 +912,11 @@ final class EditorModel {
         do {
             try ProjectDocument.write(image: base, document: document, to: url)
             markSaved(to: url)
-            flash("Project saved")
+            flash(String(localized: "Project saved"))
             return true
         } catch {
             log.error("project save failed: \(String(describing: error), privacy: .public)")
-            flash("Couldn't save project")
+            flash(String(localized: "Couldn't save project"))
             return false
         }
     }
@@ -970,9 +970,9 @@ final class EditorModel {
     /// otherwise the capture's.
     var sizeReadout: (value: String, caption: String) {
         if isCropping, let rect = cropRect?.integral, rect.width >= 1, rect.height >= 1 {
-            return ("\(Int(rect.width))×\(Int(rect.height))", "Crop size")
+            return ("\(Int(rect.width))×\(Int(rect.height))", String(localized: "Crop size"))
         }
-        return (pixelSizeText, "Image size")
+        return (pixelSizeText, String(localized: "Image size"))
     }
 
     /// Copies the readout's dimensions to the clipboard — the title-bar size
@@ -980,7 +980,7 @@ final class EditorModel {
     func copySize() {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(sizeReadout.value, forType: .string)
-        flash("Size copied")
+        flash(String(localized: "Size copied"))
     }
 
     /// The capture as a bitmap, cached for the eyedropper session — rebuilding

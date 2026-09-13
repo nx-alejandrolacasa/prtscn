@@ -126,16 +126,16 @@ final class ScrollCaptureController {
 
         NSApp.activate()
         let alert = NSAlert()
-        alert.messageText = "Scrolling Capture needs Accessibility access"
-        alert.informativeText = """
+        alert.messageText = String(localized: "Scrolling Capture needs Accessibility access")
+        alert.informativeText = String(localized: """
             PrtScn scrolls the page for you by sending scroll events, and \
             macOS only allows that for apps with Accessibility permission.
 
             Enable PrtScn in System Settings → Privacy & Security → \
             Accessibility, then try again.
-            """
-        alert.addButton(withTitle: "Open System Settings")
-        alert.addButton(withTitle: "Cancel")
+            """)
+        alert.addButton(withTitle: String(localized: "Open System Settings"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
         if alert.runModal() == .alertFirstButtonReturn,
            let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
             NSWorkspace.shared.open(url)

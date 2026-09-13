@@ -12,11 +12,11 @@ enum CaptureMode: String, CaseIterable, Codable {
     /// Human-readable name for settings rows and menus.
     var title: String {
         switch self {
-        case .region: "Area"
-        case .window: "Window"
-        case .fullScreen: "Full Screen"
-        case .fixedSize: "Fixed Size"
-        case .scrolling: "Scrolling Area"
+        case .region: String(localized: "Area")
+        case .window: String(localized: "Window")
+        case .fullScreen: String(localized: "Full Screen")
+        case .fixedSize: String(localized: "Fixed Size")
+        case .scrolling: String(localized: "Scrolling Area")
         }
     }
 

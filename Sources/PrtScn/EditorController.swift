@@ -49,8 +49,8 @@ final class EditorController: NSObject, NSWindowDelegate {
         } catch {
             log.error("couldn't open project at \(projectURL.path, privacy: .public): \(String(describing: error), privacy: .public)")
             let alert = NSAlert()
-            alert.messageText = "Couldn't open “\(projectURL.lastPathComponent)”"
-            alert.informativeText = "The file isn't a PrtScn project this version can read."
+            alert.messageText = String(localized: "Couldn't open “\(projectURL.lastPathComponent)”")
+            alert.informativeText = String(localized: "The file isn't a PrtScn project this version can read.")
             NSApp.activate()
             alert.runModal()
             return
@@ -346,7 +346,7 @@ final class EditorController: NSObject, NSWindowDelegate {
         stack.orientation = .vertical
         stack.alignment = .centerX
         stack.spacing = 1
-        stack.toolTip = "Image size in pixels — click to copy"
+        stack.toolTip = String(localized: "Image size in pixels — click to copy")
         stack.addGestureRecognizer(
             NSClickGestureRecognizer(target: self, action: #selector(copySizeAction)))
 
@@ -455,11 +455,11 @@ final class EditorController: NSObject, NSWindowDelegate {
     private func askUnsavedChanges(for model: EditorModel, sheetOn window: NSWindow? = nil,
                                    then: ((UnsavedDecision) -> Void)? = nil) -> UnsavedDecision {
         let alert = NSAlert()
-        alert.messageText = "Do you want to save the changes made to the project “\(model.documentName)”?"
-        alert.informativeText = "Your changes will be lost if you don't save them."
-        alert.addButton(withTitle: "Save")
-        alert.addButton(withTitle: "Cancel")
-        alert.addButton(withTitle: "Don't Save").keyEquivalent = "d"
+        alert.messageText = String(localized: "Do you want to save the changes made to the project “\(model.documentName)”?")
+        alert.informativeText = String(localized: "Your changes will be lost if you don't save them.")
+        alert.addButton(withTitle: String(localized: "Save"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        alert.addButton(withTitle: String(localized: "Don't Save")).keyEquivalent = "d"
         alert.buttons[2].keyEquivalentModifierMask = .command
         func decision(_ response: NSApplication.ModalResponse) -> UnsavedDecision {
             switch response {
@@ -600,22 +600,22 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
             control.segmentCount = 3
             control.trackingMode = .momentary
             control.setImage(NSImage(systemSymbolName: "minus.magnifyingglass",
-                                     accessibilityDescription: "Zoom Out"), forSegment: 0)
+                                     accessibilityDescription: String(localized: "Zoom Out")), forSegment: 0)
             control.setLabel("100%", forSegment: 1)
             control.setEnabled(false, forSegment: 1)   // a readout, not a button
             // Fixed width: no jitter as digits change, and roomy enough that
             // even "1000%" never truncates to an ellipsis.
             control.setWidth(58, forSegment: 1)
             control.setImage(NSImage(systemSymbolName: "plus.magnifyingglass",
-                                     accessibilityDescription: "Zoom In"), forSegment: 2)
+                                     accessibilityDescription: String(localized: "Zoom In")), forSegment: 2)
             control.target = self
             control.action = #selector(zoomAction(_:))
             control.onReadoutDoubleClick = { [weak self] in self?.model.toggleActualSize() }
 
             let group = NSToolbarItemGroup(itemIdentifier: id)
             group.view = control
-            group.label = "Zoom"
-            group.toolTip = "Zoom (⌘− / ⌘+, ⌘0 resets, or pinch · double-click for 100%)"
+            group.label = String(localized: "Zoom")
+            group.toolTip = String(localized: "Zoom (⌘− / ⌘+, ⌘0 resets, or pinch · double-click for 100%)")
             zoomControl = control
             updateZoomLabel()
             observeZoomPercent()
@@ -624,7 +624,7 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
 
         if id == Self.share {
             let item = NSSharingServicePickerToolbarItem(itemIdentifier: id)
-            item.toolTip = "Share"
+            item.toolTip = String(localized: "Share")
             // Autovalidation calls our `items(for:)` every ~150ms; skip it so
             // building the share payload isn't a constant (side-effecting) cost.
             item.autovalidates = false
@@ -635,20 +635,20 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
         let spec: (symbol: String, label: String, tip: String, action: Selector)
         switch id {
         case Self.crop:
-            spec = ("crop", "Crop", "Crop", #selector(cropAction))
+            spec = ("crop", String(localized: "Crop"), String(localized: "Crop"), #selector(cropAction))
         case Self.pixelate:
-            spec = ("eye.slash", "Pixelate", "Pixelate (P)", #selector(pixelateAction))
+            spec = ("eye.slash", String(localized: "Pixelate"), String(localized: "Pixelate (P)"), #selector(pixelateAction))
         case Self.eyedropper:
-            spec = ("eyedropper", "Pick Color", "Pick Color", #selector(eyedropperAction))
+            spec = ("eyedropper", String(localized: "Pick Color"), String(localized: "Pick Color"), #selector(eyedropperAction))
         case Self.copy:
-            spec = ("doc.on.doc", "Copy", "Copy (⌘C)", #selector(copyAction))
+            spec = ("doc.on.doc", String(localized: "Copy"), String(localized: "Copy (⌘C)"), #selector(copyAction))
         case Self.export:
-            spec = ("square.and.arrow.up", "Export", "Export as PNG (⌘E)", #selector(exportAction))
+            spec = ("square.and.arrow.up", String(localized: "Export"), String(localized: "Export as PNG (⌘E)"), #selector(exportAction))
         case Self.save:
-            spec = ("square.and.arrow.down", "Save",
-                    "Save as a project — keeps the shapes editable (⌘S)", #selector(saveAction))
+            spec = ("square.and.arrow.down", String(localized: "Save"),
+                    String(localized: "Save as a project — keeps the shapes editable (⌘S)"), #selector(saveAction))
         case Self.copyText:
-            spec = ("text.viewfinder", "OCR", "Copy text with OCR (⌘T)", #selector(copyTextAction))
+            spec = ("text.viewfinder", String(localized: "OCR"), String(localized: "Copy text with OCR (⌘T)"), #selector(copyTextAction))
         default:
             return nil
         }

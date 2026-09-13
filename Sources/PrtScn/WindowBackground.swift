@@ -19,10 +19,10 @@ enum WindowBackground: String, CaseIterable, Identifiable, Codable {
 
     var label: String {
         switch self {
-        case .margins: "With margins"
-        case .solidColor: "Solid color"
-        case .wallpaper: "Desktop background"
-        case .trimShadow: "Without margins"
+        case .margins: String(localized: "With margins")
+        case .solidColor: String(localized: "Solid color")
+        case .wallpaper: String(localized: "Desktop background")
+        case .trimShadow: String(localized: "Without margins")
         }
     }
 

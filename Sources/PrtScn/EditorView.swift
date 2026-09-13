@@ -122,11 +122,11 @@ struct EditorView: View {
 
             Divider().frame(height: 20)
 
-            PaletteButton(help: "Undo (⌘Z)", disabled: !model.canUndo,
+            PaletteButton(help: String(localized: "Undo (⌘Z)"), disabled: !model.canUndo,
                           action: { model.undo() }) {
                 Image(systemName: "arrow.uturn.backward").font(.system(size: 15, weight: .medium))
             }
-            PaletteButton(help: "Redo (⇧⌘Z)", disabled: !model.canRedo,
+            PaletteButton(help: String(localized: "Redo (⇧⌘Z)"), disabled: !model.canRedo,
                           action: { model.redo() }) {
                 Image(systemName: "arrow.uturn.forward").font(.system(size: 15, weight: .medium))
             }
@@ -168,7 +168,7 @@ struct EditorView: View {
                     .fill(model.hoverColor ?? .clear)
                     .overlay(Circle().strokeBorder(.primary.opacity(0.25), lineWidth: 1))
                     .frame(width: 14, height: 14)
-                Text(model.hoverColorHex ?? "Hover the capture")
+                Text(model.hoverColorHex ?? String(localized: "Hover the capture"))
                     .font(.system(size: 12, weight: .medium))
                     .monospacedDigit()
             }
@@ -402,7 +402,7 @@ private struct LineToolControl: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            PaletteButton(help: hasArrow ? "Arrow (A)" : "Line (L)", isOn: model.tool == .line,
+            PaletteButton(help: hasArrow ? String(localized: "Arrow (A)") : String(localized: "Line (L)"), isOn: model.tool == .line,
                           action: onToggle) {
                 toolIcon
             }
@@ -411,13 +411,13 @@ private struct LineToolControl: View {
                 // The two cap dropdowns with a dot between them, so together
                 // they read as the editable ends of one line — no labels.
                 SubToolbar(spacing: 4) {
-                    capMenu("Start", atStart: true,
+                    capMenu(String(localized: "Start"), atStart: true,
                             selection: Binding(get: { model.lineStartCap },
                                                set: { model.setLineStartCap($0) }))
                     Circle()
                         .fill(.secondary)
                         .frame(width: 5, height: 5)
-                    capMenu("End", atStart: false,
+                    capMenu(String(localized: "End"), atStart: false,
                             selection: Binding(get: { model.lineEndCap },
                                                set: { model.setLineEndCap($0) }))
                 }
@@ -476,7 +476,7 @@ private struct ShapeToolControl: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            PaletteButton(help: "Shapes", isOn: model.tool.isShape, action: onToggle) {
+            PaletteButton(help: String(localized: "Shapes"), isOn: model.tool.isShape, action: onToggle) {
                 Image(systemName: "square.on.circle").font(.system(size: 15, weight: .medium))
             }
 
@@ -537,7 +537,7 @@ private struct TextToolControl: View {
                 }
             }
         } else {
-            PaletteButton(help: "Font: \(model.fontDesign.label)") {
+            PaletteButton(help: String(localized: "Font: \(model.fontDesign.label)")) {
                 withAnimation(.snappy(duration: 0.2)) { fontExpanded = true }
             } icon: {
                 Text("Ff").font(.system(size: 14, weight: .semibold, design: model.fontDesign.swiftUIDesign))
@@ -606,14 +606,14 @@ private struct SizeStepper: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            PaletteButton(help: "Smaller", action: { adjust(1 / 1.15) }) {
+            PaletteButton(help: String(localized: "Smaller"), action: { adjust(1 / 1.15) }) {
                 Image(systemName: "minus").font(.system(size: 13, weight: .semibold))
             }
             Text("\(points)")
                 .font(.system(size: 12, weight: .medium))
                 .monospacedDigit()
                 .frame(minWidth: 30)
-            PaletteButton(help: "Larger", action: { adjust(1.15) }) {
+            PaletteButton(help: String(localized: "Larger"), action: { adjust(1.15) }) {
                 Image(systemName: "plus").font(.system(size: 13, weight: .semibold))
             }
         }

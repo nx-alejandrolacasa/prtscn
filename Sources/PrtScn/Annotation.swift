@@ -22,15 +22,15 @@ enum EditTool: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .select: "Select"
-        case .line: "Line"
-        case .measure: "Measure"
-        case .roundedRect: "Rectangle"
-        case .ellipse: "Ellipse"
-        case .diamond: "Diamond"
-        case .pixelate: "Pixelate"
-        case .counter: "Step Number"
-        case .text: "Text"
+        case .select: String(localized: "Select")
+        case .line: String(localized: "Line")
+        case .measure: String(localized: "Measure")
+        case .roundedRect: String(localized: "Rectangle")
+        case .ellipse: String(localized: "Ellipse")
+        case .diamond: String(localized: "Diamond")
+        case .pixelate: String(localized: "Pixelate")
+        case .counter: String(localized: "Step Number")
+        case .text: String(localized: "Text")
         }
     }
 
@@ -67,7 +67,7 @@ enum EditTool: String, CaseIterable, Identifiable {
 
     /// Tooltip text: the label with its shortcut key. Select also answers to
     /// V, Figma's shortcut for the same tool.
-    var hint: String { self == .select ? "Select (S, V)" : "\(label) (\(shortcutKey))" }
+    var hint: String { self == .select ? String(localized: "Select (S, V)") : "\(label) (\(shortcutKey))" }
 
     /// The closed-shape tools grouped behind the palette's single shape button.
     static let shapes: [EditTool] = [.roundedRect, .ellipse, .diamond]
@@ -109,9 +109,9 @@ enum LineCap: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .none: "None"
-        case .arrow: "Arrow"
-        case .bar: "Bar"
+        case .none: String(localized: "None")
+        case .arrow: String(localized: "Arrow")
+        case .bar: String(localized: "Bar")
         }
     }
 }
@@ -176,9 +176,9 @@ enum MeasureUnit: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .points: "Points (pt)"
-        case .pixels: "Pixels (px)"
-        case .both: "Both"
+        case .points: String(localized: "Points (pt)")
+        case .pixels: String(localized: "Pixels (px)")
+        case .both: String(localized: "measure-unit.both", defaultValue: "Both")
         }
     }
 }
@@ -247,9 +247,9 @@ enum FontDesign: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .sans: "Sans-serif"
-        case .serif: "Serif"
-        case .monospaced: "Monospaced"
+        case .sans: String(localized: "Sans-serif")
+        case .serif: String(localized: "Serif")
+        case .monospaced: String(localized: "Monospaced")
         }
     }
 

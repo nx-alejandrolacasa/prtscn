@@ -260,7 +260,7 @@ private final class ScrollSelectView: NSView {
         bounds.fill()
 
         guard let rect = selectionRect else {
-            drawLabel("Drag over scrollable content   ·   Hold ⌘ to scroll up   ·   Esc to cancel",
+            drawLabel(String(localized: "Drag over scrollable content   ·   Hold ⌘ to scroll up   ·   Esc to cancel"),
                       centeredAbove: CGPoint(x: bounds.midX, y: bounds.midY))
             return
         }
@@ -278,7 +278,7 @@ private final class ScrollSelectView: NSView {
         border.stroke()
 
         drawLabel("\(Int(rect.width)) × \(Int(rect.height)) pt",
-                  suffix: "   ·   ⌘ scrolling up ↑", progress: indicatorProgress,
+                  suffix: String(localized: "   ·   ⌘ scrolling up ↑"), progress: indicatorProgress,
                   centeredAbove: CGPoint(x: rect.midX, y: rect.minY - 8))
     }
 

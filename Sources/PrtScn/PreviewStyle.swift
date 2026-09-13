@@ -16,8 +16,8 @@ enum PreviewStyle: String, CaseIterable, Identifiable {
     /// Catchy display names: one island vs. many.
     var label: String {
         switch self {
-        case .classic: "Island"
-        case .islands: "Archipelago"
+        case .classic: String(localized: "Island")
+        case .islands: String(localized: "Archipelago")
         }
     }
 }

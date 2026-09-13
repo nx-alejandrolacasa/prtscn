@@ -51,6 +51,15 @@ mkdir -p "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/${APP_NAME}"
 cp "Resources/Info.plist" "$APP/Contents/Info.plist"
 
+# Localizations. Each Resources/<lang>.lproj holds Localizable.strings (the UI
+# strings; keys are the English source text) and InfoPlist.strings. macOS
+# picks the language from the user's preferred-languages list, falling back to
+# English (CFBundleDevelopmentRegion). `tools/check-localization.py` verifies
+# every language covers every key the code uses.
+for LPROJ in Resources/*.lproj; do
+  cp -R "$LPROJ" "$APP/Contents/Resources/"
+done
+
 # App icon.
 #
 # macOS 26 draws the layered Icon Composer document (Resources/AppIcon.icon):

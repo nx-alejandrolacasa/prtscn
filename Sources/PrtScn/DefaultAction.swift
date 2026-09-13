@@ -11,10 +11,10 @@ enum DefaultAction: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .save: "Export to disk"
-        case .copy: "Copy to clipboard"
-        case .edit: "Open in Editor"
-        case .discard: "Discard"
+        case .save: String(localized: "Export to disk")
+        case .copy: String(localized: "Copy to clipboard")
+        case .edit: String(localized: "Open in Editor")
+        case .discard: String(localized: "Discard")
         }
     }
 }

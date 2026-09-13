@@ -9,9 +9,9 @@ enum DockIconMode: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .whileEditing: "While Editing"
-        case .always: "Always"
-        case .never: "Never"
+        case .whileEditing: String(localized: "While Editing")
+        case .always: String(localized: "Always")
+        case .never: String(localized: "Never")
         }
     }
 }

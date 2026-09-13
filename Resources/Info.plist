@@ -2,6 +2,17 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- Localizations: English is the development language (and the key
+	     language — Localizable.strings keys are the English source strings);
+	     one Resources/<lang>.lproj per shipped language, copied in by build.sh.
+	     macOS picks the table from the user's preferred-languages list. -->
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>es</string>
+	</array>
 	<key>CFBundleName</key>
 	<string>PrtScn</string>
 	<key>CFBundleDisplayName</key>

@@ -91,7 +91,7 @@ final class UpdateChecker {
             }
         } catch {
             log.error("update check failed: \(String(describing: error), privacy: .public)")
-            if !quietly { phase = .failed("Couldn't check for updates.") }
+            if !quietly { phase = .failed(String(localized: "Couldn't check for updates.")) }
         }
     }
 
@@ -139,7 +139,7 @@ final class UpdateChecker {
             relaunch()
         } catch {
             log.error("update install failed: \(String(describing: error), privacy: .public)")
-            phase = .failed("Update failed — install manually from GitHub.")
+            phase = .failed(String(localized: "Update failed — install manually from GitHub."))
         }
     }
 

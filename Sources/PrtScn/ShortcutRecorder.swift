@@ -96,13 +96,13 @@ final class RecorderView: NSView {
 
     private func refresh() {
         if recording {
-            label.stringValue = "Type shortcut…"
+            label.stringValue = String(localized: "Type shortcut…")
             label.textColor = .secondaryLabelColor
         } else if let shortcut {
             label.stringValue = shortcut.displayString
             label.textColor = .labelColor
         } else {
-            label.stringValue = "Click to record"
+            label.stringValue = String(localized: "Click to record")
             label.textColor = .secondaryLabelColor
         }
         // Resolve the dynamic colors for the current appearance — a bare

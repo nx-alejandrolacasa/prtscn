@@ -34,6 +34,7 @@ README → "Sign once, grant once".
 ```
 Package.swift                 SwiftPM manifest (executable target, macOS 26)
 Resources/Info.plist          bundle metadata; LSUIElement = menu-bar app
+Resources/<lang>.lproj/       Localizable.strings + InfoPlist.strings per language (en, es)
 build.sh                      build + bundle + sign
 Sources/PrtScn/
   PrtScnApp.swift              @main App: MenuBarExtra + Settings scenes
@@ -73,6 +74,7 @@ Sources/PrtScn/
   HotkeyManager.swift          Carbon global hotkey registration
   ShortcutRecorder.swift       click-to-record key field
 tools/IconGenerator.swift     draws both app icons; see "App icon"
+tools/check-localization.py   diffs the keys the code uses against every .lproj table
 assets/                       README header image
 Resources/AppIcon.icns        generated flat app icon (fallback)
 Resources/AppIcon.icon/       generated Icon Composer document (macOS 26)
@@ -173,3 +175,19 @@ Non-obvious rules the generator already encodes — worth knowing before hand-ed
 - The floating preview is a borderless `NSPanel` (`canBecomeKey`) hosting a SwiftUI
   card; it's activated on show so hover + keyboard shortcuts work immediately.
 - Keep it dependency-free and on the CPU (this environment has no GPU/Metal).
+- **Localization.** Classic `.strings` tables (no String Catalog — `xcstringstool`
+  needs Xcode), one `Resources/<lang>.lproj` per language, copied into the bundle
+  by `build.sh`; English is the development language and the **key is the
+  English source text**. SwiftUI literal initializers (`Text("…")`, `Button`,
+  `Toggle`, `Picker`, `Section`, `.help`, …) localize on their own through
+  `LocalizedStringKey`; everything that is a plain `String` — enum `label`
+  vars, `NSAlert` text, window titles, toolbar labels/tooltips, overlay
+  labels, toast messages, ternaries between two literals — must go through
+  `String(localized:)`. When one English word needs two translations (e.g.
+  "Both" for resolutions vs units, "Capture" as noun vs verb) give it an
+  explicit key: `String(localized: "measure-unit.both", defaultValue: "Both")`.
+  Interpolations become `%@` (String) / `%lld` (Int) in the tables. A value
+  for a key **without** arguments is not run through `String(format:)`, so
+  write a literal `%` there, not `%%`. After touching strings run
+  `tools/check-localization.py`; it must report 0 missing / 0 unused for
+  every table.
