@@ -785,9 +785,12 @@ private struct AboutSettingsView: View {
         case .checking:
             progressLine(String(localized: "Checking…"))
         case .upToDate:
-            Text("You're up to date.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Text("You're up to date.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                cooldownButton(String(localized: "Check for Updates…"))
+            }
         case .available:
             HStack(spacing: 8) {
                 Text("Version \(updater.latest?.version ?? "?") is available.")
@@ -807,10 +810,21 @@ private struct AboutSettingsView: View {
                 Text(message)
                     .font(.caption)
                     .foregroundStyle(.red)
-                Button("Try Again") { Task { await updater.check() } }
-                    .controlSize(.small)
+                cooldownButton(String(localized: "Try Again"))
             }
         }
+    }
+
+    /// A re-check button that, while the cooldown runs, is disabled and shows
+    /// the seconds left in place of its label.
+    private func cooldownButton(_ label: String) -> some View {
+        let remaining = updater.cooldownRemaining
+        return Button(remaining > 0 ? String(localized: "\(remaining) s") : label) {
+            Task { await updater.check() }
+        }
+        .controlSize(.small)
+        .disabled(remaining > 0)
+        .monospacedDigit()
     }
 
     private func progressLine(_ label: String) -> some View {

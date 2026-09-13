@@ -159,6 +159,7 @@
 "Check for Updates…" = "Check for Updates…";
 "Checking…" = "Checking…";
 "You're up to date." = "You're up to date.";
+"%lld s" = "%lld s";
 "Version %@ is available." = "Version %@ is available.";
 "View on GitHub…" = "View on GitHub…";
 "Install Update" = "Install Update";

@@ -37,6 +37,14 @@ final class UpdateChecker {
 
     private(set) var phase: Phase = .idle
 
+    /// Seconds left before another manual check is allowed — counts down from
+    /// `checkCooldown` after each check so the button can't hammer the GitHub
+    /// API. Zero means ready.
+    private(set) var cooldownRemaining = 0
+    var isCoolingDown: Bool { cooldownRemaining > 0 }
+    static let checkCooldown = 10
+    private var cooldownTask: Task<Void, Never>?
+
     /// The newer release found by the last check, if any.
     private(set) var latest: Release?
 
@@ -92,6 +100,20 @@ final class UpdateChecker {
         } catch {
             log.error("update check failed: \(String(describing: error), privacy: .public)")
             if !quietly { phase = .failed(String(localized: "Couldn't check for updates.")) }
+        }
+        if !quietly { startCooldown() }
+    }
+
+    /// Disables re-checking for `checkCooldown`; a fresh call restarts the clock.
+    private func startCooldown() {
+        cooldownTask?.cancel()
+        cooldownRemaining = Self.checkCooldown
+        cooldownTask = Task { [weak self] in
+            while let self, self.cooldownRemaining > 0 {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled else { return }
+                self.cooldownRemaining -= 1
+            }
         }
     }
 
