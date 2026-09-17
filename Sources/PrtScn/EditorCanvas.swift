@@ -196,7 +196,9 @@ struct EditorCanvas: View {
                 textOverlay(fit: fit)
                 loupeOverlay(fit: fit, canvasSize: geo.size)
             }
-            .frame(width: geo.size.width, height: geo.size.height)
+            // The label field can out-span the canvas when zoomed; a centering
+            // frame would then shift the whole stack by half the overflow.
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
             .onDeleteCommand { model.deleteSelected() }
             // The model clamps zoom panning against the canvas's actual size.
             .onChange(of: geo.size, initial: true) { _, size in model.setCanvasSize(size) }
