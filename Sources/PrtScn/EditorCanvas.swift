@@ -118,9 +118,16 @@ struct EditorCanvas: View {
     @FocusState private var textFieldFocused: Bool
     @State private var session: DragSession?
     @State private var cropSession: CropSession?
+    /// Where the drag behind `session` / `cropSession` was pressed. A gesture
+    /// that's cancelled never gets `onEnded`, so a new start location is what
+    /// tells a fresh drag from the stale session it left behind.
+    @State private var gestureStart: CGPoint?
+    /// Mirrored into `EditorModel.isDragInProgress`; gesture state resets on
+    /// cancellation too, which `onEnded` alone doesn't cover.
+    @GestureState private var isDragging = false
     /// The zoom level when a pinch began; the gesture's magnification is
     /// relative to it, so consecutive pinches compound naturally.
-    @State private var pinchBaseZoom: CGFloat?
+    @GestureState private var pinchBaseZoom: CGFloat?
     /// The measure endpoint being dragged (image coords, snapped) — a magnifier
     /// loupe follows it for pixel-precise placement. `nil` when not dragging.
     @State private var loupePoint: CGPoint?
@@ -204,6 +211,7 @@ struct EditorCanvas: View {
             .onDeleteCommand { model.deleteSelected() }
             // The model clamps zoom panning against the canvas's actual size.
             .onChange(of: geo.size, initial: true) { _, size in model.setCanvasSize(size) }
+            .onChange(of: isDragging) { _, dragging in model.isDragInProgress = dragging }
         }
         // Switching tools commits any in-progress text (and retires the loupe's
         // hover point, which is only tracked while the measure tool is armed).
@@ -628,7 +636,12 @@ struct EditorCanvas: View {
 
     private func drawGesture(fit: CanvasFit) -> some Gesture {
         DragGesture(minimumDistance: 0, coordinateSpace: .local)
+            .updating($isDragging) { _, dragging, _ in dragging = true }
             .onChanged { value in
+                if gestureStart != value.startLocation {
+                    gestureStart = value.startLocation
+                    abandonStaleSessions()
+                }
                 if model.isCropping { cropChanged(value, fit: fit); return }
                 if session == nil {
                     session = makeSession(pressView: value.startLocation, fit: fit)
@@ -758,20 +771,20 @@ struct EditorCanvas: View {
                     case .cornerH:
                         // The horizontal run follows the cursor's y, snapping
                         // back onto its baseline when close.
-                        if let line = model.annotations.first(where: { $0.id == id }) {
+                        if let line = model.annotation(id: id) {
                             let offset = image.y - line.elbowHBase
                             model.setElbowH(id: id, !optionDown && abs(offset) * fit.scale < 5 ? 0 : offset)
                         }
                     case .cornerV:
                         // The vertical trunk follows the cursor's x — likewise.
-                        if let line = model.annotations.first(where: { $0.id == id }) {
+                        if let line = model.annotation(id: id) {
                             let offset = image.x - line.elbowVBase
                             model.setElbowV(id: id, !optionDown && abs(offset) * fit.scale < 5 ? 0 : offset)
                         }
                     default:
                         let anchor = current.anchor ?? current.originalStart
                         var p = image
-                        if let shape = model.annotations.first(where: { $0.id == id }) {
+                        if let shape = model.annotation(id: id) {
                             p = cornerPoint(under: image, handle: handle, of: shape, fit: fit)
                         }
                         if let kind, squareSnaps(kind), !optionDown { p = diagonalMagnet(p, relativeTo: anchor) }
@@ -788,6 +801,7 @@ struct EditorCanvas: View {
                 if let point = loupePoint { hoverPoint = point }
                 loupePoint = nil
                 snapAnchor = nil
+                gestureStart = nil
                 if model.isCropping {
                     // Discard a too-small drag so we stay in the "draw a region" phase.
                     if let r = model.cropRect, r.width < 8 || r.height < 8 { model.cropRect = nil }
@@ -814,6 +828,16 @@ struct EditorCanvas: View {
                     break
                 }
             }
+    }
+
+    /// Drops what a cancelled drag left mid-flight. Its mutations already
+    /// took their undo snapshot, so only the transient state needs clearing.
+    private func abandonStaleSessions() {
+        session = nil
+        cropSession = nil
+        model.draft = nil
+        marqueeRect = nil
+        loupePoint = nil
     }
 
     /// Decides, on press, what this drag will do.
@@ -925,22 +949,21 @@ struct EditorCanvas: View {
     /// Trackpad pinch: continuous zoom, live-updating the title-bar percentage.
     private var pinchGesture: some Gesture {
         MagnifyGesture()
-            .onChanged { value in
-                if pinchBaseZoom == nil { pinchBaseZoom = model.zoom }
-                model.setZoom((pinchBaseZoom ?? 1) * value.magnification)
+            .updating($pinchBaseZoom) { value, base, _ in
+                if base == nil { base = model.zoom }
+                model.setZoom((base ?? 1) * value.magnification)
             }
-            .onEnded { _ in pinchBaseZoom = nil }
     }
 
     private func annotationKind(_ id: UUID) -> EditTool? {
-        model.annotations.first(where: { $0.id == id })?.kind
+        model.annotation(id: id)?.kind
     }
 
     /// Re-snaps a dragged line endpoint to any shape side in range, updating
     /// its binding (or freeing it when nothing is nearby). The other end's
     /// exact spot is excluded so both ends can't land on the same point.
     private func resizeLineEndpoint(id: UUID, handle: ResizeHandle, to point: CGPoint, fit: CanvasFit) {
-        let line = model.annotations.first { $0.id == id }
+        let line = model.annotation(id: id)
         if NSEvent.modifierFlags.contains(.option) {
             snapAnchor = nil
             model.setLineEndpoint(id: id, handle: handle, point: point, binding: nil)
@@ -978,7 +1001,7 @@ struct EditorCanvas: View {
 
     /// The hovered line, if it still exists — the source of the drawn dots.
     private var bendDotsLine: Annotation? {
-        bendDotsLineID.flatMap { id in model.annotations.first { $0.id == id } }
+        bendDotsLineID.flatMap(model.annotation(id:))
     }
 
     /// Tracks the bend dots while hovering: approaching a line's shaft offers
@@ -1204,14 +1227,12 @@ struct EditorCanvas: View {
 
     @ViewBuilder
     private func textOverlay(fit: CanvasFit) -> some View {
-        if let id = model.editingTextID,
-           let annotation = model.annotations.first(where: { $0.id == id }) {
+        if let id = model.editingTextID, let annotation = model.annotation(id: id) {
             let font = Font.system(size: annotation.fontSize * fit.scale, weight: .semibold,
                                    design: annotation.fontDesign.swiftUIDesign)
             if annotation.kind == .text {
                 let origin = fit.toView(annotation.start)
                 editingField(annotation: annotation, id: id, font: font, centered: false)
-                    .id(fit.scale)
                     .frame(maxWidth: max(fit.imageRect.maxX - origin.x, 80), alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
                     .offset(x: origin.x, y: origin.y)
@@ -1224,15 +1245,15 @@ struct EditorCanvas: View {
                 // the text visually anchored on the label point, and the
                 // invisible surplus draws nothing. Only the vertical offset is
                 // live: it re-centers the block when a newline changes the
-                // line count. A resize changes the scale, so the field is
-                // rebuilt (`.id`) at the new frame and font instead.
+                // line count. Zooming or resizing the window commits the edit
+                // (`EditorModel.setZoom` / `setCanvasSize`), so the scale is
+                // session-constant too.
                 let center = fit.toView(annotation.labelCenter)
                 let width = max(fit.imageRect.width, 300)
                 let lineHeight = textRenderSize(" ", fontSize: annotation.fontSize,
                                                 design: annotation.fontDesign).height * fit.scale
                 let lines = CGFloat(max(model.editingText.components(separatedBy: .newlines).count, 1))
                 editingField(annotation: annotation, id: id, font: font, centered: true)
-                    .id(fit.scale)
                     .frame(width: width)
                     .fixedSize(horizontal: false, vertical: true)
                     .offset(x: center.x - width / 2, y: center.y - lines * lineHeight / 2)

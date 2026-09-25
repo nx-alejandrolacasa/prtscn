@@ -66,6 +66,10 @@ final class ScrollCaptureController {
 
     private init() {}
 
+    /// False for a task whose run was cancelled — so a stale task can never
+    /// act on (or tear down) a fresh run that has since started.
+    private var isRunLive: Bool { phase == .capturing && !Task.isCancelled }
+
     func begin() {
         guard phase == .idle else { return }
         // Claim the phase before the permission check: its NSAlert runs a
@@ -156,7 +160,7 @@ final class ScrollCaptureController {
     private func runCapture(region: CGRect, screen: NSScreen,
                             direction: ScrollStitcher.Direction) async {
         try? await Task.sleep(for: Self.overlayDismissDelay)
-        guard phase == .capturing else { return }
+        guard isRunLive else { return }
 
         guard let displayID = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")]
                 as? NSNumber)?.uint32Value,
@@ -164,10 +168,10 @@ final class ScrollCaptureController {
                   false, onScreenWindowsOnly: true),
               let display = content.displays.first(where: { $0.displayID == displayID })
         else {
-            cancel()
+            if isRunLive { cancel() }
             return
         }
-        guard phase == .capturing else { return }
+        guard isRunLive else { return }
 
         // Exclude our own windows so a lingering preview card or pin inside
         // the region can never contaminate the frames (the sourceRect crop
@@ -201,9 +205,10 @@ final class ScrollCaptureController {
         // Snapshotted per capture — the user-set cap (Settings → Capture,
         // store-clamped below CG's context limit) shouldn't shift mid-run.
         let maxHeightPx = SettingsStore.shared.scrollMaxHeight
-        guard let first = try? await SCScreenshotManager.captureImage(
-                  contentFilter: filter, configuration: config),
-              phase == .capturing,
+        let first = try? await SCScreenshotManager.captureImage(
+            contentFilter: filter, configuration: config)
+        guard isRunLive else { return }
+        guard let first,
               let stitcher = ScrollStitcher(firstFrame: first, maxHeightPx: maxHeightPx,
                                             direction: direction)
         else {
@@ -244,12 +249,12 @@ final class ScrollCaptureController {
             await glideScroll(points: stepPoints, direction: direction, ticks: glideTicks)
             try? await Task.sleep(for: Self.settleDelay)
             guard phase == .capturing, !Task.isCancelled else { return }
-            guard let frame = await captureSettledFrame(filter: filter, config: config)
-            else {             // display gone / permission revoked → keep partial
+            let frame = await captureSettledFrame(filter: filter, config: config)
+            guard isRunLive else { return }
+            guard let frame else {  // display gone / permission revoked → keep partial
                 finish(because: "frame capture failed")
                 return
             }
-            guard phase == .capturing else { return }
             frames += 1
 
             switch stitcher.append(frame) {
@@ -278,6 +283,7 @@ final class ScrollCaptureController {
                 return
             }
         }
+        guard isRunLive else { return }
         finish(because: "frame budget (\(Self.maxFrames))")
     }
 
@@ -353,12 +359,13 @@ final class ScrollCaptureController {
                                                  in: .userDomainMask).first?
                   .appendingPathComponent("Logs/PrtScn.log")
         else { return }
-        if let handle = try? FileHandle(forWritingTo: url) {
+        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        if size < 1_000_000, let handle = try? FileHandle(forWritingTo: url) {
             defer { try? handle.close() }
             _ = try? handle.seekToEnd()
             try? handle.write(contentsOf: data)
         } else {
-            try? data.write(to: url)
+            try? data.write(to: url)   // first line, or starting over past ~1 MB
         }
     }
 
@@ -370,21 +377,15 @@ final class ScrollCaptureController {
         guard let image = stitcher?.makeFinalImage() else { return }
 
         // PNG-encoding a stitch this size takes long enough to feel like a
-        // freeze, so it runs off the main actor; CGImage is immutable, the
-        // box just vouches for it. The DPI tag makes downstream
-        // save/copy/editor treat the pixels at the capture scale (same trick
-        // as ScreenshotService's crop path).
-        struct ImageBox: @unchecked Sendable { let image: CGImage }
-        let box = ImageBox(image: image)
+        // freeze, so it runs off the main actor. The DPI tag makes downstream
+        // save/copy/editor treat the pixels at the capture scale.
+        let box = SendableImage(image: image)
         let scale = self.scale
         Task.detached(priority: .userInitiated) {
-            let rep = NSBitmapImageRep(cgImage: box.image)
-            rep.size = NSSize(width: CGFloat(box.image.width) / scale,
-                              height: CGFloat(box.image.height) / scale)
             let tmp = FileManager.default.temporaryDirectory
                 .appendingPathComponent("prtscn-\(UUID().uuidString).png")
-            guard let png = rep.representation(using: .png, properties: [:]),
-                  (try? png.write(to: tmp)) != nil
+            guard let image = box.image,
+                  ScreenshotService.writePNG(image, scale: scale, to: tmp)
             else { return }
             await MainActor.run {
                 MenuBarState.shared.flashCaptureFeedback()

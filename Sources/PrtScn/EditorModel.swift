@@ -36,14 +36,29 @@ final class EditorModel {
     /// What the package on disk holds, to tell whether closing would lose work.
     private var savedAnnotations: [Annotation] = []
     private var savedCropGeneration = 0
-    private var cropGeneration = 0
+    private var cropGeneration = 0 {
+        didSet { scheduleRecoverySnapshot() }
+    }
+    /// Restored from a crash snapshot and not saved since — unsaved by
+    /// definition, whether or not it came from a project.
+    private var isRecovered = false
 
     /// Whether the project differs from its package on disk. Only a project
     /// counts — a plain capture is exported, not saved, and is closed freely.
     var hasUnsavedProjectChanges: Bool {
-        documentURL != nil
+        isRecovered || documentURL != nil
             && (annotations != savedAnnotations || cropGeneration != savedCropGeneration)
     }
+
+    /// What a crash would lose: a project's unsaved changes, or any work on a
+    /// plain capture.
+    private var hasWorkToRecover: Bool {
+        hasUnsavedProjectChanges
+            || documentURL == nil && (!annotations.isEmpty || cropGeneration > 0)
+    }
+
+    @ObservationIgnored private let recovery: CanvasRecovery
+    @ObservationIgnored private var pendingRecoverySnapshot: Task<Void, Never>?
 
     var documentName: String {
         documentURL?.deletingPathExtension().lastPathComponent ?? "Untitled"
@@ -129,6 +144,7 @@ final class EditorModel {
     func setZoom(_ value: CGFloat) {
         let new = min(max(value, minZoom), Self.maxZoom)
         guard new != zoom else { return }
+        finishTextEditingForRescale()
         if zoom <= 1, new > 1 { showTip(String(localized: "Scroll to move around · ⌘-scroll to zoom")) }
         // Scale the pan proportionally so the point at the anchor stays put
         // while zooming.
@@ -169,6 +185,7 @@ final class EditorModel {
     }
 
     func setCanvasSize(_ size: CGSize) {
+        if size != canvasSize { finishTextEditingForRescale() }
         canvasSize = size
         clampPan()
     }
@@ -183,6 +200,13 @@ final class EditorModel {
                                         in: canvasSize) * zoom
         let drawn = CGSize(width: pixelSize.width * scale, height: pixelSize.height * scale)
         pan = CanvasFit.clampedPan(drawn: drawn, pan: pan, in: canvasSize)
+    }
+
+    /// The editing field's frame and font must stay constant for the whole
+    /// session (the field editor doesn't track live changes), so anything
+    /// that rescales the canvas commits the edit first.
+    private func finishTextEditingForRescale() {
+        if editingTextID != nil { finishTextEditing() }
     }
 
     private func showTip(_ message: String) {
@@ -268,7 +292,9 @@ final class EditorModel {
     var hoverColorHex: String?
 
     /// Committed annotations, oldest first.
-    private(set) var annotations: [Annotation] = []
+    private(set) var annotations: [Annotation] = [] {
+        didSet { scheduleRecoverySnapshot() }
+    }
     /// The shape currently being dragged out (not yet committed).
     var draft: Annotation?
     /// The selected annotations. Several come from the select tool's marquee
@@ -280,7 +306,7 @@ final class EditorModel {
         didSet {
             guard selectedIDs != oldValue, selectedIDs.count == 1,
                   let id = selectedIDs.first, !oldValue.contains(id),
-                  annotations.first(where: { $0.id == id })?.kind == .line else { return }
+                  annotation(id: id)?.kind == .line else { return }
             showBendTip()
         }
     }
@@ -312,18 +338,46 @@ final class EditorModel {
 
     /// Snapshot-based undo: each entry is the full annotation list as it was
     /// *before* a change, so moves, resizes, deletes and draws all undo alike.
-    private var undoStack: [[Annotation]] = []
-    private var redoStack: [[Annotation]] = []
+    private var undoStack: [UndoState] = []
+    private var redoStack: [UndoState] = []
+
+    private struct UndoState {
+        var annotations: [Annotation]
+        var nextCounter: Int
+    }
+
+    private var undoState: UndoState {
+        get { UndoState(annotations: annotations, nextCounter: nextCounter) }
+        set {
+            annotations = newValue.annotations
+            nextCounter = newValue.nextCounter
+        }
+    }
+
+    /// Set by the canvas while a drag gesture is live; undo/redo wait for it
+    /// to end so they can't interleave with a drag's own snapshot.
+    @ObservationIgnored var isDragInProgress = false
+
+    /// The shared color panel only holds its target weakly, so the proxy
+    /// lives as long as the editor rather than the palette view.
+    @ObservationIgnored let colorPanelProxy = ColorPanelProxy()
+
+    /// The friendly-named PNG handed to the share sheet; replaced by the
+    /// next share and removed on close.
+    @ObservationIgnored private var sharedFileURL: URL?
 
     /// Transient confirmation shown after an action ("Copied", "Saved").
     var statusMessage: String?
+    var statusIsFailure = false
 
     var onClose: (() -> Void)?
     private var closed = false
 
-    init(image: NSImage, workingURL: URL, captureScale: CGFloat) {
+    init(image: NSImage, workingURL: URL, captureScale: CGFloat,
+         recovery: CanvasRecovery = CanvasRecovery()) {
         self.baseImage = image
         self.workingURL = workingURL
+        self.recovery = recovery
         self.captureScale = max(captureScale, 1)
         self.color = SettingsStore.shared.editorColor
         self.fontDesign = SettingsStore.shared.editorFontDesign
@@ -340,6 +394,7 @@ final class EditorModel {
         self.counterSize = 21 * self.captureScale
         self.measureSize = 18 * self.captureScale
         if tool.isShape { lastShapeTool = tool }
+        colorPanelProxy.onChange = { [weak self] in self?.setColor($0) }
     }
 
     /// A pixel size shown to the user as logical points.
@@ -351,36 +406,61 @@ final class EditorModel {
     var canRedo: Bool { !redoStack.isEmpty }
 
     var selectedAnnotation: Annotation? {
-        annotations.first { $0.id == selectedID }
+        selectedID.flatMap(annotation(id:))
+    }
+
+    func annotation(id: UUID) -> Annotation? {
+        annotations.first { $0.id == id }
+    }
+
+    private func mutateAnnotation(id: UUID, _ mutate: (inout Annotation) -> Void) {
+        guard let index = annotations.firstIndex(where: { $0.id == id }) else { return }
+        mutate(&annotations[index])
+    }
+
+    /// The selection minus any ids whose annotation no longer exists.
+    private var liveSelectedIDs: Set<UUID> {
+        selectedIDs.filter { annotation(id: $0) != nil }
     }
 
     /// Records the current state for undo. Call once, before a logical change.
     func snapshot() {
         recoloringID = nil
-        undoStack.append(annotations)
+        undoStack.append(undoState)
         redoStack.removeAll()
-        if undoStack.count > 60 { undoStack.removeFirst() }
+        trimUndoHistory()
+    }
+
+    /// Held off while text is being edited: finishing the edit drops undo
+    /// entries by the depth recorded when it began.
+    private func trimUndoHistory() {
+        let limit = 60
+        guard editingTextID == nil, undoStack.count > limit else { return }
+        undoStack.removeFirst(undoStack.count - limit)
     }
 
     func undo() {
+        guard !isDragInProgress else { return }
         finishTextEditing()
         guard let previous = undoStack.popLast() else { return }
         recoloringID = nil
-        redoStack.append(annotations)
-        annotations = previous
+        redoStack.append(undoState)
+        undoState = previous
         clearSelectionIfMissing()
     }
 
     func redo() {
+        guard !isDragInProgress else { return }
+        finishTextEditing()
         guard let next = redoStack.popLast() else { return }
         recoloringID = nil
-        undoStack.append(annotations)
-        annotations = next
+        undoStack.append(undoState)
+        undoState = next
         clearSelectionIfMissing()
     }
 
     private func clearSelectionIfMissing() {
-        let live = selectedIDs.filter { id in annotations.contains { $0.id == id } }
+        let live = liveSelectedIDs
         if live != selectedIDs { selectedIDs = live }
     }
 
@@ -431,8 +511,11 @@ final class EditorModel {
     private func rebindCornerSide(at index: Int, end handle: ResizeHandle) {
         guard annotations[index].isCorner else { return }
         let isStart = handle == .start
+        let otherBinding = isStart ? annotations[index].endBinding : annotations[index].startBinding
+        // Both ends on one shape: the side facing the other end is its own side.
         guard let binding = isStart ? annotations[index].startBinding : annotations[index].endBinding,
-              let shape = annotations.first(where: { $0.id == binding.shapeID }) else { return }
+              binding.shapeID != otherBinding?.shapeID,
+              let shape = annotation(id: binding.shapeID) else { return }
         let toward = isStart ? annotations[index].end : annotations[index].start
         let side = shape.bestBindingSide(toward: toward)
         guard side != binding.side else { return }
@@ -466,21 +549,18 @@ final class EditorModel {
     /// Bends or straightens a line's shaft (live drag of its curve dot). The
     /// caller takes the undo `snapshot()` once, when the drag first moves.
     func setCurvature(id: UUID, _ value: CGFloat) {
-        guard let index = annotations.firstIndex(where: { $0.id == id }) else { return }
-        annotations[index].curvature = value
+        mutateAnnotation(id: id) { $0.curvature = value }
     }
 
     /// Moves a corner line's horizontal run up/down (live drag of its dot).
     /// The caller takes the undo `snapshot()` once, on first move.
     func setElbowH(id: UUID, _ offset: CGFloat) {
-        guard let index = annotations.firstIndex(where: { $0.id == id }) else { return }
-        annotations[index].elbowH = offset
+        mutateAnnotation(id: id) { $0.elbowH = offset }
     }
 
     /// Moves a corner line's vertical trunk left/right — likewise.
     func setElbowV(id: UUID, _ offset: CGFloat) {
-        guard let index = annotations.firstIndex(where: { $0.id == id }) else { return }
-        annotations[index].elbowV = offset
+        mutateAnnotation(id: id) { $0.elbowV = offset }
     }
 
     /// Toggles a line between its curve and orthogonal-corner bends
@@ -501,27 +581,26 @@ final class EditorModel {
 
     /// A line dragged by its body detaches from its shapes.
     func clearBindings(id: UUID) {
-        guard let index = annotations.firstIndex(where: { $0.id == id }) else { return }
-        annotations[index].startBinding = nil
-        annotations[index].endBinding = nil
+        mutateAnnotation(id: id) {
+            $0.startBinding = nil
+            $0.endBinding = nil
+        }
     }
 
     /// Clears a group-moved line's bindings to shapes that aren't moving with
     /// it; bindings within the group survive, so connected clusters move whole.
     func detachBindings(id: UUID, keepingShapesIn kept: Set<UUID>) {
-        guard let index = annotations.firstIndex(where: { $0.id == id }) else { return }
-        if let binding = annotations[index].startBinding, !kept.contains(binding.shapeID) {
-            annotations[index].startBinding = nil
-        }
-        if let binding = annotations[index].endBinding, !kept.contains(binding.shapeID) {
-            annotations[index].endBinding = nil
+        mutateAnnotation(id: id) {
+            if let binding = $0.startBinding, !kept.contains(binding.shapeID) { $0.startBinding = nil }
+            if let binding = $0.endBinding, !kept.contains(binding.shapeID) { $0.endBinding = nil }
         }
     }
 
     /// Duplicates the selected annotations, offset slightly so the copies are
     /// visible, and selects them (so ⌘D again keeps cascading). A duplicated
     /// step counter takes the next sequential number rather than repeating
-    /// the badge.
+    /// the badge. Lines bound within the duplicated set stay bound to the
+    /// copies, so a connected cluster duplicates whole.
     func duplicateSelected() {
         finishTextEditing()
         let originals = annotations.filter { selectedIDs.contains($0.id) }
@@ -529,13 +608,23 @@ final class EditorModel {
         snapshot()
         let offset = 16 * captureScale
         var copies: [Annotation] = []
+        var copyIDs: [UUID: UUID] = [:]
         for original in originals {
             var copy = original.duplicated(offsetBy: CGPoint(x: offset, y: offset))
             if copy.kind == .counter {
                 copy.number = nextCounter
                 nextCounter += 1
             }
+            copyIDs[original.id] = copy.id
             copies.append(copy)
+        }
+        func remapped(_ binding: ShapeBinding?) -> ShapeBinding? {
+            guard let binding, let copyID = copyIDs[binding.shapeID] else { return nil }
+            return ShapeBinding(shapeID: copyID, side: binding.side)
+        }
+        for (index, original) in originals.enumerated() {
+            copies[index].startBinding = remapped(original.startBinding)
+            copies[index].endBinding = remapped(original.endBinding)
         }
         annotations.append(contentsOf: copies)
         selectedIDs = Set(copies.map(\.id))
@@ -553,7 +642,7 @@ final class EditorModel {
     @discardableResult
     func nudgeSelected(dx: CGFloat, dy: CGFloat, coarse: Bool) -> Bool {
         guard editingTextID == nil, !isCropping, !isPickingColor else { return false }
-        let ids = selectedIDs.filter { id in annotations.contains { $0.id == id } }
+        let ids = liveSelectedIDs
         guard !ids.isEmpty else { return false }
 
         let now = ProcessInfo.processInfo.systemUptime
@@ -564,7 +653,7 @@ final class EditorModel {
             snapshot()
             // Same rule as a bodily drag: a line nudged off its shape lets go,
             // unless the shape is moving along with it.
-            for id in ids where annotations.first(where: { $0.id == id })?.kind == .line {
+            for id in ids where annotation(id: id)?.kind == .line {
                 detachBindings(id: id, keepingShapesIn: ids)
             }
         }
@@ -582,7 +671,7 @@ final class EditorModel {
     }
 
     func deleteSelected() {
-        let ids = selectedIDs.filter { id in annotations.contains { $0.id == id } }
+        let ids = liveSelectedIDs
         guard !ids.isEmpty else { return }
         snapshot()
         annotations.removeAll { ids.contains($0.id) }
@@ -631,6 +720,7 @@ final class EditorModel {
         // history; clear it to avoid restoring coordinates from the old space.
         undoStack.removeAll()
         redoStack.removeAll()
+        recoloringID = nil
 
         baseImage = NSImage(cgImage: cropped, size: rect.size)
         pixelSize = rect.size
@@ -654,6 +744,7 @@ final class EditorModel {
                                     fontSize: fontSize * creationSizeScale,
                                     fontDesign: fontDesign)
         annotations.append(annotation)
+        editingUndoDepth = undoStack.count
         selectedID = annotation.id
         editingTextID = annotation.id
         editingIsNew = true
@@ -745,7 +836,7 @@ final class EditorModel {
     /// when one is selected, the session default otherwise.
     var paletteColor: Color {
         guard let id = editingTextID ?? selectedID,
-              let annotation = annotations.first(where: { $0.id == id }),
+              let annotation = annotation(id: id),
               annotation.kind != .pixelate else { return color }
         return annotation.color
     }
@@ -793,24 +884,26 @@ final class EditorModel {
     }
 
     func setEditingText(_ string: String) {
-        guard let id = editingTextID,
-              let index = annotations.firstIndex(where: { $0.id == id }) else { return }
-        annotations[index].text = string
+        guard let id = editingTextID else { return }
+        mutateAnnotation(id: id) { $0.text = string }
     }
 
     var editingText: String {
-        guard let id = editingTextID else { return "" }
-        return annotations.first(where: { $0.id == id })?.text ?? ""
+        editingTextID.flatMap(annotation(id:))?.text ?? ""
     }
 
     /// Ends text editing, discarding an empty box. If that box was a brand-new
-    /// placement, the undo snapshot is dropped too so undo isn't a no-op.
+    /// placement, its undo entries (the placement and any restyles while
+    /// typing) are dropped too so undo isn't a no-op.
     func finishTextEditing() {
         guard let id = editingTextID else { return }
         editingTextID = nil
         let wasNew = editingIsNew
         editingIsNew = false
-        defer { if wasNew, tool == .text { tool = .select } }
+        defer {
+            trimUndoHistory()
+            if wasNew, tool == .text { tool = .select }
+        }
         let originalText = editingOriginalText
         let undoDepth = editingUndoDepth
         editingOriginalText = nil
@@ -822,7 +915,8 @@ final class EditorModel {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         } else if !annotations[index].isMeaningful {
             annotations.remove(at: index)
-            if wasNew, !undoStack.isEmpty { undoStack.removeLast() }
+            let placementDepth = max(undoDepth - 1, 0)
+            if wasNew, undoStack.count > placementDepth { undoStack.removeSubrange(placementDepth...) }
             if selectedID == id { selectedID = nil }
             return
         }
@@ -838,7 +932,7 @@ final class EditorModel {
 
     func copy() {
         finishTextEditing()
-        prepareExport()
+        guard prepareExport() else { return flashExportFailure() }
         ScreenshotService.shared.copyToClipboard(workingURL, captureScale: captureScale)
         completed(String(localized: "Copied"))
     }
@@ -847,8 +941,12 @@ final class EditorModel {
     /// shapes baked in. Saving the editable version is `saveProject`.
     func export() {
         finishTextEditing()
-        prepareExport()
+        guard prepareExport() else { return flashExportFailure() }
         if ScreenshotService.shared.save(workingURL, captureScale: captureScale) != nil { completed(String(localized: "Exported")) }
+    }
+
+    private func flashExportFailure() {
+        flash(String(localized: "Couldn't render the image"), failure: true)
     }
 
     func copyText() {
@@ -866,11 +964,52 @@ final class EditorModel {
         markSaved(to: url)
     }
 
+    /// Seeds the editor from a crash snapshot. It stays unsaved until saved:
+    /// back to the project it came from when that still exists, otherwise
+    /// wherever the user picks.
+    func restoreRecovered(_ document: ProjectDocument, originalDocumentURL: URL?) {
+        annotations = document.annotations
+        nextCounter = max(document.nextCounter, (annotations.map(\.number).max() ?? 0) + 1)
+        documentURL = originalDocumentURL.flatMap {
+            FileManager.default.fileExists(atPath: $0.path) ? $0 : nil
+        }
+        isRecovered = true
+        hostWindow?.title = documentName
+    }
+
     private func markSaved(to url: URL) {
         documentURL = url
         savedAnnotations = annotations
         savedCropGeneration = cropGeneration
+        isRecovered = false
         hostWindow?.title = documentName
+        scheduleRecoverySnapshot()
+    }
+
+    private var projectDocument: ProjectDocument {
+        ProjectDocument(captureScale: captureScale, nextCounter: nextCounter, annotations: annotations)
+    }
+
+    /// Throttled rather than debounced: a long drag still gets snapshotted
+    /// every couple of seconds instead of only once it ends.
+    private func scheduleRecoverySnapshot() {
+        guard pendingRecoverySnapshot == nil, !closed else { return }
+        pendingRecoverySnapshot = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            self?.writeRecoverySnapshot()
+        }
+    }
+
+    private func writeRecoverySnapshot() {
+        pendingRecoverySnapshot = nil
+        guard !closed else { return }
+        guard hasWorkToRecover else {
+            recovery.discard()
+            return
+        }
+        recovery.save(document: projectDocument,
+                      image: { [baseImage] in baseImage.cgImage(forProposedRect: nil, context: nil, hints: nil) },
+                      imageGeneration: cropGeneration, origin: documentURL)
     }
 
     /// Saves the project to its package, asking where the first time. Returns
@@ -909,16 +1048,14 @@ final class EditorModel {
     @discardableResult
     private func writeProject(to url: URL) -> Bool {
         guard let base = baseImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return false }
-        let document = ProjectDocument(captureScale: captureScale, nextCounter: nextCounter,
-                                       annotations: annotations)
         do {
-            try ProjectDocument.write(image: base, document: document, to: url)
+            try ProjectDocument.write(image: base, document: projectDocument, to: url)
             markSaved(to: url)
             flash(String(localized: "Project saved"))
             return true
         } catch {
             log.error("project save failed: \(String(describing: error), privacy: .public)")
-            flash(String(localized: "Couldn't save project"))
+            flash(String(localized: "Couldn't save project"), failure: true)
             return false
         }
     }
@@ -948,7 +1085,7 @@ final class EditorModel {
             return
         }
         hoverColor = Color(sampled)
-        hoverColorHex = Self.hex(sampled)
+        hoverColorHex = sampled.hexString
     }
 
     /// Copies the currently hovered color's hex to the clipboard and exits
@@ -1005,17 +1142,6 @@ final class EditorModel {
         return rep.colorAt(x: x, y: y)
     }
 
-    private static func hex(_ color: NSColor) -> String {
-        let rgb = color.usingColorSpace(.sRGB) ?? color
-        // Wide-gamut (P3) pixels can convert to sRGB components outside 0…1;
-        // clamp so saturated colors can't format as malformed hex.
-        func byte(_ component: CGFloat) -> Int {
-            Int((min(max(component, 0), 1) * 255).rounded())
-        }
-        return String(format: "#%02X%02X%02X",
-                      byte(rgb.redComponent), byte(rgb.greenComponent), byte(rgb.blueComponent))
-    }
-
     /// Mosaics keyed by annotation id (with the source rect they were built
     /// for), so canvas redraws don't recompute the crop + two resizes per
     /// pixelate annotation on every frame. Stale ids are pruned as it grows;
@@ -1070,15 +1196,18 @@ final class EditorModel {
     /// A share-sheet item for the flattened capture: a nicely-named PNG file
     /// wrapped so the sheet shows a thumbnail, title, and app icon in its header.
     func sharingItem() -> NSPreviewRepresentingActivityItem {
-        prepareExport()
+        _ = prepareExport()
         let thumbnail = NSImage(contentsOf: workingURL) ?? baseImage
 
         // A friendly-named copy so share targets get a sensible filename.
+        removeSharedFile()
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent(
                 "\(SettingsStore.shared.sanitizedFilenamePrefix) \(Self.shareTimestamp()).png")
         try? FileManager.default.removeItem(at: url)
-        let shared = (try? FileManager.default.copyItem(at: workingURL, to: url)) != nil ? url : workingURL
+        let copied = (try? FileManager.default.copyItem(at: workingURL, to: url)) != nil
+        if copied { sharedFileURL = url }
+        let shared = copied ? url : workingURL
 
         return NSPreviewRepresentingActivityItem(
             item: shared,
@@ -1087,8 +1216,14 @@ final class EditorModel {
             icon: NSApp.applicationIconImage)
     }
 
+    private func removeSharedFile() {
+        if let sharedFileURL { ScreenshotService.shared.cleanup(sharedFileURL) }
+        sharedFileURL = nil
+    }
+
     private static func shareTimestamp() -> String {
         let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
         return formatter.string(from: Date())
     }
@@ -1107,8 +1242,13 @@ final class EditorModel {
     func close() {
         guard !closed else { return }
         closed = true
+        pendingRecoverySnapshot?.cancel()
+        recovery.discard()
         ScreenshotService.shared.cleanup(workingURL)
-        onClose?()
+        removeSharedFile()
+        // Deferred: close can run from inside a toolbar or button action,
+        // whose target the teardown would release mid-call.
+        DispatchQueue.main.async { [onClose] in onClose?() }
     }
 
     // MARK: - Export
@@ -1116,13 +1256,13 @@ final class EditorModel {
     /// Flattens the annotation layer over the capture and overwrites the working
     /// PNG. Always re-renders from `baseImage`, so it stays correct even after
     /// undoing every annotation.
-    private func prepareExport() {
+    private func prepareExport() -> Bool {
         // No side effects here — this is reachable from the share item's
         // validation. Committing text is done by the Copy/Export actions instead.
         guard let cgImage = renderFlattened(),
               let png = NSBitmapImageRep(cgImage: cgImage).representation(using: .png, properties: [:])
-        else { return }
-        try? png.write(to: workingURL)
+        else { return false }
+        return (try? png.write(to: workingURL)) != nil
     }
 
     /// Composites the base capture + annotations at full pixel resolution.
@@ -1361,8 +1501,9 @@ final class EditorModel {
         context.draw(labelImage, in: rect)
     }
 
-    private func flash(_ message: String) {
+    private func flash(_ message: String, failure: Bool = false) {
         statusMessage = message
+        statusIsFailure = failure
         Task {
             try? await Task.sleep(for: .seconds(1.4))
             if statusMessage == message { statusMessage = nil }

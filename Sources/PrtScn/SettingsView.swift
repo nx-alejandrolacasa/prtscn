@@ -37,7 +37,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         switch self {
         case .general: [
             "Appearance", "Theme", "Startup", "Launch PrtScn at login",
-            "Dock", "Show Dock icon", "Files", "Save to",
+            "Dock", "Show Dock icon", "Files", "Save to", "Choose…", "Filename prefix",
         ].map { String(localized: String.LocalizationValue($0)) }
         case .capture: [
             "Window screenshots", "Background", "Color", "Resolution", "Save as",
@@ -48,7 +48,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .preview: [
             "Style", "Preview style", "Actions", "Dismissal", "Auto-dismiss after",
             "If dismissed without action",
-        ].map { String(localized: String.LocalizationValue($0)) }
+        ].map { String(localized: String.LocalizationValue($0)) } + PreviewAction.allCases.map(\.label)
         case .editor: [
             "Tools", "Reopen with the last-used tool", "After an action",
             "Close the editor after Copy, Export, or OCR", "Measure tool",
@@ -482,7 +482,7 @@ private struct FixedSizePresetsSection: View {
     @State private var newWidth: Int?
     @State private var newHeight: Int?
     @FocusState private var focusedField: Field?
-    @State private var draggedPreset: FixedSizePreset?
+    @State private var draggedPreset: RowDrag<FixedSizePreset>?
     @State private var tabKeyMonitor: Any?
 
     private enum Field { case width, height }
@@ -531,7 +531,7 @@ private struct FixedSizePresetsSection: View {
                 // drag, not the empty space between them.
                 .contentShape(Rectangle())
                 .onDrag {
-                    draggedPreset = preset
+                    draggedPreset = RowDrag(item: preset)
                     return NSItemProvider(object: preset.id as NSString)
                 }
                 .onDrop(of: [.text],
@@ -626,12 +626,12 @@ private struct FixedSizePresetsSection: View {
 /// badge.
 private struct ReorderDelegate<Item: Equatable>: DropDelegate {
     let item: Item
-    @Binding var dragged: Item?
+    @Binding var dragged: RowDrag<Item>?
     /// Slides the dragged item into the target's slot in the backing array.
     let move: @MainActor (_ dragged: Item, _ target: Item) -> Void
 
     func validateDrop(info: DropInfo) -> Bool {
-        MainActor.assumeIsolated { dragged != nil }
+        MainActor.assumeIsolated { currentDraggedItem() != nil }
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
@@ -640,15 +640,40 @@ private struct ReorderDelegate<Item: Equatable>: DropDelegate {
 
     func dropEntered(info: DropInfo) {
         MainActor.assumeIsolated {
-            guard let dragged, dragged != item else { return }
+            guard let dragged = currentDraggedItem(), dragged != item else { return }
             move(dragged, item)
         }
+    }
+
+    /// The dragged row, if the drag in flight is still the one that picked
+    /// it up. A cancelled drag never reaches `performDrop`, so its row would
+    /// otherwise linger and let any later text drag reorder the list.
+    @MainActor private func currentDraggedItem() -> Item? {
+        guard var drag = dragged else { return nil }
+        let changeCount = NSPasteboard(name: .drag).changeCount
+        if drag.dragPasteboardChangeCount == nil {
+            drag.dragPasteboardChangeCount = changeCount
+            dragged = drag
+        }
+        guard drag.dragPasteboardChangeCount == changeCount else {
+            dragged = nil
+            return nil
+        }
+        return drag.item
     }
 
     func performDrop(info: DropInfo) -> Bool {
         MainActor.assumeIsolated { dragged = nil }
         return true
     }
+}
+
+/// A row picked up for reordering, tied to its drag session by the drag
+/// pasteboard's change count (every new drag, from any app, bumps it) —
+/// pinned the first time the drag reaches a row.
+private struct RowDrag<Item> {
+    let item: Item
+    var dragPasteboardChangeCount: Int?
 }
 
 extension Array where Element: Equatable {
@@ -664,7 +689,7 @@ extension Array where Element: Equatable {
 
 private struct PreviewSettingsView: View {
     @Bindable var settings = SettingsStore.shared
-    @State private var draggedAction: PreviewAction?
+    @State private var draggedAction: RowDrag<PreviewAction>?
 
     var body: some View {
         Form {
@@ -751,7 +776,7 @@ private struct PreviewSettingsView: View {
         // shape only the rendered text/icons would start a drag.
         .contentShape(Rectangle())
         .onDrag {
-            draggedAction = action
+            draggedAction = RowDrag(item: action)
             return NSItemProvider(object: action.rawValue as NSString)
         }
         .onDrop(of: [.text],

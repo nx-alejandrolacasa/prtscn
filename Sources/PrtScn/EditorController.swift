@@ -34,32 +34,59 @@ final class EditorController: NSObject, NSWindowDelegate {
 
     /// Opens the editor for a capture. Takes ownership of `imageURL` (the temp
     /// file): the editor reuses it as its working file and deletes it on close.
-    func show(imageURL: URL, captureScale: CGFloat) {
+    /// A capture the open editor can't make way for is saved to the save
+    /// folder rather than lost, unless `saveIfRefused` is off.
+    func show(imageURL: URL, captureScale: CGFloat, saveIfRefused: Bool = true) {
         guard let image = NSImage(contentsOf: imageURL) else { return }
-        present(EditorModel(image: image, workingURL: imageURL, captureScale: captureScale))
+        if !present(EditorModel(image: image, workingURL: imageURL, captureScale: captureScale)) {
+            if saveIfRefused { _ = ScreenshotService.shared.save(imageURL, captureScale: captureScale) }
+            ScreenshotService.shared.cleanup(imageURL)
+        }
     }
 
-    /// Reopens a `.prtscn` project: its base image becomes a fresh temp working
-    /// file (the editor owns and deletes it, like a capture's) and the
-    /// annotations come back as editable data.
+    /// Reopens a `.prtscn` project; the annotations come back as editable data.
     func open(projectURL: URL) {
+        guard let (model, document) = loadProject(at: projectURL) else { return }
+        guard present(model) else { return ScreenshotService.shared.cleanup(model.workingURL) }
+        model.restore(document, from: projectURL)
+    }
+
+    /// Reopens the canvas a crash left behind, still writing its snapshots
+    /// into the same package until it's saved or closed.
+    /// An unreadable snapshot goes to the Trash so it isn't offered again.
+    func recover(from snapshotURL: URL, originalDocumentURL: URL?) {
+        guard let (model, document) = loadProject(at: snapshotURL,
+                                                  recovery: CanvasRecovery(adopting: snapshotURL))
+        else {
+            try? FileManager.default.trashItem(at: snapshotURL, resultingItemURL: nil)
+            return
+        }
+        guard present(model) else { return ScreenshotService.shared.cleanup(model.workingURL) }
+        model.restoreRecovered(document, originalDocumentURL: originalDocumentURL)
+    }
+
+    /// A model over the package's base image, which becomes a fresh temp
+    /// working file (the editor owns and deletes it, like a capture's).
+    /// Alerts and returns `nil` when the package can't be read.
+    private func loadProject(at url: URL, recovery: CanvasRecovery = CanvasRecovery())
+        -> (EditorModel, ProjectDocument)? {
         let image: NSImage, document: ProjectDocument
         do {
-            (image, document) = try ProjectDocument.read(from: projectURL)
+            (image, document) = try ProjectDocument.read(from: url)
         } catch {
-            log.error("couldn't open project at \(projectURL.path, privacy: .public): \(String(describing: error), privacy: .public)")
+            log.error("couldn't open project at \(url.path, privacy: .public): \(String(describing: error), privacy: .public)")
             let alert = NSAlert()
-            alert.messageText = String(localized: "Couldn't open “\(projectURL.lastPathComponent)”")
+            alert.messageText = String(localized: "Couldn't open “\(url.lastPathComponent)”")
             alert.informativeText = String(localized: "The file isn't a PrtScn project this version can read.")
             NSApp.activate()
             alert.runModal()
-            return
+            return nil
         }
         let workingURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("prtscn-project-\(UUID().uuidString).png")
-        let model = EditorModel(image: image, workingURL: workingURL, captureScale: document.captureScale)
-        present(model)
-        model.restore(document, from: projectURL)
+        let model = EditorModel(image: image, workingURL: workingURL,
+                                captureScale: document.captureScale, recovery: recovery)
+        return (model, document)
     }
 
     /// Lets the user pick a `.prtscn` project to reopen.
@@ -74,19 +101,31 @@ final class EditorController: NSObject, NSWindowDelegate {
         open(projectURL: url)
     }
 
-    private func present(_ model: EditorModel) {
+    /// Returns whether `model` made it on screen; when refused, its working
+    /// file is the caller's to deal with.
+    private func present(_ model: EditorModel) -> Bool {
+        // The open editor is mid-conversation (a save panel or the unsaved-
+        // changes sheet); it can't be torn down under it.
+        if let window, window.attachedSheet != nil {
+            NSApp.activate()
+            window.makeKeyAndOrderFront(nil)
+            return false
+        }
         // A dirty project is already open: the user decides before it goes.
         if let current = self.model, current.hasUnsavedProjectChanges {
             switch askUnsavedChanges(for: current) {
             case .save: guard current.saveProject() else { fallthrough }
-            case .cancel:
-                ScreenshotService.shared.cleanup(model.workingURL)
-                return
+            case .cancel: return false
             case .discard: break
             }
         }
         close()   // dismiss any existing editor first
-        model.onClose = { [weak self] in self?.close() }
+        // Guarded by identity: a model closes asynchronously, by which time a
+        // newer editor may be the one on screen.
+        model.onClose = { [weak self, weak model] in
+            guard let self, let model, self.model === model else { return }
+            self.close()
+        }
 
         let hosting = NSHostingController(rootView: EditorView(model: model))
         // Don't let the hosting controller resize the window to the SwiftUI
@@ -236,6 +275,7 @@ final class EditorController: NSObject, NSWindowDelegate {
             window.makeKeyAndOrderFront(nil)
             self.installSizeReadout(in: window, model: model)
         }
+        return true
     }
 
     /// Consumes right-mouse events over the editor's content while zoomed in,

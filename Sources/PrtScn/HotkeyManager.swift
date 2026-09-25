@@ -20,6 +20,7 @@ final class HotkeyManager {
     private var idToMode: [UInt32: CaptureMode] = [:]
     private var nextID: UInt32 = 1
     private var handlerInstalled = false
+    private var isSuspended = false
 
     private init() {}
 
@@ -28,9 +29,22 @@ final class HotkeyManager {
     func reloadFromSettings() {
         installHandlerIfNeeded()
         unregisterAll()
+        guard !isSuspended else { return }
         for (mode, shortcut) in SettingsStore.shared.shortcuts {
             register(mode: mode, shortcut: shortcut)
         }
+    }
+
+    /// Releases every hotkey while a shortcut recorder listens, so pressing an
+    /// already-assigned combo reaches the recorder instead of capturing.
+    func suspend() {
+        isSuspended = true
+        unregisterAll()
+    }
+
+    func resume() {
+        isSuspended = false
+        reloadFromSettings()
     }
 
     /// Called (on the main actor) by the C event handler when a hotkey fires.

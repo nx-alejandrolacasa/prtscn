@@ -1,10 +1,8 @@
 import AppKit
 
-/// Classic AppKit application delegate.
-///
-/// In a menu-bar utility this stays small: its main job is to make the app an
-/// "accessory" (no Dock icon, no main window). Later slices will use it to own
-/// the preview panel and register global hotkeys.
+/// Classic AppKit application delegate: makes the app an "accessory" (no
+/// Dock icon, no main window), registers the global hotkeys, opens `.prtscn`
+/// projects, and offers back a canvas a crash left behind.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Menu-bar app by default (`.accessory`: no Dock icon, no app menu),
@@ -21,6 +19,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Quiet daily update check; if a newer release exists, the menu and
         // the About tab offer the update.
         Task { await UpdateChecker.shared.checkAutomatically() }
+
+        CanvasRecovery.offerRecoveryAtLaunch()
+    }
+
+    /// A deliberate quit already asked about unsaved projects; closing the
+    /// editor drops its crash snapshot so the next launch doesn't offer it.
+    func applicationWillTerminate(_ notification: Notification) {
+        EditorController.shared.close()
+        CanvasRecovery.waitForPendingWrites()
     }
 
     /// Finder double-click / drag-to-icon on a `.prtscn` project. One editor

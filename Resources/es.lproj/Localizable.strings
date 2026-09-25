@@ -254,3 +254,18 @@
 "Search" = "Buscar";
 "No Results" = "Sin resultados";
 "Clear" = "Borrar";
+
+/* Crash recovery alert at launch */
+"PrtScn quit unexpectedly while you were editing" = "PrtScn se cerró inesperadamente mientras editabas";
+"Your canvas was saved automatically. Do you want to restore it?" = "Tu lienzo se guardó automáticamente. ¿Quieres restaurarlo?";
+"Restore" = "Restaurar";
+"Move to Trash" = "Trasladar a la papelera";
+
+/* Editor toast when flattening the canvas for Copy / Export fails */
+"Couldn't render the image" = "No se pudo generar la imagen";
+
+/* Shortcut key label */
+"Space" = "Espacio";
+
+/* Update install: signature check failed */
+"The update's code signature couldn't be verified, so it wasn't installed." = "No se pudo verificar la firma de código de la actualización, así que no se instaló.";

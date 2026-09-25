@@ -22,8 +22,10 @@ struct ShortcutRecorder: NSViewRepresentable {
 
 /// A click-to-record shortcut field.
 ///
-/// Click it to start recording, then press a combo (at least one modifier).
-/// Esc cancels, Delete/Backspace clears. We use an `NSView` rather than SwiftUI
+/// Click it to start recording, then press a combo: ⌘ or ⌃ plus a key, or an
+/// F-key with any modifier — ⇧/⌥ alone would swallow ordinary typing (⌥E is
+/// accent entry). Esc cancels, Delete/Backspace clears. Global hotkeys are
+/// suspended while recording, so an already-assigned combo can be captured. We use an `NSView` rather than SwiftUI
 /// because we need the raw virtual key code + modifier flags, which `keyDown`
 /// gives us directly.
 final class RecorderView: NSView {
@@ -33,9 +35,18 @@ final class RecorderView: NSView {
     var onChange: ((Shortcut?) -> Void)?
 
     private var recording = false {
-        didSet { refresh() }
+        didSet {
+            refresh()
+            guard recording != oldValue else { return }
+            if recording {
+                HotkeyManager.shared.suspend()
+            } else {
+                HotkeyManager.shared.resume()
+            }
+        }
     }
     private let label = NSTextField(labelWithString: "")
+    private var windowResignKeyObserver: NSObjectProtocol?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -72,6 +83,32 @@ final class RecorderView: NSView {
         return true
     }
 
+    /// Leaving the window (or the window losing key) doesn't resign first
+    /// responder, and suspended hotkeys must not outlive the recording.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let windowResignKeyObserver {
+            NotificationCenter.default.removeObserver(windowResignKeyObserver)
+        }
+        windowResignKeyObserver = nil
+        guard let window else {
+            recording = false
+            return
+        }
+        windowResignKeyObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didResignKeyNotification, object: window, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.stopRecording() }
+        }
+    }
+
+    private func stopRecording() {
+        if window?.firstResponder === self {
+            window?.makeFirstResponder(nil)
+        }
+        recording = false
+    }
+
     override func keyDown(with event: NSEvent) {
         guard recording else {
             super.keyDown(with: event)
@@ -85,11 +122,15 @@ final class RecorderView: NSView {
             window?.makeFirstResponder(nil)
         default:
             let modifiers = Self.carbonModifiers(from: event.modifierFlags)
-            guard modifiers != 0 else {
-                NSSound.beep() // require at least one modifier
+            let keyCode = UInt32(event.keyCode)
+            let hasRequiredModifier = Shortcut.functionKeyCodes.contains(keyCode)
+                ? modifiers != 0
+                : modifiers & UInt32(cmdKey | controlKey) != 0
+            guard hasRequiredModifier else {
+                NSSound.beep()
                 return
             }
-            onChange?(Shortcut(keyCode: UInt32(event.keyCode), modifiers: modifiers))
+            onChange?(Shortcut(keyCode: keyCode, modifiers: modifiers))
             window?.makeFirstResponder(nil)
         }
     }

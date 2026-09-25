@@ -77,9 +77,7 @@ final class PinnedController {
     func pin(image rawImage: NSImage, imageURL: URL, captureScale: CGFloat) {
         let (image, windowCornerRadius) = Self.trimmedToOpaqueBounds(rawImage)
         let mouse = NSEvent.mouseLocation
-        let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) }
-            ?? NSScreen.main ?? NSScreen.screens.first
-        let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let visible = NSScreen.underMouse?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
 
         // Start at the capture's natural (point) size, scaled down to at most
         // half the screen so a big grab doesn't wall off the workspace.
@@ -157,7 +155,8 @@ final class PinnedController {
     /// see-through notches at the pin's corners. 0 = opaque capture, no curve.
     private static func trimmedToOpaqueBounds(_ image: NSImage) -> (image: NSImage, cornerRadius: CGFloat) {
         guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
-              cg.width > 0, cg.height > 0 else { return (image, 0) }
+              cg.width > 0, cg.height > 0,
+              ScreenshotService.looksLikeWindowShot(cg) else { return (image, 0) }
 
         let width = cg.width, height = cg.height
         var pixels = [UInt8](repeating: 0, count: width * height * 4)

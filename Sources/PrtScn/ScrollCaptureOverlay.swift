@@ -125,6 +125,9 @@ private final class ScrollSelectView: NSView {
     /// Selections smaller than this (either dimension, in points) are treated
     /// as a slip of the mouse — the overlay stays up for another try.
     private static let minSelection: CGFloat = 40
+    /// Shorter regions can't stitch: after a half-height scroll step the
+    /// frames must still share ScrollStitcher's 80 px overlap, even at 1x.
+    private static let minSelectionHeight: CGFloat = 160
     /// Releasing ⌘ a beat before the mouse button shouldn't lose the upward
     /// intent — ⌘ counts as engaged for this long after it goes up.
     private static let commandGrace: TimeInterval = 0.5
@@ -230,7 +233,7 @@ private final class ScrollSelectView: NSView {
         let scrollUp = scrollUpEngaged
         defer { anchor = nil; current = nil; needsDisplay = true }
         guard let rect = selectionRect, let window, let screen = window.screen,
-              rect.width >= Self.minSelection, rect.height >= Self.minSelection
+              rect.width >= Self.minSelection, rect.height >= Self.minSelectionHeight
         else { return }
         onSelect(window.convertToScreen(convert(rect, to: nil)), screen, scrollUp)
     }

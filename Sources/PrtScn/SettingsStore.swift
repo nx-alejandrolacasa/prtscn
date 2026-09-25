@@ -10,9 +10,10 @@ private let log = Logger(subsystem: "com.alejandrolacasa.prtscn", category: "Set
 /// App-wide settings, persisted to `UserDefaults` and observable by SwiftUI.
 ///
 /// Each property writes itself back to `UserDefaults` (and applies any live
-/// side effect) in its `didSet`. Property observers don't fire during `init`,
-/// so loading saved values in `init` doesn't trigger spurious re-saves or
-/// re-registrations.
+/// side effect) in its `didSet`. Under `@Observable`, `didSet` stays silent
+/// only for each property's *first* assignment in `init` — any later one runs
+/// it, re-entering `shared` before it exists (a trap). So `init` assigns
+/// every property exactly once, from fully prepared values.
 @MainActor
 @Observable
 final class SettingsStore {
@@ -20,8 +21,13 @@ final class SettingsStore {
 
     /// Register/unregister the app as a macOS login item.
     var launchAtLogin: Bool {
-        didSet { applyLaunchAtLogin() }
+        didSet {
+            guard !isResyncingLaunchAtLogin else { return }
+            applyLaunchAtLogin()
+        }
     }
+
+    @ObservationIgnored private var isResyncingLaunchAtLogin = false
 
     /// When the Dock icon (and ⌘Tab presence) shows — applied immediately.
     var dockIcon: DockIconMode {
@@ -355,33 +361,14 @@ final class SettingsStore {
             defaults.object(forKey: Keys.canvasWidth) as? Int ?? Self.defaultCanvasWidth)
         canvasHeight = Self.clampedCanvasDimension(
             defaults.object(forKey: Keys.canvasHeight) as? Int ?? Self.defaultCanvasHeight)
-        shortcuts = Self.loadShortcuts(from: defaults) ?? Self.defaultShortcuts
+        let (loadedShortcuts, backFilled) = Self.backFillShortcuts(
+            Self.loadShortcuts(from: defaults) ?? Self.defaultShortcuts, defaults: defaults)
+        shortcuts = loadedShortcuts
         // Reflect the real system login-item state rather than a stored guess.
         launchAtLogin = (SMAppService.mainApp.status == .enabled)
 
-        // Shortcuts persisted before scrolling capture existed lack its
-        // default hotkey — back-fill it exactly once, so users who later
-        // clear it (Delete in the recorder) aren't fighting a resurrection
-        // on every launch. `didSet` doesn't fire during init, so persist by
-        // hand; hotkey registration happens at app startup regardless.
-        if !defaults.bool(forKey: Keys.scrollingShortcutMigrated) {
-            defaults.set(true, forKey: Keys.scrollingShortcutMigrated)
-            if shortcuts[.scrolling] == nil, let shortcut = Self.defaultShortcuts[.scrolling] {
-                shortcuts[.scrolling] = shortcut
-                persistShortcuts()
-            }
-        }
-        // Same back-fill for fixed-size capture (its ⌘⌥4-slot default likewise
-        // postdates early installs). Skipped if the user meanwhile assigned
-        // that combo to another mode — duplicates are rejected everywhere else.
-        if !defaults.bool(forKey: Keys.fixedSizeShortcutMigrated) {
-            defaults.set(true, forKey: Keys.fixedSizeShortcutMigrated)
-            if shortcuts[.fixedSize] == nil, let shortcut = Self.defaultShortcuts[.fixedSize],
-               !shortcuts.values.contains(shortcut) {
-                shortcuts[.fixedSize] = shortcut
-                persistShortcuts()
-            }
-        }
+        // Hotkey registration happens at app startup regardless.
+        if backFilled { persistShortcuts() }
     }
 
     // MARK: - Shortcuts
@@ -418,6 +405,32 @@ final class SettingsStore {
             .scrolling: Shortcut(keyCode: UInt32(kVK_ANSI_5), modifiers: modifiers),
         ]
     }()
+
+    /// Shortcuts persisted before scrolling / fixed-size capture existed lack
+    /// their default hotkeys — back-fill each exactly once, so users who later
+    /// clear one (Delete in the recorder) aren't fighting a resurrection on
+    /// every launch. A default the user meanwhile assigned to another mode is
+    /// skipped — duplicates are rejected everywhere else. Also returns whether
+    /// anything was added.
+    private static func backFillShortcuts(
+        _ loaded: [CaptureMode: Shortcut], defaults: UserDefaults
+    ) -> ([CaptureMode: Shortcut], Bool) {
+        var shortcuts = loaded
+        var backFilled = false
+        let migrations: [(CaptureMode, String)] = [
+            (.scrolling, Keys.scrollingShortcutMigrated),
+            (.fixedSize, Keys.fixedSizeShortcutMigrated),
+        ]
+        for (mode, migratedKey) in migrations where !defaults.bool(forKey: migratedKey) {
+            defaults.set(true, forKey: migratedKey)
+            if shortcuts[mode] == nil, let shortcut = defaultShortcuts[mode],
+               !shortcuts.values.contains(shortcut) {
+                shortcuts[mode] = shortcut
+                backFilled = true
+            }
+        }
+        return (shortcuts, backFilled)
+    }
 
     private func persistShortcuts() {
         let raw = Dictionary(uniqueKeysWithValues: shortcuts.map { ($0.key.rawValue, $0.value) })
@@ -470,7 +483,7 @@ final class SettingsStore {
     // MARK: - Derived
 
     static var defaultSaveFolder: String {
-        FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask)[0].path
+        FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first?.path ?? NSHomeDirectory()
     }
 
     /// Short, friendly name for the save folder (e.g. "Desktop").
@@ -509,6 +522,9 @@ final class SettingsStore {
             }
         } catch {
             log.error("launch-at-login change failed: \(String(describing: error), privacy: .public)")
+            isResyncingLaunchAtLogin = true
+            launchAtLogin = (SMAppService.mainApp.status == .enabled)
+            isResyncingLaunchAtLogin = false
         }
     }
 }

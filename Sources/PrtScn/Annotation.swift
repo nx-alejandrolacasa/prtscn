@@ -923,6 +923,17 @@ extension Annotation {
 /// canvas and the export draw with — because `NSAttributedString.size()` lays
 /// out a single line only, which undersized multi-line text everywhere.
 func textRenderSize(_ text: String, fontSize: CGFloat, design: FontDesign) -> CGSize {
+    let key = "\(design.rawValue) \(fontSize) \(text)" as NSString
+    if let cached = textRenderSizeCache.object(forKey: key) { return cached.sizeValue }
+    let size = measureTextRenderSize(text, fontSize: fontSize, design: design)
+    textRenderSizeCache.setObject(NSValue(size: size), forKey: key)
+    return size
+}
+
+/// NSCache is thread-safe, which is what makes the `unsafe` opt-out sound.
+private nonisolated(unsafe) let textRenderSizeCache = NSCache<NSString, NSValue>()
+
+private func measureTextRenderSize(_ text: String, fontSize: CGFloat, design: FontDesign) -> CGSize {
     let font = annotationNSFont(size: fontSize, design: design)
     func lineSize(_ line: String) -> CGSize {
         NSAttributedString(string: line, attributes: [.font: font]).size()
@@ -994,8 +1005,14 @@ func lineCapSegments(from start: CGPoint, to end: CGPoint,
                              CGPoint(x: point.x - px * half, y: point.y - py * half)])
         }
     }
-    append(startCap, at: start, from: startTangent ?? end)
-    append(endCap, at: end, from: endTangent ?? start)
+    // A tangent on top of its cap point (a corner route whose elbow lands
+    // on the endpoint) has no direction; aim along the chord instead.
+    func direction(_ tangent: CGPoint?, at point: CGPoint, else other: CGPoint) -> CGPoint {
+        guard let tangent, hypot(tangent.x - point.x, tangent.y - point.y) > 0.5 else { return other }
+        return tangent
+    }
+    append(startCap, at: start, from: direction(startTangent, at: start, else: end))
+    append(endCap, at: end, from: direction(endTangent, at: end, else: start))
     return segments
 }
 

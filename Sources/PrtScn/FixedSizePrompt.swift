@@ -88,10 +88,7 @@ final class FixedSizePrompt: NSObject, NSWindowDelegate {
     /// Slightly above center of the screen the cursor is on (where the
     /// capture is about to happen), not necessarily the main screen.
     private func position(_ panel: NSPanel) {
-        let mouse = NSEvent.mouseLocation
-        let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) }
-            ?? NSScreen.main ?? NSScreen.screens.first
-        guard let visible = screen?.visibleFrame else { return }
+        guard let visible = NSScreen.underMouse?.visibleFrame else { return }
         let size = panel.frame.size
         panel.setFrameOrigin(NSPoint(
             x: visible.midX - size.width / 2,

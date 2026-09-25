@@ -22,18 +22,28 @@ final class PreviewController {
     static let shared = PreviewController()
 
     private var panel: NSPanel?
+    private var model: PreviewModel?
 
     private init() {}
 
     func show(imageURL: URL, captureScale: CGFloat, pristineImage: NSImage? = nil) {
-        guard let image = NSImage(contentsOf: imageURL) else { return }
-        close()   // dismiss any existing preview first
+        guard let image = NSImage(contentsOf: imageURL) else {
+            ScreenshotService.shared.cleanup(imageURL)
+            return
+        }
+        // The replaced capture gets its default action, as if it had timed out.
+        self.model?.dismiss()
+        close()
 
         let model = PreviewModel(image: image, imageURL: imageURL,
                                  timeout: SettingsStore.shared.previewTimeout,
                                  captureScale: captureScale,
                                  pristineImage: pristineImage)
-        model.onClose = { [weak self] in self?.close() }
+        model.onClose = { [weak self, weak model] in
+            guard let self, self.model === model else { return }
+            close()
+        }
+        self.model = model
 
         // Size the panel to the SwiftUI content. We use an NSHostingController
         // (rather than a bare NSHostingView) because its `view.fittingSize` is
@@ -76,6 +86,7 @@ final class PreviewController {
     func close() {
         panel?.orderOut(nil)
         panel = nil
+        model = nil
     }
 
     /// Anchors the card by its bottom-left corner to the cursor: the visible
@@ -85,10 +96,7 @@ final class PreviewController {
     /// area of whichever display the cursor is on.
     private func position(_ panel: NSPanel, size: NSSize) {
         let mouse = NSEvent.mouseLocation   // screen coords, origin bottom-left
-        let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) }
-            ?? NSScreen.main
-            ?? NSScreen.screens.first
-        let visible = screen?.visibleFrame ?? .zero
+        let visible = NSScreen.underMouse?.visibleFrame ?? .zero
 
         // The panel includes a transparent shadow margin around the visible
         // card, so offset by it to position the *visible* edge near the cursor.
@@ -115,5 +123,13 @@ final class PreviewController {
         y = min(max(y, visible.minY + 8), visible.maxY - size.height - 8)
 
         panel.setFrameOrigin(NSPoint(x: x, y: y))
+    }
+}
+
+extension NSScreen {
+    /// The display under the pointer, falling back to the main one.
+    static var underMouse: NSScreen? {
+        let mouse = NSEvent.mouseLocation
+        return screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? main ?? screens.first
     }
 }

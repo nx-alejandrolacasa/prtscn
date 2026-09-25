@@ -30,13 +30,18 @@ struct Shortcut: Codable, Equatable {
     /// (Carbon `kVK_*`.)
     static let specialKeyLabels: [UInt32: String] = [
         // Editing / whitespace
-        49: "Space", 36: "↩", 48: "⇥", 53: "⎋", 51: "⌫", 117: "⌦",
+        49: String(localized: "Space"), 36: "↩", 48: "⇥", 53: "⎋", 51: "⌫", 117: "⌦",
         // Arrows
         123: "←", 124: "→", 125: "↓", 126: "↑",
         // Function keys
         122: "F1", 120: "F2", 99: "F3", 118: "F4", 96: "F5", 97: "F6",
         98: "F7", 100: "F8", 101: "F9", 109: "F10", 103: "F11", 111: "F12",
     ]
+
+    static let functionKeyCodes: Set<UInt32> = Set([
+        kVK_F1, kVK_F2, kVK_F3, kVK_F4, kVK_F5, kVK_F6, kVK_F7, kVK_F8, kVK_F9, kVK_F10,
+        kVK_F11, kVK_F12, kVK_F13, kVK_F14, kVK_F15, kVK_F16, kVK_F17, kVK_F18, kVK_F19, kVK_F20,
+    ].map(UInt32.init))
 
     /// US-ANSI fallback for character keys, used only when `UCKeyTranslate`
     /// can't produce a character (e.g. a layout without Unicode data).

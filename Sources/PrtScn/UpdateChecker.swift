@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import Security
 import os
 
 private let log = Logger(subsystem: "com.alejandrolacasa.prtscn", category: "UpdateChecker")
@@ -155,14 +156,19 @@ final class UpdateChecker {
             let dmg = downloaded.deletingPathExtension().appendingPathExtension("dmg")
             try? FileManager.default.removeItem(at: dmg)
             try FileManager.default.moveItem(at: downloaded, to: dmg)
+            defer { try? FileManager.default.removeItem(at: dmg) }
 
             phase = .installing
             try await Self.install(dmg: dmg)
-            relaunch()
+        } catch UpdateError.untrustedSignature {
+            phase = .failed(String(localized: "The update's code signature couldn't be verified, so it wasn't installed."))
+            return
         } catch {
             log.error("update install failed: \(String(describing: error), privacy: .public)")
             phase = .failed(String(localized: "Update failed — install manually from GitHub."))
+            return
         }
+        relaunch()
     }
 
     /// Mounts the DMG, copies its .app over the running bundle, unmounts.
@@ -187,36 +193,81 @@ final class UpdateChecker {
         // Replacing a running app's bundle is safe on macOS — the running
         // process keeps its open files; the new bundle is picked up on
         // relaunch. `ditto` preserves the code signature, like build.sh.
-        // Stage the copy next to the destination first (same volume, so the
-        // final move is an atomic rename) — the old bundle is only removed
-        // once the copy from the DMG has fully succeeded.
+        // Stage the copy next to the destination first (same volume), verify
+        // it, then swap it in with `replaceItemAt` — which never leaves the
+        // destination missing, unlike remove-then-move.
         let destination = Bundle.main.bundleURL
         let staging = destination.deletingLastPathComponent()
             .appendingPathComponent(".\(destination.lastPathComponent).update")
         try? FileManager.default.removeItem(at: staging)
         do {
             try await run("/usr/bin/ditto", app.path, staging.path)
-            try FileManager.default.removeItem(at: destination)
-            try FileManager.default.moveItem(at: staging, to: destination)
+            try verifySignature(ofAppAt: staging)
+            _ = try FileManager.default.replaceItemAt(destination, withItemAt: staging)
         } catch {
             try? FileManager.default.removeItem(at: staging)
             throw error
         }
     }
 
-    /// Launches the freshly installed bundle after this process exits. The
-    /// spawned shell outlives us (children aren't killed on parent exit), so
-    /// `sleep 1` lets the old instance finish quitting first.
+    /// Rejects a bundle whose signature is broken, and — when this copy is
+    /// signed with a real certificate — one not satisfying our designated
+    /// requirement (same identifier, same signing certificate). Ad-hoc
+    /// builds (local `./build.sh install`) skip that second check: their
+    /// requirement pins a cdhash no other build can match.
+    private static func verifySignature(ofAppAt url: URL) throws {
+        var candidate: SecStaticCode?
+        guard SecStaticCodeCreateWithPath(url as CFURL, [], &candidate) == errSecSuccess,
+              let candidate
+        else { throw UpdateError.untrustedSignature }
+        let flags = SecCSFlags(rawValue: kSecCSStrictValidate | kSecCSCheckAllArchitectures | kSecCSCheckNestedCode)
+        let requirement = try runningAppRequirement()
+        let status = SecStaticCodeCheckValidity(candidate, flags, requirement)
+        guard status == errSecSuccess else {
+            log.error("update signature check failed (status \(status))")
+            throw UpdateError.untrustedSignature
+        }
+    }
+
+    /// `nil` when the running app is ad-hoc signed.
+    private static func runningAppRequirement() throws -> SecRequirement? {
+        var running: SecCode?
+        var runningStatic: SecStaticCode?
+        var info: CFDictionary?
+        guard SecCodeCopySelf([], &running) == errSecSuccess, let running,
+              SecCodeCopyStaticCode(running, [], &runningStatic) == errSecSuccess, let runningStatic,
+              SecCodeCopySigningInformation(runningStatic, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess,
+              let info = info as? [String: Any]
+        else { throw UpdateError.untrustedSignature }
+        let codeFlags = (info[kSecCodeInfoFlags as String] as? UInt32) ?? 0
+        if codeFlags & SecCodeSignatureFlags.adhoc.rawValue != 0 { return nil }
+
+        var requirement: SecRequirement?
+        guard SecCodeCopyDesignatedRequirement(runningStatic, [], &requirement) == errSecSuccess
+        else { throw UpdateError.untrustedSignature }
+        return requirement
+    }
+
+    /// Launches the freshly installed bundle once this process has exited
+    /// (the spawned shell outlives us). If quitting is cancelled — an unsaved
+    /// project prompt — `terminate` returns: stop the helper and let the user
+    /// retry. Path and pid travel as arguments, never interpolated into the
+    /// script.
     private func relaunch() {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        // The path travels as $0, not interpolated into the script string.
-        process.arguments = ["-c", "sleep 1; /usr/bin/open \"$0\"", Bundle.main.bundlePath]
+        process.arguments = [
+            "-c", "while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; /usr/bin/open \"$0\"",
+            Bundle.main.bundlePath, String(ProcessInfo.processInfo.processIdentifier),
+        ]
         try? process.run()
         NSApp.terminate(nil)
+        process.terminate()
+        phase = .available
     }
 
     private enum UpdateError: Error {
+        case untrustedSignature
         case noAppInDMG
         case processFailed(String)
         case httpStatus(Int)

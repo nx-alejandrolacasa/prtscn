@@ -157,7 +157,9 @@ else
   SIGN_IDENTITY="${PRTSCN_SIGN_IDENTITY:-PrtScn Dev}"
 fi
 
-if security find-identity -v -p codesigning | grep -q "$SIGN_IDENTITY"; then
+# Match the quoted name exactly — a bare substring match would take "PrtScn
+# Release (old)" for "PrtScn Release".
+if security find-identity -v -p codesigning | grep -qF "\"$SIGN_IDENTITY\""; then
   codesign --force --sign "$SIGN_IDENTITY" "$APP"
   echo "Signed with '$SIGN_IDENTITY' (stable identity)."
 else
@@ -169,23 +171,27 @@ fi
 
 echo "Built ${APP}"
 
-if [[ "${1:-}" == "run" ]]; then
-  # Relaunch cleanly if an old dev instance is running (the installed
-  # "PrtScn" is a different process name and is left alone).
-  # pkill returns as soon as the signal is sent; `open` right after finds the
-  # old process still tearing down and fails with LaunchServices -600
-  # (procNotFound). Wait for it to be gone — up to ~3 s, then force it.
+# Quits a running instance of this variant (the other variant is a different
+# process name and is left alone). pkill returns as soon as the signal is
+# sent; `open` right after finds the old process still tearing down and fails
+# with LaunchServices -600 (procNotFound). Wait for it to be gone — up to
+# ~3 s, then force it.
+quit_running_instance() {
   pkill -x "$APP_NAME" 2>/dev/null || true
   for _ in $(seq 1 30); do
     pgrep -x "$APP_NAME" >/dev/null 2>&1 || break
     sleep 0.1
   done
   pkill -9 -x "$APP_NAME" 2>/dev/null || true
+}
+
+if [[ "${1:-}" == "run" ]]; then
+  quit_running_instance
   open "$APP"
 fi
 
 if [[ "${1:-}" == "install" ]]; then
-  killall "$APP_NAME" 2>/dev/null || true
+  quit_running_instance
   rm -rf "/Applications/${APP_NAME}.app"
   # ditto preserves the code signature and metadata better than cp.
   ditto "$APP" "/Applications/${APP_NAME}.app"

@@ -116,6 +116,7 @@ struct EditorView: View {
             // Closing the color expander returns to the active tool's section
             // rather than collapsing to nothing.
             ColorPalette(selection: Binding(get: { model.paletteColor }, set: { model.setColor($0) }),
+                         panelProxy: model.colorPanelProxy,
                          isExpanded: expanded == .color,
                          onToggle: { setExpanded(expanded == .color ? section(for: model.tool) : .color) },
                          collapse: { setExpanded(section(for: model.tool)) })
@@ -178,7 +179,8 @@ struct EditorView: View {
             .padding(.top, 12)
             .transition(.move(edge: .top).combined(with: .opacity))
         } else if let status = model.statusMessage {
-            Label(status, systemImage: "checkmark.circle.fill")
+            Label(status, systemImage: model.statusIsFailure
+                  ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
                 .font(.system(size: 12, weight: .medium))
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
@@ -625,11 +627,10 @@ private struct SizeStepper: View {
 /// macOS color picker); choosing any color collapses it back.
 private struct ColorPalette: View {
     @Binding var selection: Color
+    let panelProxy: ColorPanelProxy
     let isExpanded: Bool
     let onToggle: () -> Void
     let collapse: () -> Void
-
-    @State private var panelProxy = ColorPanelProxy()
 
     private static let presets: [Color] = [
         .red, .orange, .yellow, .green, .blue, .purple, .white, .black,
@@ -672,7 +673,6 @@ private struct ColorPalette: View {
     /// Rainbow well — opens the native macOS color picker, with live updates.
     private var rainbowWell: some View {
         Button {
-            panelProxy.onChange = { selection = $0 }
             let panel = NSColorPanel.shared
             panel.color = NSColor(selection)
             panel.isContinuous = true

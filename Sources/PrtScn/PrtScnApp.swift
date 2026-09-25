@@ -7,9 +7,9 @@ import SwiftUI
 /// collection of `Scene`s — here a menu-bar item and a Settings window.
 @main
 struct PrtScnApp: App {
-    /// Bridges in a classic AppKit `NSApplicationDelegate`. We need it to set
-    /// the activation policy (menu-bar app, no Dock icon) and, later, to own
-    /// the preview panel and global hotkeys — things SwiftUI alone can't do.
+    /// Bridges in a classic AppKit `NSApplicationDelegate`: activation policy,
+    /// global hotkeys, crash recovery and quit handling — things SwiftUI alone
+    /// can't do.
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     /// The dev variant (bundle id suffixed ".dev" by build.sh) runs alongside

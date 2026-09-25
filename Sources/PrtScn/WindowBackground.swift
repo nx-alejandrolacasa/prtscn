@@ -54,11 +54,18 @@ extension Color {
         self = Color(.sRGB, red: red, green: green, blue: blue, opacity: 1)
     }
 
+    var hexString: String { NSColor(self).hexString }
+}
+
+extension NSColor {
     var hexString: String {
-        let color = NSColor(self).usingColorSpace(.sRGB) ?? .black
-        let red = Int(round(color.redComponent * 255))
-        let green = Int(round(color.greenComponent * 255))
-        let blue = Int(round(color.blueComponent * 255))
-        return String(format: "#%02X%02X%02X", red, green, blue)
+        let rgb = usingColorSpace(.sRGB) ?? .black
+        // Wide-gamut (P3) colors can convert to sRGB components outside 0…1;
+        // clamp so saturated colors can't format as malformed hex.
+        func byte(_ component: CGFloat) -> Int {
+            Int((min(max(component, 0), 1) * 255).rounded())
+        }
+        return String(format: "#%02X%02X%02X",
+                      byte(rgb.redComponent), byte(rgb.greenComponent), byte(rgb.blueComponent))
     }
 }

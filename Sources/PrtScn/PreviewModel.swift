@@ -68,31 +68,31 @@ final class PreviewModel {
     // MARK: - Actions
 
     func perform(_ action: PreviewAction) {
+        guard !handled else { return }
+        handled = true
         switch action {
         case .edit:
             EditorController.shared.show(imageURL: imageURL, captureScale: captureScale)
-            handled = true
             close(cleanup: false)           // the editor now owns the temp file
         case .copy:
-            ScreenshotService.shared.copyToClipboard(imageURL, captureScale: captureScale)
-            handled = true
-            close(cleanup: true)
+            Task {
+                await ScreenshotService.shared.copyToClipboard(imageURL, captureScale: captureScale)
+                close(cleanup: true)
+            }
         case .ocr:
             ScreenshotService.shared.copyText(in: image)
-            handled = true
             close(cleanup: true)
         case .save:
-            let saved = ScreenshotService.shared.save(imageURL, captureScale: captureScale)
-            handled = true
-            // If the save failed, the temp file is the only copy — keep it.
-            close(cleanup: saved != nil)
+            Task {
+                let saved = await ScreenshotService.shared.save(imageURL, captureScale: captureScale)
+                // If the save failed, the temp file is the only copy — keep it.
+                close(cleanup: saved != nil)
+            }
         case .pin:
             PinnedController.shared.pin(image: pristineImage ?? image, imageURL: imageURL,
                                         captureScale: captureScale)
-            handled = true
             close(cleanup: false)           // the pin now owns the temp file
         case .discard:
-            handled = true
             close(cleanup: true)    // delete the temp capture, save nothing
         }
     }
@@ -100,25 +100,9 @@ final class PreviewModel {
     /// Auto-dismiss (timeout). An untouched capture gets the user's configured
     /// default action (Export by default) so it isn't silently lost. (Esc is
     /// different: it explicitly discards — see PreviewCard's escape handler.)
+    /// A no-op once an action is running: that action closes the card itself.
     func dismiss() {
-        guard !handled else {
-            close(cleanup: true)
-            return
-        }
-        switch SettingsStore.shared.defaultAction {
-        case .save:
-            let saved = ScreenshotService.shared.save(imageURL, captureScale: captureScale)
-            // If the save failed, the temp file is the only copy — keep it.
-            close(cleanup: saved != nil)
-        case .copy:
-            ScreenshotService.shared.copyToClipboard(imageURL, captureScale: captureScale)
-            close(cleanup: true)
-        case .edit:
-            EditorController.shared.show(imageURL: imageURL, captureScale: captureScale)
-            close(cleanup: false)   // the editor now owns the temp file
-        case .discard:
-            close(cleanup: true)    // delete temp, save nothing
-        }
+        perform(SettingsStore.shared.defaultAction.previewAction)
     }
 
     private func close(cleanup: Bool) {
@@ -128,5 +112,16 @@ final class PreviewModel {
             ScreenshotService.shared.cleanup(imageURL)
         }
         onClose?()
+    }
+}
+
+private extension DefaultAction {
+    var previewAction: PreviewAction {
+        switch self {
+        case .save: .save
+        case .copy: .copy
+        case .edit: .edit
+        case .discard: .discard
+        }
     }
 }

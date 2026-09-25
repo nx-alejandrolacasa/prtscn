@@ -37,7 +37,7 @@ final class ScreenshotService {
         if mode == .fixedSize {
             if FixedSizeOverlay.shared.isActive {
                 FixedSizeOverlay.shared.cancel()
-            } else {
+            } else if !captureInFlight, !ScrollCaptureController.shared.isActive {
                 FixedSizePrompt.shared.show()
             }
             return
@@ -47,19 +47,17 @@ final class ScreenshotService {
         if mode == .scrolling {
             if ScrollCaptureController.shared.isActive {
                 ScrollCaptureController.shared.cancel()
-            } else {
+            } else if !captureInFlight, !FixedSizeOverlay.shared.isActive {
                 ScrollCaptureController.shared.begin()
             }
             return
         }
         // Region/window/full-screen shell out to `screencapture` directly;
-        // ignore repeat presses while one is still running (see captureInFlight).
-        guard !captureInFlight else { return }
+        // ignore presses while any capture is still running (see captureInFlight).
+        guard !captureInFlight, !FixedSizeOverlay.shared.isActive,
+              !ScrollCaptureController.shared.isActive else { return }
         captureInFlight = true
-        Task {
-            await performCapture(mode)
-            captureInFlight = false
-        }
+        Task { await performCapture(mode) }
     }
 
     /// Captures an exact screen rectangle, as reported by the fixed-size
@@ -70,9 +68,13 @@ final class ScreenshotService {
         let primaryTop = NSScreen.screens.first?.frame.maxY ?? 0
         let flipped = CGRect(x: rect.minX, y: primaryTop - rect.maxY,
                              width: rect.width, height: rect.height)
+        guard !captureInFlight else { return }
+        captureInFlight = true
         Task { await performCapture(.fixedSize, rect: flipped) }
     }
 
+    /// Expects `captureInFlight` set by the caller; clears it once
+    /// `screencapture` exits, so a stalled composite never blocks new captures.
     private func performCapture(_ mode: CaptureMode, rect: CGRect? = nil) async {
         let tmp = FileManager.default.temporaryDirectory
             .appendingPathComponent("prtscn-\(UUID().uuidString).png")
@@ -108,12 +110,16 @@ final class ScreenshotService {
         if SettingsStore.shared.includePointer, mode == .fullScreen { arguments.append("-C") }
 
         let succeeded = await Self.runScreencapture(arguments: arguments + [tmp.path])
+        captureInFlight = false
         let exists = FileManager.default.fileExists(atPath: tmp.path)
         log.info("capture \(mode.rawValue, privacy: .public) — succeeded=\(succeeded), fileExists=\(exists)")
 
         // On Esc/cancel, screencapture still exits 0 but writes no file — so we
         // check the file actually exists before showing a preview.
-        guard succeeded, exists else { return }
+        guard succeeded, exists else {
+            cleanup(tmp)
+            return
+        }
 
         // Flash the menu-bar icon: feedback that survives a missed preview
         // (eyes elsewhere) or a silenced shutter sound.
@@ -183,11 +189,18 @@ final class ScreenshotService {
         // Keep the capture's DPI tag (144 on Retina): a fresh rep defaults to
         // 72, which would make cropped shots report a different density than
         // uncropped ones from the same feature.
-        let rep = NSBitmapImageRep(cgImage: cropped)
-        rep.size = NSSize(width: CGFloat(cropped.width) / scale,
-                          height: CGFloat(cropped.height) / scale)
-        guard let png = rep.representation(using: .png, properties: [:]) else { return }
-        try? png.write(to: url)
+        writePNG(cropped, scale: scale, to: url)
+    }
+
+    /// Writes `image` as a PNG tagged with the DPI of `scale`, so readers see
+    /// its point size rather than one point per pixel.
+    @discardableResult
+    nonisolated static func writePNG(_ image: CGImage, scale: CGFloat, to url: URL) -> Bool {
+        let rep = NSBitmapImageRep(cgImage: image)
+        rep.size = NSSize(width: CGFloat(image.width) / scale,
+                          height: CGFloat(image.height) / scale)
+        guard let png = rep.representation(using: .png, properties: [:]) else { return false }
+        return (try? png.write(to: url)) != nil
     }
 
     /// Draws the chosen background behind a window capture (which is a window +
@@ -246,7 +259,7 @@ final class ScreenshotService {
     /// rounded corners), whereas region rectangles and full-screen grabs are
     /// fully opaque. We downscale to 32×32 and check the corner pixels' alpha —
     /// cheap and robust against a single opaque corner.
-    private static func looksLikeWindowShot(_ image: CGImage) -> Bool {
+    static func looksLikeWindowShot(_ image: CGImage) -> Bool {
         let side = 32
         // Start fully transparent: source-over drawing then leaves the surround
         // transparent (window shot) or fully opaque (region/full-screen).
@@ -362,6 +375,25 @@ final class ScreenshotService {
     /// re-reading the file's DPI here would wrongly report 1x.
     @discardableResult
     func save(_ url: URL, captureScale: CGFloat) -> URL? {
+        let downscaled = SettingsStore.shared.saveResolution == .native ? nil
+            : Self.downscaledPNG(at: url, dividedBy: captureScale)
+        return write(url, downscaledPNG: downscaled, captureScale: captureScale)
+    }
+
+    /// `save`, with the resample and PNG encode off the main actor.
+    @discardableResult
+    func save(_ url: URL, captureScale: CGFloat) async -> URL? {
+        let downscaled = SettingsStore.shared.saveResolution == .native ? nil
+            : await Task.detached(priority: .userInitiated) {
+                Self.downscaledPNG(at: url, dividedBy: captureScale)
+            }.value
+        return write(url, downscaledPNG: downscaled, captureScale: captureScale)
+    }
+
+    /// A 1x-flavored save needs the downscaled pixels up front; if the
+    /// capture is already 1x (or the resample failed, `downscaledPNG` nil),
+    /// fall back to a plain native save rather than losing the shot.
+    private func write(_ url: URL, downscaledPNG downscaled: Data?, captureScale: CGFloat) -> URL? {
         // Use the configured save folder, falling back to Desktop if it's
         // missing or no longer a directory.
         var folder = URL(fileURLWithPath: SettingsStore.shared.saveFolderPath, isDirectory: true)
@@ -371,15 +403,6 @@ final class ScreenshotService {
             folder = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask)[0]
         }
         let baseName = "\(SettingsStore.shared.sanitizedFilenamePrefix) \(Self.timestamp())"
-
-        // A 1x-flavored save needs the downscaled pixels up front; if the
-        // capture is already 1x (or the resample fails), fall back to a plain
-        // native save rather than losing the shot.
-        var downscaled: Data?
-        if SettingsStore.shared.saveResolution != .native,
-           let small = Self.downscaledImage(at: url, dividedBy: captureScale) {
-            downscaled = NSBitmapImageRep(cgImage: small).representation(using: .png, properties: [:])
-        }
 
         // Same-second saves collide on the timestamped name; suffix with
         // " (2)", " (3)"… until the name — and, for Both, its native `@Nx`
@@ -417,27 +440,41 @@ final class ScreenshotService {
     }
 
     func copyToClipboard(_ url: URL, captureScale: CGFloat) {
-        // Honor the configured copy resolution: a pixel-sized (72 DPI) NSImage
-        // so paste targets treat the downscaled capture as a true 1x image.
-        if SettingsStore.shared.copyResolution == .downscaled,
-           let small = Self.downscaledImage(at: url, dividedBy: captureScale) {
-            let image = NSImage(cgImage: small,
-                                size: NSSize(width: small.width, height: small.height))
-            let pasteboard = NSPasteboard.general
-            pasteboard.clearContents()
-            pasteboard.writeObjects([image])
-            return
-        }
-        guard let image = NSImage(contentsOf: url) else { return }
+        let downscaled = SettingsStore.shared.copyResolution == .downscaled
+            ? Self.downscaledImage(at: url, dividedBy: captureScale) : nil
+        writeToPasteboard(downscaled: downscaled, orContentsOf: url)
+    }
+
+    /// `copyToClipboard`, with the resample off the main actor.
+    func copyToClipboard(_ url: URL, captureScale: CGFloat) async {
+        let downscaled = SettingsStore.shared.copyResolution == .downscaled
+            ? await Task.detached(priority: .userInitiated) {
+                SendableImage(image: Self.downscaledImage(at: url, dividedBy: captureScale))
+            }.value.image
+            : nil
+        writeToPasteboard(downscaled: downscaled, orContentsOf: url)
+    }
+
+    /// Honors the configured copy resolution: a pixel-sized (72 DPI) NSImage
+    /// so paste targets treat the downscaled capture as a true 1x image.
+    private func writeToPasteboard(downscaled: CGImage?, orContentsOf url: URL) {
+        let image = downscaled.map { NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height)) }
+            ?? NSImage(contentsOf: url)
+        guard let image else { return }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.writeObjects([image])
     }
 
+    nonisolated private static func downscaledPNG(at url: URL, dividedBy scale: CGFloat) -> Data? {
+        downscaledImage(at: url, dividedBy: scale)
+            .flatMap { NSBitmapImageRep(cgImage: $0).representation(using: .png, properties: [:]) }
+    }
+
     /// The capture resampled from Retina down to 1x pixels — high-quality
     /// CPU-only Core Graphics. Returns `nil` when there's nothing to downscale
     /// (already 1x) or the file can't be read; callers fall back to native.
-    private static func downscaledImage(at url: URL, dividedBy scale: CGFloat) -> CGImage? {
+    nonisolated private static func downscaledImage(at url: URL, dividedBy scale: CGFloat) -> CGImage? {
         guard scale > 1,
               let image = NSImage(contentsOf: url),
               let capture = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
@@ -505,4 +542,10 @@ final class ScreenshotService {
         formatter.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
         return formatter.string(from: Date())
     }
+}
+
+/// Carries a CGImage across actors on SDKs that don't yet mark it Sendable;
+/// CGImage is immutable, the box just vouches for it.
+struct SendableImage: @unchecked Sendable {
+    let image: CGImage?
 }

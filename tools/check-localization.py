@@ -9,7 +9,9 @@ Label, Button, Toggle, Picker, Section, LabeledContent, TextField, ColorPicker,
 .help, .accessibilityLabel) — then, per Resources/<lang>.lproj/Localizable.strings,
 reports keys the code uses that the table lacks, and table keys the code no
 longer uses. String interpolations are compared position-insensitively
-(`\\(x)` ↔ `%@` / `%lld`), so the format specifier itself isn't validated.
+(`\\(x)` ↔ `%@` / `%lld`) against the code; within each table, every value
+must use the same specifier types as its key (a `%@` where the key has `%lld`
+crashes or garbles at runtime).
 """
 import pathlib, re, sys
 
@@ -26,13 +28,14 @@ SINGLE = re.compile(
 )
 EXPLICIT_KEY = re.compile(r'String\(localized: "([^"]+)", defaultValue:')
 MULTILINE_START = re.compile(r'(?:String\(localized: |\bText\()"""\s*$')
+SPECIFIER = re.compile(r'%(\d+\$)?(lld|ld|d|@|lf|f|s)')
 INTERP = re.compile(r'\\\((?:[^()]|\([^()]*\))*\)')  # \( ... ) with one nesting level
 
 
 def normalize(key: str) -> str:
     """Collapse interpolations / format specifiers so both sides compare equal."""
     key = INTERP.sub("%", key)
-    key = re.sub(r'%(\d+\$)?(lld|ld|d|@|lf|f|s)', "%", key)
+    key = SPECIFIER.sub("%", key)
     return key.replace('\\"', '"').replace("\\n", "\n")
 
 
@@ -69,26 +72,35 @@ def swift_keys():
     return keys
 
 
-def table_keys(path):
+def table_entries(path):
     text = re.sub(r'/\*.*?\*/', "", path.read_text(), flags=re.S)
-    return {normalize(m.group(1)) for m in re.finditer(r'^"((?:[^"\\]|\\.)*)"\s*=', text, re.M)}
+    return re.findall(r'^"((?:[^"\\]|\\.)*)"\s*=\s*"((?:[^"\\]|\\.)*)"', text, re.M)
+
+
+def specifier_types(text):
+    return sorted(m.group(2) for m in SPECIFIER.finditer(text))
 
 
 def main():
     used = swift_keys()
     failed = False
     for table in sorted(RESOURCES.glob("*.lproj/Localizable.strings")):
-        have = table_keys(table)
+        entries = table_entries(table)
+        have = {normalize(k) for k, _ in entries}
         missing = sorted(k for k in used if k not in have)
         stale = sorted(have - used.keys())
+        mismatched = [(k, v) for k, v in entries if specifier_types(k) != specifier_types(v)]
         rel = table.relative_to(ROOT)
-        if missing or stale:
+        if missing or stale or mismatched:
             failed = True
         for k in missing:
             print(f"{rel}: MISSING  {k!r}   used at {', '.join(used[k])}")
         for k in stale:
             print(f"{rel}: UNUSED   {k!r}")
-        print(f"{rel}: {len(have)} keys, {len(missing)} missing, {len(stale)} unused")
+        for k, v in mismatched:
+            print(f"{rel}: FORMAT   {k!r} → {v!r}   specifier types differ")
+        print(f"{rel}: {len(have)} keys, {len(missing)} missing, {len(stale)} unused, "
+              f"{len(mismatched)} format mismatches")
     sys.exit(1 if failed else 0)
 
 

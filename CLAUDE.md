@@ -66,6 +66,7 @@ Sources/PrtScn/
   EditorView.swift             editor window body + floating tool palette
   EditorController.swift       editor NSWindow + title-bar toolbar; opens .prtscn projects
   ProjectDocument.swift        .prtscn package (image.png + document.json) + Annotation Codable
+  CanvasRecovery.swift         crash snapshots (Application Support/<bundle id>/Recovery) + launch restore
   SettingsStore.swift          @Observable settings, persisted to UserDefaults
   SettingsWindow.swift         AppKit NSSplitViewController settings window (full-height sidebar)
   SettingsView.swift           sidebar panes: General/Capture/Preview/Editor/Hotkeys/About
@@ -73,6 +74,7 @@ Sources/PrtScn/
   Shortcut.swift                key code + modifiers + glyph display
   HotkeyManager.swift          Carbon global hotkey registration
   ShortcutRecorder.swift       click-to-record key field
+Tests/PrtScnTests/            Swift Testing suite (`swift test --disable-sandbox`; Testing ships with the CLT)
 tools/IconGenerator.swift     draws both app icons; see "App icon"
 tools/check-localization.py   diffs the keys the code uses against every .lproj table
 assets/                       README header image

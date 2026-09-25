@@ -20,7 +20,7 @@ enum BlankCanvas {
 
         // Scale 1: one canvas pixel per logical point, so the configured size
         // is both what the window shows at 100% and what the PNG exports.
-        EditorController.shared.show(imageURL: url, captureScale: 1)
+        EditorController.shared.show(imageURL: url, captureScale: 1, saveIfRefused: false)
     }
 
     private static func whiteImage(width: Int, height: Int) -> CGImage? {

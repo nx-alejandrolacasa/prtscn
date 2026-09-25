@@ -8,6 +8,11 @@ let package = Package(
         .executableTarget(
             name: "PrtScn",
             path: "Sources/PrtScn"
-        )
+        ),
+        .testTarget(
+            name: "PrtScnTests",
+            dependencies: ["PrtScn"],
+            path: "Tests/PrtScnTests"
+        ),
     ]
 )
