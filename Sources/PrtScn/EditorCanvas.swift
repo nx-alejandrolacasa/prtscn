@@ -147,6 +147,8 @@ struct EditorCanvas: View {
 
     /// Hit slop in view points.
     private let handleHitRadius: CGFloat = 11
+    /// View-point gap between a shape's stroke and its selection frame.
+    private let selectionPadding: CGFloat = 8
     private let bodyTolerance: CGFloat = 8
     /// How close (view points) to a shape's side the binding dot engages.
     private let bindSnapRadius: CGFloat = 16
@@ -540,13 +542,65 @@ struct EditorCanvas: View {
                                                    width: radius * 2, height: radius * 2)),
                            with: .color(.accentColor.opacity(0.8)), style: StrokeStyle(lineWidth: 1.5))
         }
-        for handle in annotation.handles {
-            let center = fit.toView(handle.point)
+        if let frame = selectionFrame(annotation, fit: fit) {
+            context.stroke(Path(roundedRect: frame, cornerRadius: 2),
+                           with: .color(.accentColor.opacity(0.8)), style: StrokeStyle(lineWidth: 1))
+        }
+        for handle in viewHandles(of: annotation, fit: fit) {
+            let center = handle.point
             context.fill(Path(ellipseIn: CGRect(x: center.x - 5.5, y: center.y - 5.5, width: 11, height: 11)),
                          with: .color(.white))
             context.fill(Path(ellipseIn: CGRect(x: center.x - 4, y: center.y - 4, width: 8, height: 8)),
                          with: .color(.accentColor))
         }
+    }
+
+    /// The padded frame the corner handles sit on (view coords); nil for
+    /// annotations without corner handles.
+    private func selectionFrame(_ annotation: Annotation, fit: CanvasFit) -> CGRect? {
+        guard annotation.handles.contains(where: { cornerDirection($0.handle) != nil }) else { return nil }
+        let r = annotation.boundingRect
+        let inset = selectionInset(annotation, fit: fit)
+        return CGRect(origin: fit.toView(r.origin),
+                      size: CGSize(width: r.width * fit.scale, height: r.height * fit.scale))
+            .insetBy(dx: -inset, dy: -inset)
+    }
+
+    private func selectionInset(_ annotation: Annotation, fit: CanvasFit) -> CGFloat {
+        annotation.lineWidth * fit.scale / 2 + selectionPadding
+    }
+
+    /// Which way a corner handle is pushed out from its true corner.
+    private func cornerDirection(_ handle: ResizeHandle) -> CGPoint? {
+        switch handle {
+        case .topLeft: return CGPoint(x: -1, y: -1)
+        case .topRight: return CGPoint(x: 1, y: -1)
+        case .bottomLeft: return CGPoint(x: -1, y: 1)
+        case .bottomRight: return CGPoint(x: 1, y: 1)
+        case .start, .end, .curve, .cornerH, .cornerV: return nil
+        }
+    }
+
+    /// The handles in view coords, corner handles pushed out onto the padded
+    /// selection frame.
+    private func viewHandles(of annotation: Annotation, fit: CanvasFit) -> [(handle: ResizeHandle, point: CGPoint)] {
+        let inset = selectionInset(annotation, fit: fit)
+        return annotation.handles.map { handle in
+            var point = fit.toView(handle.point)
+            if let direction = cornerDirection(handle.handle) {
+                point.x += direction.x * inset
+                point.y += direction.y * inset
+            }
+            return (handle.handle, point)
+        }
+    }
+
+    /// Where the true corner is for a cursor holding a pushed-out corner handle.
+    private func cornerPoint(under image: CGPoint, handle: ResizeHandle, of annotation: Annotation,
+                             fit: CanvasFit) -> CGPoint {
+        guard let direction = cornerDirection(handle) else { return image }
+        let inset = selectionInset(annotation, fit: fit) / fit.scale
+        return CGPoint(x: image.x - direction.x * inset, y: image.y - direction.y * inset)
     }
 
     /// A thin outline around each member of a multi-selection — no handles;
@@ -717,6 +771,9 @@ struct EditorCanvas: View {
                     default:
                         let anchor = current.anchor ?? current.originalStart
                         var p = image
+                        if let shape = model.annotations.first(where: { $0.id == id }) {
+                            p = cornerPoint(under: image, handle: handle, of: shape, fit: fit)
+                        }
                         if let kind, squareSnaps(kind), !optionDown { p = diagonalMagnet(p, relativeTo: anchor) }
                         model.setPoints(id: id, start: anchor, end: p)
                     }
@@ -777,17 +834,18 @@ struct EditorCanvas: View {
             return DragSession(kind: .finishingEdit, pressImage: pressImage)
         }
 
-        // The counter tool always stamps — clicking on top of a figure adds
-        // the next number there instead of selecting it. Repositioning a
-        // badge is the select tool's job.
-        if model.tool == .counter, !toggling {
+        // A drawing tool always draws: pressing on top of a figure adds a new
+        // one there instead of selecting it, so several lines can start from
+        // one point. Selecting and moving is the select tool's job.
+        let drawing = model.tool != .select && !toggling
+        if drawing, model.tool == .counter {
             model.selectedID = nil
             return DragSession(kind: .placeCounter, pressImage: pressImage)
         }
 
         // 1. A handle of the currently selected annotation.
-        if let selected = model.selectedAnnotation {
-            for handle in selected.handles where distance(pressView, fit.toView(handle.point)) <= handleHitRadius {
+        if !drawing, let selected = model.selectedAnnotation {
+            for handle in viewHandles(of: selected, fit: fit) where distance(pressView, handle.point) <= handleHitRadius {
                 return DragSession(kind: .resize(selected.id, handle.handle), pressImage: pressImage,
                                    originalStart: selected.start, originalEnd: selected.end,
                                    anchor: selected.anchor(for: handle.handle))
@@ -795,22 +853,10 @@ struct EditorCanvas: View {
         }
 
         // 2. With the line tool armed, a press near a bindable shape's side
-        // starts a line bound there — taking precedence over selecting the
-        // shape underneath, since the aim is clearly to connect it. Pressing
-        // deeper inside the shape still selects it. But a press right on a
-        // dot that already holds a line end grabs that end to re-route it —
-        // a second line from the same anchor is still possible by pressing
-        // elsewhere along the side.
+        // starts a line bound there.
         if model.tool == .line, !toggling, !NSEvent.modifierFlags.contains(.option),
            let candidate = bindingCandidate(at: pressImage, in: model.annotations,
                                             tolerance: bindSnapRadius / fit.scale) {
-            if distance(pressView, fit.toView(candidate.anchor)) <= handleHitRadius,
-               let bound = boundLineEnd(at: candidate.binding) {
-                model.selectedID = bound.line.id
-                return DragSession(kind: .resize(bound.line.id, bound.handle),
-                                   pressImage: pressImage,
-                                   originalStart: bound.line.start, originalEnd: bound.line.end)
-            }
             model.selectedID = nil
             let start = boundEndpoint(anchor: candidate.anchor, side: candidate.binding.side,
                                       lineWidth: model.lineWidth * model.creationSizeScale)
@@ -824,7 +870,7 @@ struct EditorCanvas: View {
         // the line (a plain click just selects — the resize only mutates once
         // the drag moves).
         let tolerance = bodyTolerance / fit.scale
-        if let line = model.annotations.last(where: {
+        if !drawing, let line = model.annotations.last(where: {
             $0.kind == .line && $0.bodyContains(pressImage, tolerance: tolerance)
         }), let dot = line.bendDots.first(where: {
             distance(pressView, fit.toView($0.point)) <= handleHitRadius
@@ -838,7 +884,7 @@ struct EditorCanvas: View {
         // adds it to / removes it from the selection; a plain press selects it
         // (keeping a multi-selection it's already part of) and drags everything
         // selected together.
-        if let hit = model.annotations.last(where: { $0.bodyContains(pressImage, tolerance: tolerance) }) {
+        if !drawing, let hit = model.annotations.last(where: { $0.bodyContains(pressImage, tolerance: tolerance) }) {
             if toggling {
                 if model.selectedIDs.contains(hit.id) {
                     model.selectedIDs.remove(hit.id)
@@ -874,15 +920,6 @@ struct EditorCanvas: View {
 
     private func distance(_ a: CGPoint, _ b: CGPoint) -> CGFloat {
         hypot(a.x - b.x, a.y - b.y)
-    }
-
-    /// The topmost line with an end bound to exactly this shape side, if any.
-    private func boundLineEnd(at binding: ShapeBinding) -> (line: Annotation, handle: ResizeHandle)? {
-        for line in model.annotations.reversed() where line.kind == .line {
-            if line.startBinding == binding { return (line, .start) }
-            if line.endBinding == binding { return (line, .end) }
-        }
-        return nil
     }
 
     /// Trackpad pinch: continuous zoom, live-updating the title-bar percentage.
@@ -972,8 +1009,8 @@ struct EditorCanvas: View {
         let point = fit.toImage(location, clampedTo: model.pixelSize)
         let tolerance = bodyTolerance / fit.scale
         let over = model.annotations.contains { $0.bodyContains(point, tolerance: tolerance) }
-            || model.selectedAnnotation?.handles.contains {
-                distance(location, fit.toView($0.point)) <= handleHitRadius
+            || model.selectedAnnotation.map { viewHandles(of: $0, fit: fit) }?.contains {
+                distance(location, $0.point) <= handleHitRadius
             } == true
         if over != hoverMovable { hoverMovable = over }
     }
@@ -1174,6 +1211,7 @@ struct EditorCanvas: View {
             if annotation.kind == .text {
                 let origin = fit.toView(annotation.start)
                 editingField(annotation: annotation, id: id, font: font, centered: false)
+                    .id(fit.scale)
                     .frame(maxWidth: max(fit.imageRect.maxX - origin.x, 80), alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
                     .offset(x: origin.x, y: origin.y)
@@ -1186,13 +1224,15 @@ struct EditorCanvas: View {
                 // the text visually anchored on the label point, and the
                 // invisible surplus draws nothing. Only the vertical offset is
                 // live: it re-centers the block when a newline changes the
-                // line count.
+                // line count. A resize changes the scale, so the field is
+                // rebuilt (`.id`) at the new frame and font instead.
                 let center = fit.toView(annotation.labelCenter)
                 let width = max(fit.imageRect.width, 300)
                 let lineHeight = textRenderSize(" ", fontSize: annotation.fontSize,
                                                 design: annotation.fontDesign).height * fit.scale
                 let lines = CGFloat(max(model.editingText.components(separatedBy: .newlines).count, 1))
                 editingField(annotation: annotation, id: id, font: font, centered: true)
+                    .id(fit.scale)
                     .frame(width: width)
                     .fixedSize(horizontal: false, vertical: true)
                     .offset(x: center.x - width / 2, y: center.y - lines * lineHeight / 2)

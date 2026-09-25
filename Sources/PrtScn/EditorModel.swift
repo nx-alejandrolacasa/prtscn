@@ -389,6 +389,7 @@ final class EditorModel {
         snapshot()
         annotations.append(annotation)
         selectedID = annotation.id
+        tool = .select
     }
 
     /// Updates an annotation's endpoints (live move/resize). The caller takes
@@ -809,6 +810,7 @@ final class EditorModel {
         editingTextID = nil
         let wasNew = editingIsNew
         editingIsNew = false
+        defer { if wasNew, tool == .text { tool = .select } }
         let originalText = editingOriginalText
         let undoDepth = editingUndoDepth
         editingOriginalText = nil
