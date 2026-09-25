@@ -67,7 +67,7 @@ struct CanvasFit {
 private struct DragSession {
     enum Kind {
         case draw
-        /// A shift/⌘-click that only toggled the selection — nothing to drag.
+        /// A ⌘-click that only toggled the selection — nothing to drag.
         case idle
         /// A select-tool drag on empty space — rubber-band selection.
         case marquee
@@ -151,6 +151,8 @@ struct EditorCanvas: View {
     /// Whether the cursor is over something the select tool could grab — it
     /// shows an open hand there, a plain arrow everywhere else.
     @State private var hoverMovable = false
+    /// Whether this Shift hold has already stepped down a stack of figures.
+    @State private var isCyclingStack = false
 
     /// Hit slop in view points.
     private let handleHitRadius: CGFloat = 11
@@ -209,6 +211,9 @@ struct EditorCanvas: View {
             // frame would then shift the whole stack by half the overflow.
             .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
             .onDeleteCommand { model.deleteSelected() }
+            .onModifierKeysChanged(mask: .shift) { _, keys in
+                if keys.isEmpty { isCyclingStack = false }
+            }
             // The model clamps zoom panning against the canvas's actual size.
             .onChange(of: geo.size, initial: true) { _, size in model.setCanvasSize(size) }
             .onChange(of: isDragging) { _, dragging in model.isDragInProgress = dragging }
@@ -843,9 +848,8 @@ struct EditorCanvas: View {
     /// Decides, on press, what this drag will do.
     private func makeSession(pressView: CGPoint, fit: CanvasFit) -> DragSession {
         let pressImage = fit.toImage(pressView, clampedTo: model.pixelSize)
-        // Shift/⌘-click toggles annotations in and out of the selection.
-        let toggling = NSEvent.modifierFlags.contains(.shift)
-            || NSEvent.modifierFlags.contains(.command)
+        let cyclingStack = NSEvent.modifierFlags.contains(.shift)
+        let toggling = cyclingStack || NSEvent.modifierFlags.contains(.command)
 
         // Picking mode takes over every click on the canvas until it commits
         // or is cancelled — it doesn't select/move/draw annotations.
@@ -904,11 +908,17 @@ struct EditorCanvas: View {
                                originalStart: line.start, originalEnd: line.end)
         }
 
-        // 4. The body of any annotation (topmost = last drawn). A toggle-click
-        // adds it to / removes it from the selection; a plain press selects it
-        // (keeping a multi-selection it's already part of) and drags everything
-        // selected together.
+        // 4. The body of any annotation (topmost = last drawn). Shift-click
+        // steps down the stack under the pointer; ⌘-click adds it to / removes
+        // it from the selection; a plain press selects it (keeping a
+        // multi-selection it's already part of) and drags everything selected
+        // together.
         if !drawing, let hit = model.annotations.last(where: { $0.bodyContains(pressImage, tolerance: tolerance) }) {
+            if cyclingStack {
+                let chosen = figureBehindSelection(at: pressImage, tolerance: tolerance)
+                return DragSession(kind: .move(chosen.id), pressImage: pressImage,
+                                   originalStart: chosen.start, originalEnd: chosen.end)
+            }
             if toggling {
                 if model.selectedIDs.contains(hit.id) {
                     model.selectedIDs.remove(hit.id)
@@ -940,6 +950,17 @@ struct EditorCanvas: View {
         default: kind = .draw
         }
         return DragSession(kind: kind, pressImage: pressImage)
+    }
+
+    /// The first Shift-click of a hold picks the figure behind the topmost
+    /// one; each further click goes one deeper, stopping at the bottom.
+    private func figureBehindSelection(at point: CGPoint, tolerance: CGFloat) -> Annotation {
+        let stack = model.annotations.reversed().filter { $0.bodyContains(point, tolerance: tolerance) }
+        let current = isCyclingStack ? stack.firstIndex { $0.id == model.selectedID } : nil
+        let chosen = stack[min((current ?? 0) + 1, stack.count - 1)]
+        isCyclingStack = true
+        model.selectedID = chosen.id
+        return chosen
     }
 
     private func distance(_ a: CGPoint, _ b: CGPoint) -> CGFloat {
