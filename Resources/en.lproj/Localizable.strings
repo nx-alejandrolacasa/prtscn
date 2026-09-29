@@ -226,7 +226,8 @@
 /* Editor — title bar */
 "Copy (⌘C)" = "Copy (⌘C)";
 "Export as PNG (⌘E)" = "Export as PNG (⌘E)";
-"Save as a project — keeps the shapes editable (⌘S)" = "Save as a project — keeps the shapes editable (⌘S)";
+"Save Project (⌘S)" = "Save Project (⌘S)";
+"Save Project As… (⇧⌘S)" = "Save Project As… (⇧⌘S)";
 "Copy text with OCR (⌘T)" = "Copy text with OCR (⌘T)";
 "Share" = "Share";
 "Zoom" = "Zoom";

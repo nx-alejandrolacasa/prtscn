@@ -30,7 +30,7 @@ enum PreviewAction: String, CaseIterable, Identifiable {
         case .edit: "pencil.and.outline"
         case .copy: "doc.on.doc"
         case .ocr: "text.viewfinder"
-        case .save: "square.and.arrow.up"
+        case .save: "square.and.arrow.down"
         case .pin: "pin"
         case .discard: "trash"
         }
