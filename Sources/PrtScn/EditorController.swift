@@ -610,6 +610,7 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
     private static let zoom = NSToolbarItem.Identifier("PrtScn.zoom")
     private static let copy = NSToolbarItem.Identifier("PrtScn.copy")
     private static let export = NSToolbarItem.Identifier("PrtScn.export")
+    private static let save = NSToolbarItem.Identifier("PrtScn.save")
     private static let copyText = NSToolbarItem.Identifier("PrtScn.copyText")
     private static let share = NSToolbarItem.Identifier("PrtScn.share")
 
@@ -619,11 +620,11 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
 
     private var ordered: [NSToolbarItem.Identifier] {
         // Crop + Pixelate + Eyedropper (all act on the image itself) sit on the
-        // leading side, with the zoom −/+ group set apart next to them; a space
-        // sets Share apart from the Copy/Export/Copy Text group on the
-        // trailing side.
+        // leading side, with the zoom −/+ group set apart next to them; on the
+        // trailing side, spaces split the Copy/Export/Copy Text group from
+        // project Save and from Share.
         [Self.crop, Self.pixelate, Self.eyedropper, .space, Self.zoom, .flexibleSpace,
-         Self.copy, Self.export, Self.copyText, .space, Self.share]
+         Self.copy, Self.export, Self.copyText, .space, Self.save, .space, Self.share]
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { ordered }
@@ -671,8 +672,8 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
             return item
         }
 
-        if id == Self.export {
-            return exportItem(id)
+        if id == Self.save {
+            return saveItem(id)
         }
 
         let spec: (symbol: String, label: String, tip: String, action: Selector)
@@ -684,7 +685,9 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
         case Self.eyedropper:
             spec = ("eyedropper", String(localized: "Pick Color"), String(localized: "Pick Color"), #selector(eyedropperAction))
         case Self.copy:
-            spec = ("doc.on.doc", String(localized: "Copy"), String(localized: "Copy (⌘C)"), #selector(copyAction))
+            spec = ("sparkle.text.clipboard", String(localized: "Copy"), String(localized: "Copy (⌘C)"), #selector(copyAction))
+        case Self.export:
+            spec = ("square.and.arrow.down", String(localized: "Export"), String(localized: "Export as PNG (⌘E)"), #selector(exportAction))
         case Self.copyText:
             spec = ("text.viewfinder", String(localized: "OCR"), String(localized: "Copy text with OCR (⌘T)"), #selector(copyTextAction))
         default:
@@ -701,19 +704,21 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
         return item
     }
 
-    /// Click exports the PNG; the dropdown holds the editable-project saves.
-    private func exportItem(_ id: NSToolbarItem.Identifier) -> NSToolbarItem {
+    /// Click saves the project; the dropdown offers Save As and Open.
+    private func saveItem(_ id: NSToolbarItem.Identifier) -> NSToolbarItem {
         let menu = NSMenu()
         menu.addItem(withTitle: String(localized: "Save Project (⌘S)"), action: #selector(saveAction), keyEquivalent: "").target = self
         menu.addItem(withTitle: String(localized: "Save Project As… (⇧⌘S)"), action: #selector(saveAsAction), keyEquivalent: "").target = self
+        menu.addItem(.separator())
+        menu.addItem(withTitle: String(localized: "Open Project…"), action: #selector(openProjectAction), keyEquivalent: "").target = self
 
         let item = NSMenuToolbarItem(itemIdentifier: id)
-        item.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: String(localized: "Export"))
-        item.label = String(localized: "Export")
-        item.toolTip = String(localized: "Export as PNG (⌘E)")
+        item.image = NSImage(systemSymbolName: "folder", accessibilityDescription: String(localized: "Save"))
+        item.label = String(localized: "Save")
+        item.toolTip = String(localized: "Save as a project — keeps the shapes editable (⌘S)")
         item.menu = menu
         item.target = self
-        item.action = #selector(exportAction)
+        item.action = #selector(saveAction)
         return item
     }
 
@@ -747,6 +752,7 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
     @objc private func exportAction() { model.export() }
     @objc private func saveAction() { model.saveProject() }
     @objc private func saveAsAction() { model.saveProjectAs() }
+    @objc private func openProjectAction() { EditorController.shared.openProjectWithPanel() }
     @objc private func copyTextAction() { model.copyText() }
 
     // MARK: - Share
@@ -773,3 +779,4 @@ private final class ZoomSegmentedControl: NSSegmentedControl {
         super.mouseDown(with: event)
     }
 }
+

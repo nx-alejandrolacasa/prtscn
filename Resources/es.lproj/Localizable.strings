@@ -224,6 +224,7 @@
 "Export as PNG (⌘E)" = "Exportar como PNG (⌘E)";
 "Save Project (⌘S)" = "Guardar proyecto (⌘S)";
 "Save Project As… (⇧⌘S)" = "Guardar proyecto como… (⇧⌘S)";
+"Save as a project — keeps the shapes editable (⌘S)" = "Guardar como proyecto; las formas siguen siendo editables (⌘S)";
 "Copy text with OCR (⌘T)" = "Copiar el texto con OCR (⌘T)";
 "Share" = "Compartir";
 "Zoom" = "Zoom";
