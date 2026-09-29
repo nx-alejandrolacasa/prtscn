@@ -685,9 +685,9 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
         case Self.eyedropper:
             spec = ("eyedropper", String(localized: "Pick Color"), String(localized: "Pick Color"), #selector(eyedropperAction))
         case Self.copy:
-            spec = ("sparkle.text.clipboard", String(localized: "Copy"), String(localized: "Copy (⌘C)"), #selector(copyAction))
+            spec = ("document.on.document", String(localized: "Copy"), String(localized: "Copy (⌘C)"), #selector(copyAction))
         case Self.export:
-            spec = ("square.and.arrow.down", String(localized: "Export"), String(localized: "Export as PNG (⌘E)"), #selector(exportAction))
+            spec = ("arrow.down.document", String(localized: "Export"), String(localized: "Export as PNG (⌘E)"), #selector(exportAction))
         case Self.copyText:
             spec = ("text.viewfinder", String(localized: "OCR"), String(localized: "Copy text with OCR (⌘T)"), #selector(copyTextAction))
         default:

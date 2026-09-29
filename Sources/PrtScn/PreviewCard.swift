@@ -225,7 +225,7 @@ struct ToolbarButton: View {
     var body: some View {
         Button(action: perform) {
             Image(systemName: action.systemImage)
-                .font(.system(size: action.iconPointSize, weight: .medium))
+                .font(action.iconFont)
                 .foregroundStyle(iconStyle)
                 .frame(width: 32, height: 32)
                 .background(

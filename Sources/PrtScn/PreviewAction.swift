@@ -27,25 +27,26 @@ enum PreviewAction: String, CaseIterable, Identifiable {
     /// SF Symbol name for the toolbar button.
     var systemImage: String {
         switch self {
-        case .edit: "scribble.variable"
-        case .copy: "sparkle.text.clipboard"
+        case .edit: "scribble"
+        case .copy: "document.on.document"
         case .ocr: "text.viewfinder"
-        case .save: "square.and.arrow.down"
+        case .save: "arrow.down.document"
         case .pin: "pin"
         case .discard: "trash"
         }
     }
 
-    /// Point size that makes `systemImage` draw 18pt tall: at one shared
-    /// size the glyphs' ink heights range from 15.5pt to 19pt.
-    var iconPointSize: CGFloat {
+    /// Size and weight that make `systemImage` draw 18pt tall with a ~1.6pt
+    /// stroke: at one shared size and weight the glyphs' heights and
+    /// strokes both visibly differ.
+    var iconFont: Font {
         switch self {
-        case .edit: 18.5
-        case .copy: 15
-        case .ocr: 18
-        case .save: 17
-        case .pin: 15.5
-        case .discard: 16
+        case .edit: .system(size: 19, weight: .regular)
+        case .copy: .system(size: 14, weight: .semibold)
+        case .ocr: .system(size: 18, weight: .regular)
+        case .save: .system(size: 16.5, weight: .medium)
+        case .pin: .system(size: 15, weight: .semibold)
+        case .discard: .system(size: 16, weight: .semibold)
         }
     }
 
