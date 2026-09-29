@@ -289,11 +289,11 @@ private struct PinnedCard: View {
     /// buttons so they also fire while the menu is closed.
     @ViewBuilder
     private var menuItems: some View {
-        Button("Copy Image", systemImage: "doc.on.doc", action: onCopy)
+        Button("Copy Image", systemImage: "sparkle.text.clipboard", action: onCopy)
             .keyboardShortcut("c", modifiers: .command)
         Button("Save", systemImage: "square.and.arrow.down", action: onSave)
             .keyboardShortcut("s", modifiers: .command)
-        Button("Edit…", systemImage: "pencil.and.outline", action: onEdit)
+        Button("Edit…", systemImage: "scribble.variable", action: onEdit)
             .keyboardShortcut(.return, modifiers: [])
         Divider()
         Button("Close Pin", systemImage: "pin.slash", action: onClose)

@@ -24,7 +24,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .general: "gearshape.fill"
         case .capture: "camera.fill"
         case .preview: "photo.fill.on.rectangle.fill"
-        case .editor: "pencil.and.outline"
+        case .editor: "scribble.variable"
         case .hotkeys: "keyboard.fill"
         case .about: "info"
         }
