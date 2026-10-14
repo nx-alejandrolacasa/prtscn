@@ -44,9 +44,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let event = NSApp.currentEvent, event.type == .keyDown,
               event.modifierFlags.contains(.command),
               event.charactersIgnoringModifiers?.lowercased() == "q",
-              let window = NSApp.keyWindow, window.styleMask.contains(.closable)
+              let window = NSApp.keyWindow
         else { return EditorController.shared.confirmCloseForQuit() ? .terminateNow : .terminateCancel }
-        window.performClose(nil)
+        if EditorController.shared.owns(window) {
+            EditorController.shared.requestClose()
+        } else if window.styleMask.contains(.closable) {
+            window.performClose(nil)
+        } else {
+            return EditorController.shared.confirmCloseForQuit() ? .terminateNow : .terminateCancel
+        }
         return .terminateCancel
     }
 }

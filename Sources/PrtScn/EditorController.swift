@@ -4,15 +4,19 @@ import SwiftUI
 
 private let log = Logger(subsystem: "com.alejandrolacasa.prtscn", category: "EditorController")
 
-/// Owns the (single, reused) editor window: builds it, sizes it to the capture,
-/// centers it, and tears it down — the larger, titled sibling of
-/// `PreviewController`.
+/// Owns the (single, reused) editor window. Captures open it as a real
+/// full-screen Space — the blurred wallpaper behind, the capture centered at
+/// 1:1, the tools floating along the top and bottom edges; blank canvases and
+/// projects open it as a normal window. The green button and the bar's
+/// exit-full-screen button move between the two.
 @MainActor
 final class EditorController: NSObject, NSWindowDelegate {
     static let shared = EditorController()
 
     private var window: NSWindow?
     private var model: EditorModel?
+    /// The blurred desktop picture, shown only while full screen.
+    private weak var wallpaperView: NSView?
     /// The size readout's two lines, kept to live-update while a crop is
     /// selected and after one is applied.
     private weak var sizeLabel: NSTextField?
@@ -36,9 +40,11 @@ final class EditorController: NSObject, NSWindowDelegate {
     /// file): the editor reuses it as its working file and deletes it on close.
     /// A capture the open editor can't make way for is saved to the save
     /// folder rather than lost, unless `saveIfRefused` is off.
-    func show(imageURL: URL, captureScale: CGFloat, saveIfRefused: Bool = true) {
+    func show(imageURL: URL, captureScale: CGFloat, saveIfRefused: Bool = true,
+              fullScreen: Bool = true) {
         guard let image = NSImage(contentsOf: imageURL) else { return }
-        if !present(EditorModel(image: image, workingURL: imageURL, captureScale: captureScale)) {
+        if !present(EditorModel(image: image, workingURL: imageURL, captureScale: captureScale),
+                    fullScreen: fullScreen) {
             if saveIfRefused { _ = ScreenshotService.shared.save(imageURL, captureScale: captureScale) }
             ScreenshotService.shared.cleanup(imageURL)
         }
@@ -103,7 +109,7 @@ final class EditorController: NSObject, NSWindowDelegate {
 
     /// Returns whether `model` made it on screen; when refused, its working
     /// file is the caller's to deal with.
-    private func present(_ model: EditorModel) -> Bool {
+    private func present(_ model: EditorModel, fullScreen: Bool = false) -> Bool {
         // The open editor is mid-conversation (a save panel or the unsaved-
         // changes sheet); it can't be torn down under it.
         if let window, window.attachedSheet != nil {
@@ -127,11 +133,6 @@ final class EditorController: NSObject, NSWindowDelegate {
             self.close()
         }
 
-        let hosting = NSHostingController(rootView: EditorView(model: model))
-        // Don't let the hosting controller resize the window to the SwiftUI
-        // content's fitting size — we set the window to the capture's 1:1 size
-        // and the content must fill it (otherwise the image scales down to fit).
-        hosting.sizingOptions = []
         let size = Self.windowSize(for: model)
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: size),
@@ -143,41 +144,57 @@ final class EditorController: NSObject, NSWindowDelegate {
         // No title text in the title bar itself — the brand lives in the menu
         // bar, and hiding it lets the tool groups hug the traffic lights.
         window.titleVisibility = .hidden
-        window.contentViewController = hosting
-        // Assigning the content view controller makes AppKit resize the window to
-        // the SwiftUI view's fitting size (the minimum width), so force the
-        // capture's 1:1 size back afterwards.
-        window.setContentSize(size)
-        window.contentMinSize = Self.minContentSize   // never shrink past the buttons
+        window.contentMinSize = Self.minContentSize
         window.isReleasedWhenClosed = false
+        window.collectionBehavior = [.fullScreenPrimary]
         window.delegate = self
-        window.center()
 
-        // A real NSToolbar so the system draws the action buttons in its current
-        // design language — Liquid Glass capsules on macOS 26 — rather than the
-        // flat custom controls a titlebar-accessory of SwiftUI buttons would give.
+        // Full screen shows just the wallpaper, blurred — no other windows:
+        // the desktop picture (captured, so dynamic wallpapers work) under an
+        // in-window full-screen-UI material, with the SwiftUI editor laid over
+        // both. Windowed, the picture is hidden and the material reads as a
+        // plain window background.
+        let bounds = window.contentView?.bounds ?? .zero
+        let wallpaper = NSView(frame: bounds)
+        wallpaper.wantsLayer = true
+        wallpaper.layer?.contentsGravity = .resizeAspectFill
+        wallpaper.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        wallpaper.autoresizingMask = [.width, .height]
+        let blur = NSVisualEffectView(frame: bounds)
+        blur.material = .fullScreenUI
+        blur.blendingMode = .withinWindow
+        blur.state = .active
+        blur.autoresizingMask = [.width, .height]
+        let hosting = NSHostingView(rootView: EditorView(model: model))
+        // Never let the hosting view size the window to the SwiftUI fitting
+        // size — the content fills the screen.
+        hosting.sizingOptions = []
+        hosting.frame = bounds
+        hosting.autoresizingMask = [.width, .height]
+        wallpaper.isHidden = true
+        window.contentView?.addSubview(wallpaper)
+        window.contentView?.addSubview(blur)
+        window.contentView?.addSubview(hosting)
+
+        // Windowed, the tools live in a real NSToolbar so the system draws
+        // them in its current design language; full screen hides it in
+        // favor of the floating glass bar.
         let toolbarDelegate = EditorToolbarDelegate(model: model)
         let toolbar = NSToolbar(identifier: "EditorToolbar")
         toolbar.delegate = toolbarDelegate
         toolbar.displayMode = .iconOnly
         window.toolbar = toolbar
         window.toolbarStyle = .unified
+        toolbar.isVisible = !fullScreen
         // Attaching the toolbar changes the title-bar height, and AppKit's
-        // frame math then inflates a content size set before it (the window
-        // opened ~32pt too tall, letterboxing the capture). Re-assert the
-        // content size now that the final title-bar height is known.
+        // frame math then inflates a content size set before it. Re-assert
+        // the content size now that the final title-bar height is known.
         window.setContentSize(size)
         window.center()
 
-        // Resize the window to fit the image after a crop.
-        model.onGeometryChange = { [weak window, weak model] in
-            guard let window, let model else { return }
-            window.setContentSize(Self.windowSize(for: model))
-            window.center()
-        }
-
         self.window = window
         self.model = model
+        self.wallpaperView = wallpaper
         self.toolbarDelegate = toolbarDelegate
         model.hostWindow = window
         observeUnsavedChanges()
@@ -197,10 +214,12 @@ final class EditorController: NSObject, NSWindowDelegate {
             let consumed: Bool
             if event.type == .keyDown {
                 let key = event.specialKey?.rawValue
+                let escape = event.keyCode == 53
                 let shift = event.modifierFlags.contains(.shift)
                 let command = event.modifierFlags.contains(.command)
                 consumed = MainActor.assumeIsolated {
-                    Self.shared.handleReturnKey(key: key, windowID: windowID, command: command)
+                    Self.shared.handleEscape(escape, windowID: windowID)
+                        || Self.shared.handleReturnKey(key: key, windowID: windowID, command: command)
                         || Self.shared.handleArrowKey(key: key, windowID: windowID, shift: shift)
                 }
             } else if event.type == .scrollWheel {
@@ -236,6 +255,15 @@ final class EditorController: NSObject, NSWindowDelegate {
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
+        if fullScreen {
+            window.toggleFullScreen(nil)
+            return finishPresenting(window)
+        }
+        window.alphaValue = 0
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.25
+            window.animator().alphaValue = 1
+        }
 
         // The hand-back has no fixed timing — it can land later than any
         // runloop-turn deferral — and modern activation is cooperative, so a
@@ -265,10 +293,13 @@ final class EditorController: NSObject, NSWindowDelegate {
             }
             if let window, window.level == .floating { window.level = .normal }
         }
+        return finishPresenting(window)
+    }
 
-        // Deferred a runloop turn: the readout anchors to the zoom control's
-        // view, which AppKit only installs in the window hierarchy once the
-        // title bar has been laid out — synchronously it isn't there yet.
+    /// Deferred a runloop turn: the readout anchors to the zoom control's
+    /// view, which AppKit only installs in the window hierarchy once the
+    /// title bar has been laid out — synchronously it isn't there yet.
+    private func finishPresenting(_ window: NSWindow) -> Bool {
         DispatchQueue.main.async { [weak self] in
             guard let self, let window = self.window, let model = self.model else { return }
             NSApp.activate()
@@ -278,85 +309,36 @@ final class EditorController: NSObject, NSWindowDelegate {
         return true
     }
 
-    /// Consumes right-mouse events over the editor's content while zoomed in,
-    /// turning the drag into a pan (with a grabbing-hand cursor). Returns
-    /// whether the event was consumed.
-    private func handlePan(type: NSEvent.EventType, windowID: ObjectIdentifier?,
-                           location: NSPoint, dx: CGFloat, dy: CGFloat) -> Bool {
-        guard let window, let model, windowID == ObjectIdentifier(window),
-              model.canPan else { return false }
-        switch type {
-        case .rightMouseDown:
-            guard let content = window.contentView,
-                  content.bounds.contains(content.convert(location, from: nil))
-            else { return false }
-            isPanning = true
-            NSCursor.closedHand.set()
-        case .rightMouseDragged:
-            guard isPanning else { return false }
-            model.panBy(dx: dx, dy: dy)
-        default:
-            guard isPanning else { return false }
-            isPanning = false
-            NSCursor.arrow.set()
+    // MARK: - Full screen
+
+    /// ⌃⌘F and the bar's exit button — the green button is the other way in.
+    func toggleFullScreen() { window?.toggleFullScreen(nil) }
+
+    func windowWillEnterFullScreen(_ notification: Notification) {
+        window?.toolbar?.isVisible = false
+        sizeLabel?.superview?.isHidden = true
+        guard let wallpaperView else { return }
+        wallpaperView.isHidden = false
+        guard wallpaperView.layer?.contents == nil else { return }
+        let screen = window?.screen
+        Task { [weak wallpaperView] in
+            guard let image = await ScreenshotService.currentWallpaperImage(of: screen) else { return }
+            wallpaperView?.layer?.contents = image
         }
-        return true
     }
 
-    /// Return inserts a line break while a text annotation is being typed
-    /// into — only Esc (or clicking away) commits. The field editor treats a
-    /// bare Return as "submit", so it's told to insert the newline directly.
-    private func handleReturnKey(key: Int?, windowID: ObjectIdentifier?, command: Bool) -> Bool {
-        guard let window, let model, windowID == ObjectIdentifier(window),
-              !command, model.editingTextID != nil, let key,
-              [.carriageReturn, .enter].contains(NSEvent.SpecialKey(rawValue: key)),
-              let editor = window.firstResponder as? NSTextView else { return false }
-        editor.insertNewlineIgnoringFieldEditor(nil)
-        return true
-    }
+    func windowDidEnterFullScreen(_ notification: Notification) { model?.isFullScreen = true }
 
-    /// Arrow keys nudge the selected annotations — one point per press, ten
-    /// with Shift. Handled here rather than with SwiftUI keyboard shortcuts
-    /// because those fire for a plain arrow whatever the modifiers, so the
-    /// Shift-modified variant never gets its own step. Returns whether the
-    /// event was consumed — an arrow that moves nothing (no selection, or a
-    /// text annotation being typed into) falls through to the text caret.
-    private func handleArrowKey(key: Int?, windowID: ObjectIdentifier?, shift: Bool) -> Bool {
-        guard let window, let model, windowID == ObjectIdentifier(window),
-              let key else { return false }
-        let step: (dx: CGFloat, dy: CGFloat)
-        switch NSEvent.SpecialKey(rawValue: key) {
-        case .leftArrow: step = (-1, 0)
-        case .rightArrow: step = (1, 0)
-        case .upArrow: step = (0, -1)
-        case .downArrow: step = (0, 1)
-        default: return false
+    func windowDidExitFullScreen(_ notification: Notification) {
+        model?.isFullScreen = false
+        wallpaperView?.isHidden = true
+        window?.toolbar?.isVisible = true
+        sizeLabel?.superview?.isHidden = false
+        guard sizeLabel == nil, let window else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let model = self.model else { return }
+            self.installSizeReadout(in: window, model: model)
         }
-        return model.nudgeSelected(dx: step.dx, dy: step.dy, coarse: shift)
-    }
-
-    /// Scrolling moves the capture (image tracks the gesture, like the
-    /// right-click drag — `scrollingDelta` already honors the user's natural-
-    /// scrolling preference, and momentum events keep flowing through for
-    /// free inertia); ⌘-scrolling zooms about the canvas center, the same
-    /// clamped path the pinch uses. Returns whether the event was consumed.
-    private func handleScroll(windowID: ObjectIdentifier?, location: NSPoint,
-                              dx: CGFloat, dy: CGFloat, precise: Bool,
-                              zooming: Bool) -> Bool {
-        guard let window, let model, windowID == ObjectIdentifier(window),
-              let content = window.contentView,
-              content.bounds.contains(content.convert(location, from: nil))
-        else { return false }
-        if zooming {
-            // Trackpads report pixel deltas; a wheel notch reports whole
-            // "lines" and needs amplifying to feel comparable.
-            let step = precise ? dy : dy * 12
-            model.setZoom(model.zoom * pow(1.004, step))
-            return true
-        }
-        guard model.canPan else { return false }   // fitted or smaller — nothing to pan
-        model.panBy(dx: dx, dy: dy)
-        return true
     }
 
     /// The image-size readout: the capture's pixel dimensions over a small
@@ -451,27 +433,130 @@ final class EditorController: NSObject, NSWindowDelegate {
 
     @objc private func copySizeAction() { model?.copySize() }
 
-    func close() {
-        model?.close()      // cleans up the temp file (guarded against re-entry)
-        window?.orderOut(nil)
-        teardown()
+    /// Consumes right-mouse events over the editor's content while zoomed in,
+    /// turning the drag into a pan (with a grabbing-hand cursor). Returns
+    /// whether the event was consumed.
+    private func handlePan(type: NSEvent.EventType, windowID: ObjectIdentifier?,
+                           location: NSPoint, dx: CGFloat, dy: CGFloat) -> Bool {
+        guard let window, let model, windowID == ObjectIdentifier(window),
+              model.canPan else { return false }
+        switch type {
+        case .rightMouseDown:
+            guard let content = window.contentView,
+                  content.bounds.contains(content.convert(location, from: nil))
+            else { return false }
+            isPanning = true
+            NSCursor.closedHand.set()
+        case .rightMouseDragged:
+            guard isPanning else { return false }
+            model.panBy(dx: dx, dy: dy)
+        default:
+            guard isPanning else { return false }
+            isPanning = false
+            NSCursor.arrow.set()
+        }
+        return true
     }
 
-    /// Closing a project with unsaved changes asks first, as a sheet. The
-    /// answer comes back asynchronously, so the close is refused now and
-    /// done with `close()` — which skips this check — once the user has chosen.
+    /// Esc leaves the editor at any moment, saving nothing — caught here, ahead
+    /// of the field editor, so it works mid-typing too.
+    private func handleEscape(_ escape: Bool, windowID: ObjectIdentifier?) -> Bool {
+        guard escape, let window, windowID == ObjectIdentifier(window) else { return false }
+        close()
+        return true
+    }
+
+    /// Return inserts a line break while a text annotation is being typed
+    /// into — only clicking away commits. The field editor treats a
+    /// bare Return as "submit", so it's told to insert the newline directly.
+    private func handleReturnKey(key: Int?, windowID: ObjectIdentifier?, command: Bool) -> Bool {
+        guard let window, let model, windowID == ObjectIdentifier(window),
+              !command, model.editingTextID != nil, let key,
+              [.carriageReturn, .enter].contains(NSEvent.SpecialKey(rawValue: key)),
+              let editor = window.firstResponder as? NSTextView else { return false }
+        editor.insertNewlineIgnoringFieldEditor(nil)
+        return true
+    }
+
+    /// Arrow keys nudge the selected annotations — one point per press, ten
+    /// with Shift. Handled here rather than with SwiftUI keyboard shortcuts
+    /// because those fire for a plain arrow whatever the modifiers, so the
+    /// Shift-modified variant never gets its own step. Returns whether the
+    /// event was consumed — an arrow that moves nothing (no selection, or a
+    /// text annotation being typed into) falls through to the text caret.
+    private func handleArrowKey(key: Int?, windowID: ObjectIdentifier?, shift: Bool) -> Bool {
+        guard let window, let model, windowID == ObjectIdentifier(window),
+              let key else { return false }
+        let step: (dx: CGFloat, dy: CGFloat)
+        switch NSEvent.SpecialKey(rawValue: key) {
+        case .leftArrow: step = (-1, 0)
+        case .rightArrow: step = (1, 0)
+        case .upArrow: step = (0, -1)
+        case .downArrow: step = (0, 1)
+        default: return false
+        }
+        return model.nudgeSelected(dx: step.dx, dy: step.dy, coarse: shift)
+    }
+
+    /// Scrolling moves the capture (image tracks the gesture, like the
+    /// right-click drag — `scrollingDelta` already honors the user's natural-
+    /// scrolling preference, and momentum events keep flowing through for
+    /// free inertia); ⌘-scrolling zooms about the canvas center, the same
+    /// clamped path the pinch uses. Returns whether the event was consumed.
+    private func handleScroll(windowID: ObjectIdentifier?, location: NSPoint,
+                              dx: CGFloat, dy: CGFloat, precise: Bool,
+                              zooming: Bool) -> Bool {
+        guard let window, let model, windowID == ObjectIdentifier(window),
+              let content = window.contentView,
+              content.bounds.contains(content.convert(location, from: nil))
+        else { return false }
+        if zooming {
+            // Trackpads report pixel deltas; a wheel notch reports whole
+            // "lines" and needs amplifying to feel comparable.
+            let step = precise ? dy : dy * 12
+            model.setZoom(model.zoom * pow(1.004, step))
+            return true
+        }
+        guard model.canPan else { return false }   // fitted or smaller — nothing to pan
+        model.panBy(dx: dx, dy: dy)
+        return true
+    }
+
+    /// Whether `window` is the editor — ⌘Q with it in front closes it instead
+    /// of quitting, like any other window.
+    func owns(_ window: NSWindow?) -> Bool { window != nil && window === self.window }
+
+    func close() {
+        model?.close()      // cleans up the temp file (guarded against re-entry)
+        guard let window else { return teardown() }
+        teardown()
+        // A full-screen window has a Space to give back; `close` handles that
+        // where a plain order-out would leave it behind.
+        if window.styleMask.contains(.fullScreen) { return window.close() }
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.18
+            window.animator().alphaValue = 0
+        }, completionHandler: { MainActor.assumeIsolated { window.orderOut(nil) } })
+    }
+
+    /// The red button routes through the same unsaved-changes check as ⌘W.
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        guard let model, model.hasUnsavedProjectChanges else { return true }
-        askUnsavedChanges(for: model, sheetOn: sender) { [weak sender] decision in
-            guard let sender else { return }
+        requestClose()
+        return false
+    }
+
+    /// The Close button and ⌘W: a project with unsaved changes asks first, as
+    /// a sheet, and closes once the user has chosen.
+    func requestClose() {
+        guard let window, let model, model.hasUnsavedProjectChanges else { return close() }
+        askUnsavedChanges(for: model, sheetOn: window) { [weak self] decision in
             switch decision {
             case .save: guard model.saveProject() else { return }
             case .discard: break
             case .cancel: return
             }
-            sender.close()
+            self?.close()
         }
-        return false
     }
 
     /// Whether the editor can close right now — quitting from the menu asks
@@ -517,13 +602,6 @@ final class EditorController: NSObject, NSWindowDelegate {
         then?(result)
         return result
     }
-    /// The standard close button routes here — tear down through the model so
-    /// the temp file is cleaned up exactly once.
-    func windowWillClose(_ notification: Notification) {
-        model?.close()
-        teardown()
-    }
-
     private func clearReactivationObserver() {
         if let reactivationObserver {
             NotificationCenter.default.removeObserver(reactivationObserver)
@@ -533,6 +611,7 @@ final class EditorController: NSObject, NSWindowDelegate {
 
     private func teardown() {
         clearReactivationObserver()
+        window?.delegate = nil
         window = nil
         model = nil
         toolbarDelegate = nil
@@ -552,44 +631,27 @@ final class EditorController: NSObject, NSWindowDelegate {
         SettingsStore.shared.applyDockIcon()
     }
 
-    /// Breathing room between the floating palette / crop bar and the window's
-    /// bottom edge. The capture itself runs edge-to-edge — the palette floats
-    /// on top of it.
+    /// Breathing room between the floating bars and the screen edges.
     static let paletteMargin: CGFloat = 16
 
-    /// The smallest content area: wide enough that every title-bar toolbar
-    /// item (crop/pixelate/eyedropper, the −/%/+ zoom group, and the export
-    /// buttons) plus the image-size readout after zoom stays visible without
-    /// the toolbar collapsing into the overflow chevron —
-    /// and for the full tool palette; tall enough for a canvas that can still
-    /// fit the measure loupe. The window otherwise hugs the capture's 1:1
-    /// size, capped to the screen; captures smaller than this open centered
-    /// over the checkerboard. (The title text is hidden, so the width only
-    /// has to cover the tool groups.)
-    static let minContentSize = NSSize(width: 800, height: 280)
+    /// Wide enough for the three top-bar groups side by side, tall enough for
+    /// a canvas between the bars.
+    static let minContentSize = NSSize(width: 820, height: 320)
 
-    /// Sizes the window so the capture opens at full resolution: its true pixel
-    /// dimensions mapped 1:1 to the screen's device pixels (pixels ÷ backing
-    /// scale → points), edge-to-edge. The image — not its frame — is scaled
-    /// down when a capture is too large for the screen (e.g. a full-screen
-    /// grab), and the window never opens smaller than the toolbar needs.
+    /// Windowed, the capture opens at 1:1 (pixels ÷ capture scale → points),
+    /// shrunk to fit the visible screen only when it must, never below the
+    /// bars' minimum.
     private static func windowSize(for model: EditorModel) -> NSSize {
-        let visible = NSScreen.main?.visibleFrame.size ?? NSSize(width: 1440, height: 900)
-        // The capture's logical (1:1) size = pixels ÷ the scale it was taken at.
+        let visible = NSScreen.underMouse?.visibleFrame.size ?? NSSize(width: 1440, height: 900)
         var w = model.pixelSize.width / model.captureScale
         var h = model.pixelSize.height / model.captureScale
         guard w > 0, h > 0 else { return NSSize(width: 820, height: 620) }
-
-        // Shrink the image to fit the visible screen (frame included) only if
-        // needed; never enlarge.
         let fit = min(1, min(visible.width * 0.95 / w, visible.height * 0.95 / h))
         w *= fit
         h *= fit
-        // Floor at the toolbar's minimum so the controls always fit.
         return NSSize(width: max(w.rounded(), minContentSize.width),
                       height: max(h.rounded(), minContentSize.height))
     }
-
 }
 
 /// Supplies the editor window's toolbar items (Copy / Export / Save / Copy Text) as
@@ -687,7 +749,7 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
         case Self.copy:
             spec = ("document.on.document", String(localized: "Copy"), String(localized: "Copy (⌘C)"), #selector(copyAction))
         case Self.export:
-            spec = ("arrow.down.document", String(localized: "Export"), String(localized: "Export as PNG (⌘E)"), #selector(exportAction))
+            spec = ("arrow.up.document", String(localized: "Export"), String(localized: "Export as PNG (⌘E)"), #selector(exportAction))
         case Self.copyText:
             spec = ("text.viewfinder", String(localized: "OCR"), String(localized: "Copy text with OCR (⌘T)"), #selector(copyTextAction))
         default:
@@ -779,4 +841,3 @@ private final class ZoomSegmentedControl: NSSegmentedControl {
         super.mouseDown(with: event)
     }
 }
-

@@ -227,6 +227,8 @@
 "Save as a project — keeps the shapes editable (⌘S)" = "Guardar como proyecto; las formas siguen siendo editables (⌘S)";
 "Copy text with OCR (⌘T)" = "Copiar el texto con OCR (⌘T)";
 "Share" = "Compartir";
+"Close (⌘W)" = "Cerrar (⌘W)";
+"Exit Full Screen (⌃⌘F)" = "Salir de pantalla completa (⌃⌘F)";
 "Zoom" = "Zoom";
 "Zoom In" = "Ampliar";
 "Zoom Out" = "Reducir";

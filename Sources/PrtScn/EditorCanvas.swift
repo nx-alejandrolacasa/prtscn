@@ -168,6 +168,7 @@ struct EditorCanvas: View {
                                 zoom: model.zoom, pan: model.pan, in: geo.size)
 
             ZStack(alignment: .topLeading) {
+                ImageBackdrop(imageRect: fit.imageRect, canvasSize: geo.size)
                 canvas(fit: fit)
                     .gesture(drawGesture(fit: fit))
                     .simultaneousGesture(doubleClickGesture(fit: fit))
@@ -520,8 +521,8 @@ struct EditorCanvas: View {
             if let point {
                 let anchor = fit.toView(point)
                 // Beside the cursor; springs to the left when the right side
-                // wouldn't fit. `EditorController.minContentSize` guarantees
-                // one side always does.
+                // wouldn't fit (the canvas spans the screen, so one side
+                // always does).
                 let fitsRight = anchor.x + gap + diameter <= canvasSize.width
                 MeasureLoupe(image: model.baseImage, pixelSize: model.pixelSize,
                              point: point, diameter: diameter)
@@ -1310,12 +1311,11 @@ struct EditorCanvas: View {
                     if textFieldFocused || model.editingTextID != id { return }
                 }
             }
-            .onExitCommand { model.finishTextEditing() }   // Esc
             .onChange(of: textFieldFocused) { _, focused in
                 // The placing click (and palette taps) steal first responder
                 // from the just-shown field. While still editing, reclaim it
-                // rather than committing — commits happen via Esc, clicking
-                // away on the canvas, or switching tools.
+                // rather than committing — commits happen by clicking away on
+                // the canvas or switching tools.
                 guard !focused, model.editingTextID == id else { return }
                 Task { @MainActor in
                     if model.editingTextID == id { textFieldFocused = true }
@@ -1385,5 +1385,55 @@ private struct MeasureLoupe: View {
         // reads against light captures.
         .overlay(Circle().inset(by: -0.5).stroke(.black.opacity(0.25), lineWidth: 1))
         .shadow(color: .black.opacity(0.35), radius: 10, y: 3)
+    }
+}
+
+/// What sits under the capture: a transparency checkerboard the size of its
+/// visible rect (so transparent window-shots read as such), lifted off the
+/// blurred desktop by a soft shadow. Only the part inside the canvas is drawn —
+/// a zoomed capture overflows the canvas, and the checkerboard must not follow
+/// it under the floating bars.
+private struct ImageBackdrop: View {
+    let imageRect: CGRect
+    let canvasSize: CGSize
+
+    var body: some View {
+        let visible = imageRect.intersection(CGRect(origin: .zero, size: canvasSize))
+        if visible.width >= 1, visible.height >= 1 {
+            CheckerboardBackground()
+                .frame(width: visible.width, height: visible.height)
+                .shadow(color: .black.opacity(0.4), radius: 28, y: 12)
+                .offset(x: visible.minX, y: visible.minY)
+                .allowsHitTesting(false)
+        }
+    }
+}
+
+/// The classic image-editor "transparency" checkerboard. Its two grays follow
+/// the current appearance (light vs. dark).
+private struct CheckerboardBackground: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// Tile edge in points; each cell is one square of the pattern.
+    private let tile: CGFloat = 10
+
+    var body: some View {
+        Canvas { context, size in
+            let (base, alt) = colorScheme == .dark
+                ? (Color(white: 0.17), Color(white: 0.13))
+                : (Color(white: 1.0), Color(white: 0.90))
+            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(base))
+
+            let cols = Int((size.width / tile).rounded(.up))
+            let rows = Int((size.height / tile).rounded(.up))
+            var squares = Path()
+            for row in 0..<rows {
+                for col in 0..<cols where (row + col) % 2 == 1 {
+                    squares.addRect(CGRect(x: CGFloat(col) * tile, y: CGFloat(row) * tile,
+                                           width: tile, height: tile))
+                }
+            }
+            context.fill(squares, with: .color(alt))
+        }
     }
 }

@@ -1,16 +1,26 @@
 import AppKit
 import SwiftUI
 
-/// The editor's window body: the annotation canvas with a floating tool palette
-/// over it. Copy / Export / Save / Copy-Text live in the title-bar toolbar (see
-/// `EditorController`); the keyboard shortcuts for everything live here, in the
-/// content view's responder chain, so they fire wherever the buttons sit.
+/// The editor's full-screen body: the capture centered at 1:1 over the blurred
+/// desktop, the image tools / zoom / export bar floating along the top edge and
+/// the drawing palette along the bottom. The keyboard shortcuts for everything
+/// live here, in the content view's responder chain, so they fire wherever the
+/// buttons sit.
 struct EditorView: View {
     @Bindable var model: EditorModel
 
     /// Which inline palette section is open. A single source of truth keeps the
     /// text and color expanders mutually exclusive.
     @State private var expanded: PaletteSection?
+    /// Drives the entrance: the bars slide in from their edges while the
+    /// capture settles into place.
+    @State private var appeared = false
+
+    /// Where the toast sits: just under the full-screen top bar, or near the
+    /// window's top edge.
+    private var toastInset: CGFloat {
+        model.isFullScreen ? 36 + 12 + 2 * EditorController.paletteMargin : 12
+    }
 
     private enum PaletteSection { case line, shapes, text, counter, measure, color }
 
@@ -30,29 +40,184 @@ struct EditorView: View {
     }
 
     var body: some View {
-        // The canvas spans the whole content area; the fitted capture runs
-        // edge-to-edge, centered by `CanvasFit` when it's smaller than the
-        // minimum window.
+        // The canvas is the whole screen: `CanvasFit` centers the capture at
+        // 1:1 (fitted down only when it's bigger than the screen); the bars
+        // float over it, translucent, so overlapping costs nothing.
         EditorCanvas(model: model)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // A Photoshop-style transparency checkerboard, so transparent
-            // window-shots and any letterboxing read clearly. Adapts its grays
-            // to light/dark mode.
-            .background(CheckerboardBackground())
+            .scaleEffect(appeared ? 1 : 0.94)
+            .opacity(appeared ? 1 : 0)
+            .overlay(alignment: .top) {
+                if model.isFullScreen {
+                    topBar
+                        .offset(y: appeared ? 0 : -40)
+                        .opacity(appeared ? 1 : 0)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
             .overlay(alignment: .bottom) {
-                if model.isCropping { cropBar } else { palette }
+                Group { if model.isCropping { cropBar } else { palette } }
+                    .offset(y: appeared ? 0 : 40)
+                    .opacity(appeared ? 1 : 0)
             }
             .overlay(alignment: .top) { toast }
             .background(shortcuts)
-            .frame(minWidth: EditorController.minContentSize.width,
-                   minHeight: EditorController.minContentSize.height)
+            .animation(.snappy(duration: 0.25), value: model.isFullScreen)
             // The open section always follows the active tool — a selected
             // tool's subtools stay in view (tools without any, like pixelate,
             // collapse the bar).
             .onChange(of: model.tool) { _, tool in setExpanded(section(for: tool)) }
             // The preselected tool's section starts open (set directly, so it
             // doesn't animate in), putting its options in view without a click.
-            .onAppear { expanded = section(for: model.tool) }
+            .onAppear {
+                expanded = section(for: model.tool)
+                withAnimation(.spring(duration: 0.55, bounce: 0.22)) { appeared = true }
+            }
+    }
+
+    // MARK: - Top bar
+
+    /// The full-screen stand-in for the window's title-bar toolbar: close and
+    /// exit-full-screen where the traffic lights would be, then image tools,
+    /// zoom and the size readout; export, project and share on the right;
+    /// the document name (with its edited dot) between them, for projects.
+    private var topBar: some View {
+        HStack(alignment: .center) {
+            HStack(spacing: 6) {
+                    PaletteButton(help: String(localized: "Close (⌘W)"),
+                                  action: EditorController.shared.requestClose) {
+                        Image(systemName: "xmark").font(.system(size: 14, weight: .semibold))
+                    }
+                    PaletteButton(help: String(localized: "Exit Full Screen (⌃⌘F)"),
+                                  action: EditorController.shared.toggleFullScreen) {
+                        Image(systemName: "arrow.up.right.and.arrow.down.left.rectangle")
+                            .font(.system(size: 15, weight: .medium))
+                    }
+                }
+                .glassBar()
+
+            HStack(spacing: 6) {
+                PaletteButton(help: String(localized: "Crop"), action: model.beginCrop) {
+                    Image(systemName: "crop").font(.system(size: 15, weight: .medium))
+                }
+                PaletteButton(help: String(localized: "Pixelate (P)"), isOn: model.tool == .pixelate,
+                              action: { model.tool = .pixelate }) {
+                    Image(systemName: "eye.slash").font(.system(size: 15, weight: .medium))
+                }
+                PaletteButton(help: String(localized: "Pick Color"), isOn: model.isPickingColor,
+                              action: model.beginPickingColor) {
+                    Image(systemName: "eyedropper").font(.system(size: 15, weight: .medium))
+                }
+
+                Divider().frame(height: 20)
+
+                zoomControl
+
+                Divider().frame(height: 20)
+
+                sizeReadout
+            }
+            .glassBar()
+
+            Spacer()
+
+            if model.documentURL != nil {
+                HStack(spacing: 6) {
+                    Text(model.documentName)
+                        .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(1)
+                    if model.hasUnsavedProjectChanges {
+                        Circle().fill(.secondary).frame(width: 6, height: 6)
+                            .transition(.scale.combined(with: .opacity))
+                    }
+                }
+                .padding(.horizontal, 14)
+                .frame(height: 36)
+                .glassBar()
+                .animation(.snappy(duration: 0.2), value: model.hasUnsavedProjectChanges)
+                Spacer()
+            }
+
+            HStack(spacing: 6) {
+                PaletteButton(help: String(localized: "Copy (⌘C)"), action: model.copy) {
+                    Image(systemName: "document.on.document").font(.system(size: 15, weight: .medium))
+                }
+                PaletteButton(help: String(localized: "Export as PNG (⌘E)"), action: model.export) {
+                    Image(systemName: "arrow.up.document").font(.system(size: 15, weight: .medium))
+                }
+                PaletteButton(help: String(localized: "Copy text with OCR (⌘T)"), action: model.copyText) {
+                    Image(systemName: "text.viewfinder").font(.system(size: 15, weight: .medium))
+                }
+
+                Divider().frame(height: 20)
+
+                saveMenu
+                ShareButton(model: model)
+            }
+            .glassBar()
+        }
+        .padding(.horizontal, EditorController.paletteMargin)
+        .padding(.top, EditorController.paletteMargin)
+        .environment(\.tooltipsBelow, true)
+    }
+
+    /// ( − | 100% | + ): the readout doubles as a true-size toggle on
+    /// double-click.
+    private var zoomControl: some View {
+        HStack(spacing: 2) {
+            PaletteButton(help: String(localized: "Zoom Out"), action: model.zoomOut) {
+                Image(systemName: "minus.magnifyingglass").font(.system(size: 14, weight: .medium))
+            }
+            Text(verbatim: "\(model.zoomPercent)%")
+                .font(.system(size: 12, weight: .medium))
+                .monospacedDigit()
+                .frame(width: 48)
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) { model.toggleActualSize() }
+                .help(String(localized: "Zoom (⌘− / ⌘+, ⌘0 resets, or pinch · double-click for 100%)"))
+            PaletteButton(help: String(localized: "Zoom In"), action: model.zoomIn) {
+                Image(systemName: "plus.magnifyingglass").font(.system(size: 14, weight: .medium))
+            }
+        }
+    }
+
+    /// The capture's pixel dimensions (or the crop's, while one is selected)
+    /// over a small caption; clicking copies them as text.
+    private var sizeReadout: some View {
+        let readout = model.sizeReadout
+        return Button(action: model.copySize) {
+            VStack(spacing: 1) {
+                Text(readout.value)
+                    .font(.system(size: 12, weight: .semibold))
+                    .monospacedDigit()
+                Text(readout.caption)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(String(localized: "Image size in pixels — click to copy"))
+    }
+
+    /// Click saves the project; the dropdown offers Save As and Open.
+    private var saveMenu: some View {
+        Menu {
+            Button(String(localized: "Save Project (⌘S)")) { model.saveProject() }
+            Button(String(localized: "Save Project As… (⇧⌘S)")) { model.saveProjectAs() }
+            Divider()
+            Button(String(localized: "Open Project…")) { EditorController.shared.openProjectWithPanel() }
+        } label: {
+            Image(systemName: "folder")
+                .font(.system(size: 15, weight: .medium))
+                .frame(width: 32, height: 32)
+                .contentShape(Circle())
+        } primaryAction: {
+            model.saveProject()
+        }
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .help(String(localized: "Save as a project — keeps the shapes editable (⌘S)"))
     }
 
     /// The palette section belonging to a tool — always shown while that tool
@@ -134,10 +299,7 @@ struct EditorView: View {
         }
         // Pinned to the sub-toolbar's height (32 + its vertical padding), so
         // the palette is the same size with any section open — or none.
-        .frame(height: 36)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .glassEffect(.regular, in: Capsule())
+        .glassBar()
         .padding(.bottom, EditorController.paletteMargin)
     }
 
@@ -176,7 +338,7 @@ struct EditorView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
             .glassEffect(.regular, in: Capsule())
-            .padding(.top, 12)
+            .padding(.top, toastInset)
             .transition(.move(edge: .top).combined(with: .opacity))
         } else if let status = model.statusMessage {
             Label(status, systemImage: model.statusIsFailure
@@ -185,7 +347,7 @@ struct EditorView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
                 .glassEffect(.regular, in: Capsule())
-                .padding(.top, 12)
+                .padding(.top, toastInset)
                 .transition(.move(edge: .top).combined(with: .opacity))
         } else if let tip = model.tipMessage {
             Label(tip, systemImage: "hand.draw")
@@ -193,7 +355,7 @@ struct EditorView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
                 .glassEffect(.regular, in: Capsule())
-                .padding(.top, 12)
+                .padding(.top, toastInset)
                 .transition(.move(edge: .top).combined(with: .opacity))
         }
     }
@@ -207,6 +369,9 @@ struct EditorView: View {
             Button("", action: { model.saveProject() }).keyboardShortcut("s", modifiers: .command)
             Button("", action: model.saveProjectAs).keyboardShortcut("s", modifiers: [.command, .shift])
             Button("", action: model.copyText).keyboardShortcut("t", modifiers: .command)
+            Button("", action: EditorController.shared.requestClose).keyboardShortcut("w", modifiers: .command)
+            Button("", action: EditorController.shared.toggleFullScreen)
+                .keyboardShortcut("f", modifiers: [.control, .command])
             Button("", action: model.undo).keyboardShortcut("z", modifiers: .command)
             Button("", action: model.redo).keyboardShortcut("z", modifiers: [.command, .shift])
             Button("", action: model.deleteSelected).keyboardShortcut(.delete, modifiers: [])
@@ -218,12 +383,6 @@ struct EditorView: View {
             Button("", action: model.resetZoom).keyboardShortcut("0", modifiers: .command)
             Button("", action: { if model.isCropping { model.applyCrop() } })
                 .keyboardShortcut(.return, modifiers: [])
-            Button("") {
-                if model.isCropping { model.cancelCrop() }
-                else if model.isPickingColor { model.cancelPickingColor() }
-                else { model.selectedID = nil }
-            }
-            .keyboardShortcut(.cancelAction)
             toolShortcuts
         }
         .opacity(0)
@@ -252,33 +411,40 @@ struct EditorView: View {
     }
 }
 
-/// The classic image-editor "transparency" checkerboard, drawn behind the
-/// capture so transparent window-shots and letterboxing read clearly. Its two
-/// grays follow the current appearance (light vs. dark).
-private struct CheckerboardBackground: View {
-    @Environment(\.colorScheme) private var colorScheme
+extension View {
+    /// The floating bars' shared look: a 36pt-tall Liquid Glass capsule.
+    fileprivate func glassBar() -> some View {
+        frame(height: 36)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .glassEffect(.regular, in: Capsule())
+    }
+}
 
-    /// Tile edge in points; each cell is one square of the pattern.
-    private let tile: CGFloat = 10
+/// The Share button: pops the system sharing picker from its own frame, with
+/// the flattened capture as the item.
+private struct ShareButton: View {
+    let model: EditorModel
+    @State private var anchor = AnchorView()
 
     var body: some View {
-        Canvas { context, size in
-            let (base, alt) = colorScheme == .dark
-                ? (Color(white: 0.17), Color(white: 0.13))
-                : (Color(white: 1.0), Color(white: 0.90))
-            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(base))
-
-            let cols = Int((size.width / tile).rounded(.up))
-            let rows = Int((size.height / tile).rounded(.up))
-            var squares = Path()
-            for row in 0..<rows {
-                for col in 0..<cols where (row + col) % 2 == 1 {
-                    squares.addRect(CGRect(x: CGFloat(col) * tile, y: CGFloat(row) * tile,
-                                           width: tile, height: tile))
-                }
-            }
-            context.fill(squares, with: .color(alt))
+        PaletteButton(help: String(localized: "Share"), action: share) {
+            Image(systemName: "square.and.arrow.up").font(.system(size: 15, weight: .medium))
         }
+        .background(AnchorRepresentable(view: anchor))
+    }
+
+    private func share() {
+        NSSharingServicePicker(items: [model.sharingItem()])
+            .show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
+    }
+
+    private final class AnchorView: NSView {}
+
+    private struct AnchorRepresentable: NSViewRepresentable {
+        let view: AnchorView
+        func makeNSView(context: Context) -> AnchorView { view }
+        func updateNSView(_ nsView: AnchorView, context: Context) {}
     }
 }
 
@@ -317,6 +483,7 @@ private struct PaletteButton<Icon: View>: View {
 
     @State private var hovering = false
     @State private var showTip = false
+    @Environment(\.tooltipsBelow) private var tooltipsBelow
 
     init(help: String, isOn: Bool = false, disabled: Bool = false, segmented: Bool = false,
          action: @escaping () -> Void, @ViewBuilder icon: () -> Icon) {
@@ -341,10 +508,10 @@ private struct PaletteButton<Icon: View>: View {
         .opacity(disabled ? 0.35 : 1)
         .onHover { hovering = $0 }
         .accessibilityLabel(help)
-        .overlay(alignment: .top) {
+        .overlay(alignment: tooltipsBelow ? .bottom : .top) {
             if showTip {
                 TooltipBubble(text: help)
-                    .offset(y: -34)
+                    .offset(y: tooltipsBelow ? 34 : -34)
                     .transition(.opacity)
             }
         }
@@ -372,6 +539,19 @@ private struct PaletteButton<Icon: View>: View {
         } else if hovering {
             shape.fill(Color.primary.opacity(0.12))
         }
+    }
+}
+
+/// Bars along the top edge show their tooltips under the button, where
+/// there's screen to show them on.
+private struct TooltipsBelowKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    fileprivate var tooltipsBelow: Bool {
+        get { self[TooltipsBelowKey.self] }
+        set { self[TooltipsBelowKey.self] = newValue }
     }
 }
 

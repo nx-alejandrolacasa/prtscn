@@ -66,10 +66,9 @@ final class EditorModel {
 
     /// The window hosting this editor, for sheets (the project save panel).
     weak var hostWindow: NSWindow?
-
-    /// Called after the image geometry changes (a crop) so the controller can
-    /// resize the window to fit.
-    var onGeometryChange: (() -> Void)?
+    /// Whether that window is a full-screen Space right now — the top bar
+    /// swaps the traffic lights' spot for its own close / exit buttons.
+    var isFullScreen = false
 
     // MARK: - Zoom & pan
 
@@ -730,7 +729,6 @@ final class EditorModel {
         zoom = 1
         pan = .zero
         selectedID = nil
-        onGeometryChange?()
     }
 
     // MARK: - Text
@@ -1061,8 +1059,7 @@ final class EditorModel {
     }
 
     /// Enters eyedropper picking mode: the canvas starts live-previewing the
-    /// hovered pixel's color (see `updateHoverColor`) until a click commits it
-    /// or Escape cancels.
+    /// hovered pixel's color (see `updateHoverColor`) until a click commits it.
     func beginPickingColor() {
         isPickingColor = true
         hoverColor = nil

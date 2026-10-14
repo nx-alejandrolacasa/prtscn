@@ -293,7 +293,7 @@ private struct PinnedCard: View {
             .keyboardShortcut("c", modifiers: .command)
         Button("Save", systemImage: "square.and.arrow.down", action: onSave)
             .keyboardShortcut("s", modifiers: .command)
-        Button("Edit…", systemImage: "scribble", action: onEdit)
+        Button("Edit…", systemImage: "pencil.tip.crop.circle", action: onEdit)
             .keyboardShortcut(.return, modifiers: [])
         Divider()
         Button("Close Pin", systemImage: "pin.slash", action: onClose)

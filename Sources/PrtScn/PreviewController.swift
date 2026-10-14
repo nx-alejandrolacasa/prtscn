@@ -132,4 +132,8 @@ extension NSScreen {
         let mouse = NSEvent.mouseLocation
         return screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? main ?? screens.first
     }
+
+    var displayID: CGDirectDisplayID? {
+        deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
+    }
 }

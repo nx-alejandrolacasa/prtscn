@@ -216,9 +216,9 @@ final class ScreenshotService {
         guard Self.looksLikeWindowShot(capture) else { return }
 
         // Add breathing room around the window so the background is actually
-        // visible as a margin (≈6% of the longest edge, clamped). The capture is
+        // visible as a margin (≈3% of the longest edge, clamped). The capture is
         // retina, so these are pixel values.
-        let padding = min(max(Int((Double(max(capture.width, capture.height)) * 0.06).rounded()), 56), 160)
+        let padding = min(max(Int((Double(max(capture.width, capture.height)) * 0.03).rounded()), 28), 80)
         let canvasWidth = capture.width + padding * 2
         let canvasHeight = capture.height + padding * 2
         let canvas = CGRect(x: 0, y: 0, width: canvasWidth, height: canvasHeight)
@@ -276,7 +276,8 @@ final class ScreenshotService {
         return corners.contains { $0 < 250 }
     }
 
-    /// The current desktop wallpaper for the main display, as a `CGImage`.
+    /// The current desktop wallpaper of `screen` (the main display by
+    /// default), as a `CGImage`.
     ///
     /// We capture the live desktop with ScreenCaptureKit (excluding every
     /// window, so only the wallpaper remains) rather than reading the picture
@@ -284,7 +285,8 @@ final class ScreenshotService {
     /// `NSWorkspace.desktopImageURL`. This reuses the Screen Recording
     /// permission the app already has. Falls back to the picture file if the
     /// capture is unavailable.
-    private static func currentWallpaperImage() async -> CGImage? {
+    static func currentWallpaperImage(of screen: NSScreen? = nil) async -> CGImage? {
+        let screen = screen ?? NSScreen.main
         do {
             // Get app windows only (desktop/wallpaper windows are kept out of the
             // list). We then exclude these app windows from the capture, leaving
@@ -292,9 +294,9 @@ final class ScreenshotService {
             // (including the wallpaper window) makes the stream fail to start.
             let content = try await SCShareableContent.excludingDesktopWindows(
                 true, onScreenWindowsOnly: true)
-            let main = CGMainDisplayID()
-            guard let display = content.displays.first(where: { $0.displayID == main })
-                ?? content.displays.first else { return fallbackWallpaperImage() }
+            let displayID = screen?.displayID ?? CGMainDisplayID()
+            guard let display = content.displays.first(where: { $0.displayID == displayID })
+                ?? content.displays.first else { return fallbackWallpaperImage(of: screen) }
 
             // Finder's desktop-icons layer sits one level above the wallpaper
             // itself, so `excludingDesktopWindows` above strips it out of
@@ -320,13 +322,13 @@ final class ScreenshotService {
             return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
         } catch {
             log.error("wallpaper capture failed: \(String(describing: error), privacy: .public)")
-            return fallbackWallpaperImage()
+            return fallbackWallpaperImage(of: screen)
         }
     }
 
     /// Last-resort wallpaper: read the desktop picture file directly.
-    private static func fallbackWallpaperImage() -> CGImage? {
-        guard let screen = NSScreen.main,
+    private static func fallbackWallpaperImage(of screen: NSScreen?) -> CGImage? {
+        guard let screen,
               let url = NSWorkspace.shared.desktopImageURL(for: screen),
               let image = NSImage(contentsOf: url),
               let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil)

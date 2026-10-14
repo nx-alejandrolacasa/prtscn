@@ -27,10 +27,10 @@ enum PreviewAction: String, CaseIterable, Identifiable {
     /// SF Symbol name for the toolbar button.
     var systemImage: String {
         switch self {
-        case .edit: "scribble"
+        case .edit: "pencil.tip.crop.circle"
         case .copy: "document.on.document"
         case .ocr: "text.viewfinder"
-        case .save: "arrow.down.document"
+        case .save: "arrow.up.document"
         case .pin: "pin"
         case .discard: "trash"
         }
@@ -41,7 +41,7 @@ enum PreviewAction: String, CaseIterable, Identifiable {
     /// strokes both visibly differ.
     var iconFont: Font {
         switch self {
-        case .edit: .system(size: 19, weight: .regular)
+        case .edit: .system(size: 17, weight: .medium)
         case .copy: .system(size: 14, weight: .semibold)
         case .ocr: .system(size: 18, weight: .regular)
         case .save: .system(size: 16.5, weight: .medium)

@@ -63,8 +63,8 @@ Sources/PrtScn/
   Annotation.swift             annotation model + per-tool geometry
   EditorModel.swift            editor state, undo/redo, export flattening
   EditorCanvas.swift           the SwiftUI Canvas: drawing + gestures
-  EditorView.swift             editor window body + floating tool palette
-  EditorController.swift       editor NSWindow + title-bar toolbar; opens .prtscn projects
+  EditorView.swift             editor body: floating top bar (image tools/zoom/export) + bottom palette
+  EditorController.swift       editor window: full-screen Space for captures (blurred wallpaper), windowed for canvases/projects; opens .prtscn projects
   ProjectDocument.swift        .prtscn package (image.png + document.json) + Annotation Codable
   CanvasRecovery.swift         crash snapshots (Application Support/<bundle id>/Recovery) + launch restore
   SettingsStore.swift          @Observable settings, persisted to UserDefaults

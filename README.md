@@ -48,7 +48,11 @@ eating your battery — just system frameworks, doing exactly what you asked.
   rectangle, ellipse, pixelate/redact, step counter, text, a live
   eyedropper color picker, crop, and full undo/redo.
   Double-click any shape to label it: the text sits centered on the
-  shape with the stroke cleared away around it. The title bar always
+  shape with the stroke cleared away around it. Captures open the editor
+  as a full-screen Space — wallpaper blurred behind, the capture centered
+  at 1:1, the tools floating along the top and bottom edges; blank
+  canvases and projects open it as a window (the green button and ⌃⌘F
+  switch between the two). The top bar always
   shows the image's pixel size — while cropping it previews the crop's
   size instead, and a click copies the dimensions.
 - 💾 **Save as a project** — ⌘S writes a `.prtscn` document that keeps
