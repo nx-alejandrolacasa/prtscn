@@ -4,17 +4,23 @@ import SwiftUI
 
 private let log = Logger(subsystem: "com.alejandrolacasa.prtscn", category: "EditorController")
 
-/// Owns the (single, reused) editor window. Captures open it as a real
-/// full-screen Space — the blurred wallpaper behind, the capture centered at
-/// 1:1, the tools floating along the top and bottom edges; blank canvases and
-/// projects open it as a normal window. The green button and the bar's
-/// exit-full-screen button move between the two.
+/// Owns the (single, reused) editor window. Captures open it immersive —
+/// a borderless window covering the screen, the blurred wallpaper behind, the
+/// capture centered at 1:1, the tools floating along the top and bottom
+/// edges — instantly, with no full-screen Space to animate in and out. Blank
+/// canvases and projects open it as a normal window. The green button, ⌃⌘F
+/// and the bar's exit button move between the two, and switching to another
+/// app drops the immersive editor into a window so it never stands in the way.
 @MainActor
 final class EditorController: NSObject, NSWindowDelegate {
     static let shared = EditorController()
 
     private var window: NSWindow?
     private var model: EditorModel?
+    /// The frame to come back to when leaving immersive mode.
+    private var windowedFrame = NSRect.zero
+    /// Drops to a window when the user switches to another app while immersive.
+    private var immersiveExitObserver: NSObjectProtocol?
     /// The blurred desktop picture, shown only while full screen.
     private weak var wallpaperView: NSView?
     /// The size readout's two lines, kept to live-update while a crop is
@@ -23,6 +29,8 @@ final class EditorController: NSObject, NSWindowDelegate {
     private weak var sizeCaption: NSTextField?
     /// Retained because `NSToolbar.delegate` is weak.
     private var toolbarDelegate: EditorToolbarDelegate?
+    /// Retained because going borderless detaches it from the window.
+    private var toolbar: NSToolbar?
     /// Local right-mouse event monitor that pans the zoomed capture.
     private var panMonitor: Any?
     private var isPanning = false
@@ -134,9 +142,9 @@ final class EditorController: NSObject, NSWindowDelegate {
         }
 
         let size = Self.windowSize(for: model)
-        let window = NSWindow(
+        let window = EditorWindow(
             contentRect: NSRect(origin: .zero, size: size),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            styleMask: Self.windowedStyle,
             backing: .buffered,
             defer: false
         )
@@ -146,10 +154,10 @@ final class EditorController: NSObject, NSWindowDelegate {
         window.titleVisibility = .hidden
         window.contentMinSize = Self.minContentSize
         window.isReleasedWhenClosed = false
-        window.collectionBehavior = [.fullScreenPrimary]
+        window.collectionBehavior = [.fullScreenNone]
         window.delegate = self
 
-        // Full screen shows just the wallpaper, blurred — no other windows:
+        // Immersive shows just the wallpaper, blurred — no other windows:
         // the desktop picture (captured, so dynamic wallpapers work) under an
         // in-window full-screen-UI material, with the SwiftUI editor laid over
         // both. Windowed, the picture is hidden and the material reads as a
@@ -196,6 +204,7 @@ final class EditorController: NSObject, NSWindowDelegate {
         self.model = model
         self.wallpaperView = wallpaper
         self.toolbarDelegate = toolbarDelegate
+        self.toolbar = toolbar
         model.hostWindow = window
         observeUnsavedChanges()
 
@@ -253,17 +262,15 @@ final class EditorController: NSObject, NSWindowDelegate {
         // burying the window — so order it front regardless of activation, and
         // re-assert the activation below once the menu's hand-back is done.
         NSApp.activate()
+        if fullScreen { setImmersive(true) }
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
-        if fullScreen {
-            window.toggleFullScreen(nil)
-            return finishPresenting(window)
-        }
         window.alphaValue = 0
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.25
             window.animator().alphaValue = 1
         }
+        if fullScreen { return finishPresenting(window) }
 
         // The hand-back has no fixed timing — it can land later than any
         // runloop-turn deferral — and modern activation is cooperative, so a
@@ -309,35 +316,75 @@ final class EditorController: NSObject, NSWindowDelegate {
         return true
     }
 
-    // MARK: - Full screen
+    // MARK: - Immersive mode
+
+    private static let windowedStyle: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .resizable]
 
     /// ⌃⌘F and the bar's exit button — the green button is the other way in.
-    func toggleFullScreen() { window?.toggleFullScreen(nil) }
+    func toggleFullScreen() { setImmersive(!(model?.isFullScreen ?? false)) }
 
-    func windowWillEnterFullScreen(_ notification: Notification) {
-        window?.toolbar?.isVisible = false
-        sizeLabel?.superview?.isHidden = true
+    /// The green button enters immersive mode instead of zooming.
+    func windowShouldZoom(_ window: NSWindow, toFrame newFrame: NSRect) -> Bool {
+        setImmersive(true)
+        return false
+    }
+
+    private func setImmersive(_ on: Bool) {
+        guard let window, let model, model.isFullScreen != on else { return }
+        model.isFullScreen = on
+        if on {
+            windowedFrame = window.frame
+            let screen = window.screen ?? NSScreen.underMouse ?? NSScreen.main
+            window.toolbar?.isVisible = false
+            sizeLabel?.superview?.isHidden = true
+            showWallpaper(of: screen)
+            window.styleMask = [.borderless]
+            window.setFrame(screen?.frame ?? windowedFrame, display: true)
+            NSApp.presentationOptions = [.autoHideMenuBar, .autoHideDock]
+            immersiveExitObserver = NotificationCenter.default.addObserver(
+                forName: NSApplication.didResignActiveNotification, object: NSApp, queue: .main
+            ) { _ in
+                MainActor.assumeIsolated { Self.shared.setImmersive(false) }
+            }
+            return
+        }
+        clearImmersiveExitObserver()
+        wallpaperView?.isHidden = true
+        let target = windowedFrame
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.25
+            window.animator().setFrame(target, display: true)
+        }, completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.window === window else { return }
+                window.styleMask = Self.windowedStyle
+                window.titleVisibility = .hidden
+                window.toolbar = self.toolbar
+                window.toolbarStyle = .unified
+                self.toolbar?.isVisible = true
+                window.setFrame(target, display: true)
+                self.sizeLabel?.superview?.isHidden = false
+                if NSApp.isActive { window.makeKeyAndOrderFront(nil) }
+                guard self.sizeLabel == nil, let model = self.model else { return }
+                DispatchQueue.main.async { self.installSizeReadout(in: window, model: model) }
+            }
+        })
+    }
+
+    private func clearImmersiveExitObserver() {
+        NSApp.presentationOptions = []
+        guard let immersiveExitObserver else { return }
+        NotificationCenter.default.removeObserver(immersiveExitObserver)
+        self.immersiveExitObserver = nil
+    }
+
+    private func showWallpaper(of screen: NSScreen?) {
         guard let wallpaperView else { return }
         wallpaperView.isHidden = false
         guard wallpaperView.layer?.contents == nil else { return }
-        let screen = window?.screen
         Task { [weak wallpaperView] in
             guard let image = await ScreenshotService.currentWallpaperImage(of: screen) else { return }
             wallpaperView?.layer?.contents = image
-        }
-    }
-
-    func windowDidEnterFullScreen(_ notification: Notification) { model?.isFullScreen = true }
-
-    func windowDidExitFullScreen(_ notification: Notification) {
-        model?.isFullScreen = false
-        wallpaperView?.isHidden = true
-        window?.toolbar?.isVisible = true
-        sizeLabel?.superview?.isHidden = false
-        guard sizeLabel == nil, let window else { return }
-        DispatchQueue.main.async { [weak self] in
-            guard let self, let model = self.model else { return }
-            self.installSizeReadout(in: window, model: model)
         }
     }
 
@@ -530,9 +577,6 @@ final class EditorController: NSObject, NSWindowDelegate {
         model?.close()      // cleans up the temp file (guarded against re-entry)
         guard let window else { return teardown() }
         teardown()
-        // A full-screen window has a Space to give back; `close` handles that
-        // where a plain order-out would leave it behind.
-        if window.styleMask.contains(.fullScreen) { return window.close() }
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = 0.18
             window.animator().alphaValue = 0
@@ -611,10 +655,12 @@ final class EditorController: NSObject, NSWindowDelegate {
 
     private func teardown() {
         clearReactivationObserver()
+        clearImmersiveExitObserver()
         window?.delegate = nil
         window = nil
         model = nil
         toolbarDelegate = nil
+        toolbar = nil
         isPanning = false
         if let panMonitor { NSEvent.removeMonitor(panMonitor) }
         panMonitor = nil
@@ -651,6 +697,15 @@ final class EditorController: NSObject, NSWindowDelegate {
         h *= fit
         return NSSize(width: max(w.rounded(), minContentSize.width),
                       height: max(h.rounded(), minContentSize.height))
+    }
+}
+
+/// Borderless while immersive, so it has to say it takes focus.
+private final class EditorWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        styleMask.contains(.titled) ? super.constrainFrameRect(frameRect, to: screen) : frameRect
     }
 }
 
