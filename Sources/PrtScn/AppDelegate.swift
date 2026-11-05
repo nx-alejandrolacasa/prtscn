@@ -30,11 +30,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         CanvasRecovery.waitForPendingWrites()
     }
 
-    /// Finder double-click / drag-to-icon on a `.prtscn` project. One editor
-    /// window, so only the last URL is opened.
+    /// Finder double-click / Open With / drag-to-icon on a `.prtscn` project
+    /// or an image file. One editor window, so only the last URL is opened.
     func application(_ application: NSApplication, open urls: [URL]) {
-        guard let url = urls.last(where: { $0.pathExtension == "prtscn" }) else { return }
-        EditorController.shared.open(projectURL: url)
+        guard let url = urls.last else { return }
+        if url.pathExtension == "prtscn" {
+            EditorController.shared.open(projectURL: url)
+        } else {
+            EditorController.shared.open(imageFileURL: url)
+        }
     }
 
     /// ⌘Q with a window in front (editor, Settings, …) closes that window

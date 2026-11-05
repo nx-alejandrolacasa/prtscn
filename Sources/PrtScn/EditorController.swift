@@ -58,6 +58,43 @@ final class EditorController: NSObject, NSWindowDelegate {
         }
     }
 
+    /// Opens any image macOS can decode (PNG, JPEG, HEIC, WebP, AVIF, …) as a
+    /// capture: it's re-encoded into a temp PNG the editor owns, so the
+    /// original file is never touched. The pixel density (a 2× screenshot's
+    /// 144 dpi) becomes the capture scale so tools and exports size like a
+    /// capture's.
+    func open(imageFileURL url: URL) {
+        guard let image = NSImage(contentsOf: url),
+              let decoded = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
+              let cgImage = Self.redrawnAsRGBA8(decoded),
+              let png = NSBitmapImageRep(cgImage: cgImage).representation(using: .png, properties: [:])
+        else {
+            log.error("couldn't decode image at \(url.path, privacy: .public)")
+            let alert = NSAlert()
+            alert.messageText = String(localized: "Couldn't open “\(url.lastPathComponent)”")
+            alert.informativeText = String(localized: "The file isn't an image this Mac can read.")
+            NSApp.activate()
+            alert.runModal()
+            return
+        }
+        let workingURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("prtscn-image-\(UUID().uuidString).png")
+        guard (try? png.write(to: workingURL)) != nil else { return }
+        let scale = (CGFloat(cgImage.width) / max(image.size.width, 1)).rounded()
+        show(imageURL: workingURL, captureScale: scale, saveIfRefused: false, fullScreen: false)
+    }
+
+    /// HEIC and 10-bit decodes come back in pixel formats PNG can't encode;
+    /// redrawing into a plain 8-bit RGBA bitmap normalizes them.
+    private static func redrawnAsRGBA8(_ image: CGImage) -> CGImage? {
+        guard let context = CGContext(
+            data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        return context.makeImage()
+    }
+
     /// Reopens a `.prtscn` project; the annotations come back as editable data.
     func open(projectURL: URL) {
         guard let (model, document) = loadProject(at: projectURL) else { return }

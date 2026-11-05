@@ -250,6 +250,7 @@
 "%@ project.prtscn" = "%@ proyecto.prtscn";
 "Couldn't open “%@”" = "No se pudo abrir “%@”";
 "The file isn't a PrtScn project this version can read." = "El archivo no es un proyecto de PrtScn que esta versión pueda leer.";
+"The file isn't an image this Mac can read." = "El archivo no es una imagen que este Mac pueda leer.";
 "Do you want to save the changes made to the project “%@”?" = "¿Quieres guardar los cambios realizados en el proyecto “%@”?";
 "Your changes will be lost if you don't save them." = "Si no los guardas, los cambios se perderán.";
 "Don't Save" = "No guardar";
