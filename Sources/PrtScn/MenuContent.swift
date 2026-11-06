@@ -58,9 +58,9 @@ struct MenuContent: View {
                 Label("New Blank Canvas", systemImage: "plus.rectangle")
             }
             Button {
-                EditorController.shared.openProjectWithPanel()
+                EditorController.shared.openFileWithPanel()
             } label: {
-                Label("Open Project…", systemImage: "folder")
+                Label("Open File…", systemImage: "arrow.up.forward.square")
             }
 
             Divider()

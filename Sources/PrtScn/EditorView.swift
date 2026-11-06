@@ -206,7 +206,7 @@ struct EditorView: View {
             Button(String(localized: "Save Project (⌘S)")) { model.saveProject() }
             Button(String(localized: "Save Project As… (⇧⌘S)")) { model.saveProjectAs() }
             Divider()
-            Button(String(localized: "Open Project…")) { EditorController.shared.openProjectWithPanel() }
+            Button(String(localized: "Open File…")) { EditorController.shared.openFileWithPanel() }
         } label: {
             Image(systemName: "folder")
                 .font(.system(size: 15, weight: .medium))
@@ -307,18 +307,37 @@ struct EditorView: View {
 
     private var cropBar: some View {
         HStack(spacing: 10) {
-            Button("Cancel") { model.cancelCrop() }
-                .buttonStyle(.bordered)
-            Button("Crop") { model.applyCrop() }
-                .buttonStyle(.borderedProminent)
-                .disabled(model.cropRect == nil)
+            CropAnchorGrid(selected: model.cropAnchor, select: model.setCropAnchor)
+            Divider().frame(height: 18)
+            HStack(spacing: 4) {
+                cropField(String(localized: "Width"), value: $model.cropWidth)
+                Text("×").foregroundStyle(.secondary)
+                cropField(String(localized: "Height"), value: $model.cropHeight)
+            }
+            // A drag that reshapes the region must refresh a field mid-edit,
+            // or its stale text would snap the region back when it blurs.
+            .id("\(model.cropWidth)×\(model.cropHeight)")
+            Divider().frame(height: 18)
+            PaletteButton(help: String(localized: "Crop (↩)"), isOn: true,
+                          disabled: model.cropRect == nil, action: model.applyCrop) {
+                Image(systemName: "checkmark").font(.system(size: 14, weight: .semibold))
+            }
+            PaletteButton(help: String(localized: "Cancel"), raised: true, action: model.cancelCrop) {
+                Image(systemName: "xmark").font(.system(size: 14, weight: .semibold))
+            }
         }
-        .buttonBorderShape(.capsule)
-        .controlSize(.large)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .glassEffect(.regular, in: Capsule())
+        .glassBar()
         .padding(.bottom, EditorController.paletteMargin)
+    }
+
+    private func cropField(_ label: String, value: Binding<Int>) -> some View {
+        TextField(label, value: value, format: .number.grouping(.never))
+            .textFieldStyle(.roundedBorder)
+            .multilineTextAlignment(.trailing)
+            .font(.system(size: 12, weight: .medium).monospacedDigit())
+            .frame(width: 56)
+            .labelsHidden()
+            .accessibilityLabel(label)
     }
 
     // MARK: - Toast
@@ -472,12 +491,15 @@ private struct SubToolbar<Content: View>: View {
 /// A flat palette button with an active/hover/disabled state and a custom
 /// icon view. Two active looks: the accent circle (main-bar tools), or —
 /// `segmented` — a raised white pill for an exclusive choice sitting on a
-/// `SubToolbar` track, like a segmented control's selected segment.
+/// `SubToolbar` track, like a segmented control's selected segment. `raised`
+/// gives a plain action the same pill, as a circle, so it reads as a button
+/// beside an accent one.
 private struct PaletteButton<Icon: View>: View {
     let help: String
     var isOn = false
     var disabled = false
     var segmented = false
+    var raised = false
     let action: () -> Void
     let icon: Icon
 
@@ -486,11 +508,12 @@ private struct PaletteButton<Icon: View>: View {
     @Environment(\.tooltipsBelow) private var tooltipsBelow
 
     init(help: String, isOn: Bool = false, disabled: Bool = false, segmented: Bool = false,
-         action: @escaping () -> Void, @ViewBuilder icon: () -> Icon) {
+         raised: Bool = false, action: @escaping () -> Void, @ViewBuilder icon: () -> Icon) {
         self.help = help
         self.isOn = isOn
         self.disabled = disabled
         self.segmented = segmented
+        self.raised = raised
         self.action = action
         self.icon = icon()
     }
@@ -530,15 +553,20 @@ private struct PaletteButton<Icon: View>: View {
 
     @ViewBuilder private var background: some View {
         if segmented, isOn {
-            Capsule()
-                .fill(Color(nsColor: .controlBackgroundColor))
-                .overlay(Capsule().strokeBorder(.primary.opacity(0.12), lineWidth: 0.5))
-                .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
+            raisedPill(Capsule())
+        } else if raised {
+            raisedPill(Circle())
         } else if isOn {
             Circle().fill(Color.accentColor.opacity(0.9))
         } else if hovering {
             shape.fill(Color.primary.opacity(0.12))
         }
+    }
+
+    private func raisedPill<S: InsettableShape>(_ pill: S) -> some View {
+        pill.fill(Color(nsColor: .controlBackgroundColor))
+            .overlay(pill.strokeBorder(.primary.opacity(0.12), lineWidth: 0.5))
+            .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
     }
 }
 
@@ -799,6 +827,46 @@ private struct SizeStepper: View {
                 Image(systemName: "plus").font(.system(size: 13, weight: .semibold))
             }
         }
+    }
+}
+
+/// The 3 × 3 dot grid that picks which part of the image a crop hangs from.
+private struct CropAnchorGrid: View {
+    let selected: UnitPoint
+    let select: (UnitPoint) -> Void
+
+    private static let anchors: [(point: UnitPoint, name: String)] = [
+        (.topLeading, String(localized: "Top Left")), (.top, String(localized: "Top")),
+        (.topTrailing, String(localized: "Top Right")), (.leading, String(localized: "Left")),
+        (.center, String(localized: "Center")), (.trailing, String(localized: "Right")),
+        (.bottomLeading, String(localized: "Bottom Left")), (.bottom, String(localized: "Bottom")),
+        (.bottomTrailing, String(localized: "Bottom Right")),
+    ]
+
+    var body: some View {
+        Grid(horizontalSpacing: 0, verticalSpacing: 0) {
+            ForEach(0..<3) { row in
+                GridRow {
+                    ForEach(0..<3) { column in
+                        dot(Self.anchors[row * 3 + column])
+                    }
+                }
+            }
+        }
+    }
+
+    private func dot(_ anchor: (point: UnitPoint, name: String)) -> some View {
+        let isOn = anchor.point == selected
+        return Button { select(anchor.point) } label: {
+            Circle()
+                .fill(isOn ? Color.accentColor : Color.primary.opacity(0.3))
+                .frame(width: isOn ? 7 : 5, height: isOn ? 7 : 5)
+                .frame(width: 10, height: 10)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(anchor.name)
+        .accessibilityLabel(anchor.name)
     }
 }
 

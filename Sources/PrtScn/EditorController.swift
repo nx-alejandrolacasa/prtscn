@@ -140,16 +140,25 @@ final class EditorController: NSObject, NSWindowDelegate {
         return (model, document)
     }
 
-    /// Lets the user pick a `.prtscn` project to reopen.
-    func openProjectWithPanel() {
+    /// A `.prtscn` project or any image file, from Finder or the open panel.
+    func open(fileURL url: URL) {
+        if url.pathExtension == "prtscn" {
+            open(projectURL: url)
+        } else {
+            open(imageFileURL: url)
+        }
+    }
+
+    /// Lets the user pick a `.prtscn` project or an image to open.
+    func openFileWithPanel() {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.prtscnProject]
+        panel.allowedContentTypes = [.prtscnProject, .image]
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.directoryURL = URL(fileURLWithPath: SettingsStore.shared.saveFolderPath, isDirectory: true)
         NSApp.activate()
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        open(projectURL: url)
+        open(fileURL: url)
     }
 
     /// Returns whether `model` made it on screen; when refused, its working
@@ -864,7 +873,7 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
         menu.addItem(withTitle: String(localized: "Save Project (⌘S)"), action: #selector(saveAction), keyEquivalent: "").target = self
         menu.addItem(withTitle: String(localized: "Save Project As… (⇧⌘S)"), action: #selector(saveAsAction), keyEquivalent: "").target = self
         menu.addItem(.separator())
-        menu.addItem(withTitle: String(localized: "Open Project…"), action: #selector(openProjectAction), keyEquivalent: "").target = self
+        menu.addItem(withTitle: String(localized: "Open File…"), action: #selector(openFileAction), keyEquivalent: "").target = self
 
         let item = NSMenuToolbarItem(itemIdentifier: id)
         item.image = NSImage(systemSymbolName: "folder", accessibilityDescription: String(localized: "Save"))
@@ -906,7 +915,7 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
     @objc private func exportAction() { model.export() }
     @objc private func saveAction() { model.saveProject() }
     @objc private func saveAsAction() { model.saveProjectAs() }
-    @objc private func openProjectAction() { EditorController.shared.openProjectWithPanel() }
+    @objc private func openFileAction() { EditorController.shared.openFileWithPanel() }
     @objc private func copyTextAction() { model.copyText() }
 
     // MARK: - Share

@@ -223,6 +223,21 @@ final class EditorModel {
     /// The pending crop region (pixel coords) while `isCropping`. `nil` means the
     /// user hasn't drawn a region yet (the "aim and drag" phase).
     var cropRect: CGRect?
+    /// Where the region sits in the image when placed by the crop bar, and
+    /// which of its corners stays put when its size is typed in.
+    var cropAnchor = UnitPoint.center
+
+    var cropWidth: Int {
+        get { Int((cropRect ?? imageBounds).width) }
+        set { resizeCrop(to: CGSize(width: CGFloat(newValue), height: CGFloat(cropHeight))) }
+    }
+
+    var cropHeight: Int {
+        get { Int((cropRect ?? imageBounds).height) }
+        set { resizeCrop(to: CGSize(width: CGFloat(cropWidth), height: CGFloat(newValue))) }
+    }
+
+    private var imageBounds: CGRect { CGRect(origin: .zero, size: pixelSize) }
 
     // MARK: - Drawing state
 
@@ -698,6 +713,26 @@ final class EditorModel {
     func cancelCrop() {
         isCropping = false
         cropRect = nil
+    }
+
+    /// Moves the region to `anchor`'s spot in the image, keeping its size.
+    func setCropAnchor(_ anchor: UnitPoint) {
+        cropAnchor = anchor
+        guard let rect = cropRect else { return }
+        cropRect = CGRect(origin: CGPoint(x: (pixelSize.width - rect.width) * anchor.x,
+                                          y: (pixelSize.height - rect.height) * anchor.y),
+                          size: rect.size)
+    }
+
+    /// Resizes the region (the whole image, when none is drawn yet) about its
+    /// anchored corner, clamped to the image.
+    private func resizeCrop(to size: CGSize) {
+        let frame = cropRect ?? imageBounds
+        let width = min(max(size.width.rounded(), 1), pixelSize.width)
+        let height = min(max(size.height.rounded(), 1), pixelSize.height)
+        let x = min(max(frame.minX + (frame.width - width) * cropAnchor.x, 0), pixelSize.width - width)
+        let y = min(max(frame.minY + (frame.height - height) * cropAnchor.y, 0), pixelSize.height - height)
+        cropRect = CGRect(x: x.rounded(), y: y.rounded(), width: width, height: height)
     }
 
     /// Crops the capture to `cropRect`: replaces the base image, shifts every

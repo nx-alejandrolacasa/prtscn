@@ -7,7 +7,7 @@
 "Capture Fixed Size…" = "Capturar tamaño fijo…";
 "Capture Scrolling Area" = "Capturar con desplazamiento";
 "New Blank Canvas" = "Nuevo lienzo en blanco";
-"Open Project…" = "Abrir proyecto…";
+"Open File…" = "Abrir archivo…";
 "Close All Pins" = "Cerrar todos los pines";
 "Update to %@…" = "Actualizar a %@…";
 "Settings…" = "Ajustes…";
@@ -216,6 +216,16 @@
 "Undo (⌘Z)" = "Deshacer (⌘Z)";
 "Redo (⇧⌘Z)" = "Rehacer (⇧⌘Z)";
 "Crop" = "Recortar";
+"Crop (↩)" = "Recortar (↩)";
+"Top Left" = "Arriba a la izquierda";
+"Top" = "Arriba";
+"Top Right" = "Arriba a la derecha";
+"Left" = "Izquierda";
+"Center" = "Centro";
+"Right" = "Derecha";
+"Bottom Left" = "Abajo a la izquierda";
+"Bottom" = "Abajo";
+"Bottom Right" = "Abajo a la derecha";
 "Pick Color" = "Elegir color";
 "Hover the capture" = "Pasa el cursor sobre la captura";
 

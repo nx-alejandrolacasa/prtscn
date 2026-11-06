@@ -34,11 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// or an image file. One editor window, so only the last URL is opened.
     func application(_ application: NSApplication, open urls: [URL]) {
         guard let url = urls.last else { return }
-        if url.pathExtension == "prtscn" {
-            EditorController.shared.open(projectURL: url)
-        } else {
-            EditorController.shared.open(imageFileURL: url)
-        }
+        EditorController.shared.open(fileURL: url)
     }
 
     /// ⌘Q with a window in front (editor, Settings, …) closes that window

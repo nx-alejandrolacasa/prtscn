@@ -57,12 +57,13 @@ eating your battery — just system frameworks, doing exactly what you asked.
   size instead, and a click copies the dimensions.
 - 💾 **Save as a project** — ⌘S writes a `.prtscn` document that keeps
   every shape, line, label and step counter editable (⌘E exports the flat
-  PNG as before). Reopen it later from the menu bar (Open Project…) or by
+  PNG as before). Reopen it later from the menu bar (Open File…) or by
   double-clicking it in Finder, and carry on where you left off — handy with **New Blank Canvas** for diagrams and
   schemas that evolve over time.
 - 🖼️ **Open any image** — right-click a PNG, JPEG, HEIC, WebP or AVIF in
-  Finder and *Open With → PrtScn* to annotate it with the same tools; the
-  original file is never touched, edits export as usual.
+  Finder and *Open With → PrtScn*, or pick it from the menu bar (Open File…),
+  to annotate it with the same tools; the original file is never touched,
+  edits export as usual.
 - 🪟 **Window backgrounds** — margins with a drop shadow, a
   solid color, your actual desktop wallpaper, or a tight trim — for
   screenshots that already look presentation-ready.
