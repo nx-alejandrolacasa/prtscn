@@ -91,7 +91,7 @@ final class UpdateChecker {
             if Self.isVersion(version, newerThan: Self.currentVersion) {
                 latest = Release(
                     version: version,
-                    dmgURL: release.assets.first { $0.name.hasSuffix(".dmg") }?.browserDownloadUrl,
+                    dmgURL: release.assets.first { $0.name.hasSuffix(".dmg") && $0.isUploaded }?.browserDownloadUrl,
                     pageURL: release.htmlUrl)
                 phase = .available
             } else {
@@ -151,7 +151,10 @@ final class UpdateChecker {
 
         do {
             phase = .downloading
-            let (downloaded, _) = try await URLSession.shared.download(from: dmgURL)
+            let (downloaded, response) = try await URLSession.shared.download(from: dmgURL)
+            if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+                throw UpdateError.httpStatus(http.statusCode)
+            }
             // hdiutil wants the .dmg extension to pick the right handler.
             let dmg = downloaded.deletingPathExtension().appendingPathExtension("dmg")
             try? FileManager.default.removeItem(at: dmg)
@@ -180,10 +183,16 @@ final class UpdateChecker {
         try await run("/usr/bin/hdiutil",
                       "attach", dmg.path, "-nobrowse", "-readonly", "-noautoopen",
                       "-mountpoint", mountPoint.path)
-        defer {
-            Task.detached { try? await run("/usr/bin/hdiutil", "detach", mountPoint.path) }
+        do {
+            try await replaceRunningApp(from: mountPoint)
+        } catch {
+            try? await run("/usr/bin/hdiutil", "detach", mountPoint.path)
+            throw error
         }
+        try? await run("/usr/bin/hdiutil", "detach", mountPoint.path)
+    }
 
+    private static func replaceRunningApp(from mountPoint: URL) async throws {
         let contents = try FileManager.default.contentsOfDirectory(
             at: mountPoint, includingPropertiesForKeys: nil)
         guard let app = contents.first(where: { $0.pathExtension == "app" }) else {
@@ -277,10 +286,12 @@ final class UpdateChecker {
     /// the main actor suspends instead of blocking (same pattern as
     /// `ScreenshotService.runScreencapture`).
     private static func run(_ executable: String, _ arguments: String...) async throws {
+        let stderr = Pipe()
         let status: Int32 = await withCheckedContinuation { continuation in
             let process = Process()
             process.executableURL = URL(fileURLWithPath: executable)
             process.arguments = arguments
+            process.standardError = stderr
             process.terminationHandler = { continuation.resume(returning: $0.terminationStatus) }
             do {
                 try process.run()
@@ -290,7 +301,8 @@ final class UpdateChecker {
             }
         }
         guard status == 0 else {
-            throw UpdateError.processFailed("\(executable) exited with \(status)")
+            let message = String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            throw UpdateError.processFailed("\(executable) exited with \(status): \(message)")
         }
     }
 }
@@ -304,5 +316,9 @@ private struct APIRelease: Decodable {
     struct Asset: Decodable {
         let name: String
         let browserDownloadUrl: URL
+        /// "uploaded" once the file is actually downloadable; a release caught
+        /// mid-publish still lists the asset while its URL 404s.
+        let state: String
+        var isUploaded: Bool { state == "uploaded" }
     }
 }
