@@ -703,6 +703,9 @@ struct EditorCanvas: View {
                                            color: model.color,
                                            lineWidth: model.lineWidth * sizeScale,
                                            fontSize: labelSize * sizeScale)
+                    // Keep one id for the whole drag so the pixelate mosaic
+                    // doesn't reshuffle every frame.
+                    if let previous = model.draft { draft.id = previous.id }
                     if model.tool == .line {
                         draft.startCap = model.lineStartCap
                         draft.endCap = model.lineEndCap

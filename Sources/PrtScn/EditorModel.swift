@@ -1151,9 +1151,9 @@ final class EditorModel {
     func pixelatedRegion(for annotation: Annotation) -> CGImage? {
         let rect = annotation.boundingRect
         if let cached = mosaicCache[annotation.id], cached.region == rect { return cached.image }
-        guard let mosaic = pixelatedRegion(rect) else { return nil }
-        // Drafts get a fresh id per drag frame; prune ids that no longer exist
-        // so the cache stays bounded.
+        guard let mosaic = pixelatedRegion(rect, seed: annotation.id) else { return nil }
+        // Abandoned drafts leave ids behind; prune ids that no longer exist so
+        // the cache stays bounded.
         if mosaicCache.count > annotations.count + 8 {
             let live = Set(annotations.map(\.id))
             mosaicCache = mosaicCache.filter { live.contains($0.key) }
@@ -1162,10 +1162,10 @@ final class EditorModel {
         return mosaic
     }
 
-    /// A mosaic of `rect` (pixel coords) from the base image: downscale, then
-    /// nearest-neighbor upscale — pure Core Graphics, no Metal. Used for the
-    /// pixelate tool on screen and in the export.
-    private func pixelatedRegion(_ rect: CGRect) -> CGImage? {
+    /// A mosaic of `rect` (pixel coords) from the base image: downscale,
+    /// shuffle the cells, then nearest-neighbor upscale — pure Core Graphics,
+    /// no Metal. Used for the pixelate tool on screen and in the export.
+    private func pixelatedRegion(_ rect: CGRect, seed: UUID) -> CGImage? {
         guard let base = baseImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
         let bounds = CGRect(x: 0, y: 0, width: base.width, height: base.height)
         let region = rect.integral.intersection(bounds)
@@ -1174,20 +1174,51 @@ final class EditorModel {
         let block = max(min(pixelSize.width, pixelSize.height) * 0.02, 6)
         let smallWidth = max(Int(region.width / block), 1)
         let smallHeight = max(Int(region.height / block), 1)
-        guard let small = Self.resize(sub, width: smallWidth, height: smallHeight, interpolation: .medium)
+        guard let small = Self.resize(sub, width: smallWidth, height: smallHeight, interpolation: .medium,
+                                      shuffledWith: seed)
         else { return nil }
         return Self.resize(small, width: Int(region.width), height: Int(region.height), interpolation: .none)
     }
 
     private static func resize(_ image: CGImage, width: Int, height: Int,
-                               interpolation: CGInterpolationQuality) -> CGImage? {
+                               interpolation: CGInterpolationQuality, shuffledWith seed: UUID? = nil) -> CGImage? {
         guard width > 0, height > 0, let context = CGContext(
             data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
             space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ) else { return nil }
         context.interpolationQuality = interpolation
         context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        if let seed { shufflePixels(of: context, seed: seed) }
         return context.makeImage()
+    }
+
+    /// Permutes every cell of the mosaic and nudges each colour a few levels,
+    /// so it can't be matched back to its source: de-pixelation attacks rely
+    /// on each cell being the exact average of the pixels *under it*, and the
+    /// jitter blurs the colour histogram a brute-force comparison could still
+    /// rank candidates by. Seeded by the annotation id so the canvas, the
+    /// export and a reopened project all agree.
+    private static func shufflePixels(of context: CGContext, seed: UUID) {
+        guard let data = context.data else { return }
+        let width = context.width, height = context.height, stride = context.bytesPerRow / 4
+        let pixels = data.bindMemory(to: UInt32.self, capacity: stride * height)
+        var cells = (0..<height).flatMap { y in (0..<width).map { x in pixels[y * stride + x] } }
+        var generator = SplitMix64(seed: seed)
+        cells.shuffle(using: &generator)
+        for y in 0..<height { for x in 0..<width { pixels[y * stride + x] = cells[y * width + x] } }
+
+        let channels = data.bindMemory(to: UInt8.self, capacity: context.bytesPerRow * height)
+        let jitter = 8
+        for y in 0..<height {
+            for x in 0..<width {
+                let offset = y * context.bytesPerRow + x * 4
+                let alpha = Int(channels[offset + 3])
+                for channel in 0..<3 {
+                    let nudged = Int(channels[offset + channel]) + Int.random(in: -jitter...jitter, using: &generator)
+                    channels[offset + channel] = UInt8(min(max(nudged, 0), alpha))
+                }
+            }
+        }
     }
 
     /// A share-sheet item for the flattened capture: a nicely-named PNG file
@@ -1515,5 +1546,22 @@ final class EditorModel {
             height = max(height, rep.pixelsHigh)
         }
         return width > 0 && height > 0 ? CGSize(width: width, height: height) : image.size
+    }
+}
+
+/// Deterministic generator (the stdlib's can't be seeded).
+struct SplitMix64: RandomNumberGenerator {
+    private var state: UInt64
+
+    init(seed: UUID) {
+        state = withUnsafeBytes(of: seed.uuid) { $0.load(as: UInt64.self) }
+    }
+
+    mutating func next() -> UInt64 {
+        state &+= 0x9E37_79B9_7F4A_7C15
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        return z ^ (z >> 31)
     }
 }
