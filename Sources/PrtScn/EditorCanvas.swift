@@ -176,10 +176,10 @@ struct EditorCanvas: View {
                     .onContinuousHover(coordinateSpace: .local) { phase in
                         switch phase {
                         case .active(let location):
+                            // Re-assert every move: SwiftUI resets the cursor on
+                            // each mouse-moved, so a one-shot set wouldn't stick.
+                            crosshair?.set()
                             if model.isPickingColor {
-                                // Re-assert every move: SwiftUI resets the cursor on
-                                // each mouse-moved, so a one-shot set wouldn't stick.
-                                NSCursor.crosshair.set()
                                 model.updateHoverColor(at: fit.toImage(location, clampedTo: model.pixelSize))
                             } else if model.tool == .measure, !model.isCropping,
                                       SettingsStore.shared.measureLoupe {
@@ -199,10 +199,8 @@ struct EditorCanvas: View {
                                 snapAnchor = nil
                                 bendDotsLineID = nil
                             }
-                            if model.isPickingColor {
-                                NSCursor.arrow.set()
-                                model.updateHoverColor(at: nil)
-                            }
+                            if crosshair != nil { NSCursor.arrow.set() }
+                            if model.isPickingColor { model.updateHoverColor(at: nil) }
                         }
                     }
                 textOverlay(fit: fit)
@@ -294,6 +292,10 @@ struct EditorCanvas: View {
         // NSCursor's crosshair instead — see the hover handler — as SwiftUI's
         // PointerStyle has no crosshair.)
         .pointerStyle(pointerStyle)
+    }
+
+    private var crosshair: NSCursor? {
+        model.isPickingColor || (model.tool.isShape && !model.isCropping) ? .crosshair : nil
     }
 
     private var pointerStyle: PointerStyle? {
@@ -649,6 +651,7 @@ struct EditorCanvas: View {
                     abandonStaleSessions()
                 }
                 if model.isCropping { cropChanged(value, fit: fit); return }
+                crosshair?.set()
                 if session == nil {
                     session = makeSession(pressView: value.startLocation, fit: fit)
                     // Hover doesn't fire during a drag: only a bend-dot drag

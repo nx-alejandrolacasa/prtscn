@@ -99,9 +99,8 @@ struct EditorView: View {
                 PaletteButton(help: String(localized: "Crop"), action: model.beginCrop) {
                     Image(systemName: "crop").font(.system(size: 15, weight: .medium))
                 }
-                PaletteButton(help: String(localized: "Pixelate (P)"), isOn: model.tool == .pixelate,
-                              action: { model.tool = .pixelate }) {
-                    Image(systemName: "eye.slash").font(.system(size: 15, weight: .medium))
+                PaletteButton(help: String(localized: "Copy text with OCR (⌘T)"), action: model.copyText) {
+                    Image(systemName: "text.viewfinder").font(.system(size: 15, weight: .medium))
                 }
                 PaletteButton(help: String(localized: "Pick Color"), isOn: model.isPickingColor,
                               action: model.beginPickingColor) {
@@ -143,9 +142,6 @@ struct EditorView: View {
                 }
                 PaletteButton(help: String(localized: "Export as PNG (⌘E)"), action: model.export) {
                     Image(systemName: "arrow.up.document").font(.system(size: 15, weight: .medium))
-                }
-                PaletteButton(help: String(localized: "Copy text with OCR (⌘T)"), action: model.copyText) {
-                    Image(systemName: "text.viewfinder").font(.system(size: 15, weight: .medium))
                 }
 
                 Divider().frame(height: 20)
@@ -274,6 +270,11 @@ struct EditorView: View {
             CounterToolControl(model: model, isExpanded: expanded == .counter) {
                 model.tool = .counter
                 setExpanded(.counter)
+            }
+
+            PaletteButton(help: EditTool.pixelate.hint, isOn: model.tool == .pixelate,
+                          action: { model.tool = .pixelate }) {
+                EditTool.pixelate.icon
             }
 
             Divider().frame(height: 20)
