@@ -64,12 +64,13 @@ struct EditorView: View {
             .animation(.snappy(duration: 0.25), value: model.isFullScreen)
             // The open section always follows the active tool — a selected
             // tool's subtools stay in view (tools without any, like pixelate,
-            // collapse the bar).
-            .onChange(of: model.tool) { _, tool in setExpanded(section(for: tool)) }
+            // collapse the bar) — or, with Select armed, the one selected
+            // annotation, so it can be restyled without re-arming its tool.
+            .onChange(of: optionsTool) { _, tool in setExpanded(section(for: tool)) }
             // The preselected tool's section starts open (set directly, so it
             // doesn't animate in), putting its options in view without a click.
             .onAppear {
-                expanded = section(for: model.tool)
+                expanded = section(for: optionsTool)
                 withAnimation(.spring(duration: 0.55, bounce: 0.22)) { appeared = true }
             }
     }
@@ -96,10 +97,10 @@ struct EditorView: View {
                 .glassBar()
 
             HStack(spacing: 6) {
-                PaletteButton(help: String(localized: "Crop"), action: model.beginCrop) {
+                PaletteButton(help: String(localized: "Crop (K)"), action: model.beginCrop) {
                     Image(systemName: "crop").font(.system(size: 15, weight: .medium))
                 }
-                PaletteButton(help: String(localized: "Copy text with OCR (⌘T)"), action: model.copyText) {
+                PaletteButton(help: String(localized: "Copy text with OCR (⌘T)"), action: model.togglePickingText) {
                     Image(systemName: "text.viewfinder").font(.system(size: 15, weight: .medium))
                 }
                 PaletteButton(help: String(localized: "Pick Color"), isOn: model.isPickingColor,
@@ -137,7 +138,7 @@ struct EditorView: View {
             }
 
             HStack(spacing: 6) {
-                PaletteButton(help: String(localized: "Copy (⌘C)"), action: model.copy) {
+                PaletteButton(help: String(localized: "Copy (⌘C)"), action: { model.copy() }) {
                     Image(systemName: "document.on.document").font(.system(size: 15, weight: .medium))
                 }
                 PaletteButton(help: String(localized: "Export as PNG (⌘E)"), action: model.export) {
@@ -216,6 +217,10 @@ struct EditorView: View {
         .help(String(localized: "Save as a project — keeps the shapes editable (⌘S)"))
     }
 
+    private var optionsTool: EditTool {
+        model.tool == .select ? model.selectedAnnotation?.kind ?? .select : model.tool
+    }
+
     /// The palette section belonging to a tool — always shown while that tool
     /// is active. `nil` for tools without subtools.
     private func section(for tool: EditTool) -> PaletteSection? {
@@ -284,8 +289,8 @@ struct EditorView: View {
             ColorPalette(selection: Binding(get: { model.paletteColor }, set: { model.setColor($0) }),
                          panelProxy: model.colorPanelProxy,
                          isExpanded: expanded == .color,
-                         onToggle: { setExpanded(expanded == .color ? section(for: model.tool) : .color) },
-                         collapse: { setExpanded(section(for: model.tool)) })
+                         onToggle: { setExpanded(expanded == .color ? section(for: optionsTool) : .color) },
+                         collapse: { setExpanded(section(for: optionsTool)) })
 
             Divider().frame(height: 20)
 
@@ -370,7 +375,7 @@ struct EditorView: View {
                 .padding(.top, toastInset)
                 .transition(.move(edge: .top).combined(with: .opacity))
         } else if let tip = model.tipMessage {
-            Label(tip, systemImage: "hand.draw")
+            Label(tip, systemImage: model.tipSymbol)
                 .font(.system(size: 12, weight: .medium))
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
@@ -384,24 +389,29 @@ struct EditorView: View {
 
     private var shortcuts: some View {
         Group {
-            Button("", action: model.copy).keyboardShortcut("c", modifiers: .command)
+            Button("", action: { model.copy() }).keyboardShortcut("c", modifiers: .command)
+            Button("", action: { model.copy(keepingEditorOpen: true) })
+                .keyboardShortcut("c", modifiers: [.command, .option])
             Button("", action: model.export).keyboardShortcut("e", modifiers: .command)
             Button("", action: { model.saveProject() }).keyboardShortcut("s", modifiers: .command)
             Button("", action: model.saveProjectAs).keyboardShortcut("s", modifiers: [.command, .shift])
-            Button("", action: model.copyText).keyboardShortcut("t", modifiers: .command)
+            Button("", action: model.togglePickingText).keyboardShortcut("t", modifiers: .command)
             Button("", action: EditorController.shared.requestClose).keyboardShortcut("w", modifiers: .command)
             Button("", action: EditorController.shared.toggleFullScreen)
                 .keyboardShortcut("f", modifiers: [.control, .command])
             Button("", action: model.undo).keyboardShortcut("z", modifiers: .command)
             Button("", action: model.redo).keyboardShortcut("z", modifiers: [.command, .shift])
             Button("", action: model.deleteSelected).keyboardShortcut(.delete, modifiers: [])
-            Button("", action: model.duplicateSelected).keyboardShortcut("d", modifiers: .command)
+            Button("", action: { model.duplicateSelected() }).keyboardShortcut("d", modifiers: .command)
             Button("", action: model.zoomIn).keyboardShortcut("+", modifiers: .command)
             // ⌘= zooms in too — on many layouts "+" needs Shift, "=" doesn't.
             Button("", action: model.zoomIn).keyboardShortcut("=", modifiers: .command)
             Button("", action: model.zoomOut).keyboardShortcut("-", modifiers: .command)
             Button("", action: model.resetZoom).keyboardShortcut("0", modifiers: .command)
-            Button("", action: { if model.isCropping { model.applyCrop() } })
+            Button("", action: model.zoomToActualSize).keyboardShortcut("1", modifiers: .command)
+            Button("", action: model.selectAll).keyboardShortcut("a", modifiers: .command)
+            // ⏎ finishes: the crop while cropping, otherwise the edit itself.
+            Button("", action: { if model.isCropping { model.applyCrop() } else { model.copy() } })
                 .keyboardShortcut(.return, modifiers: [])
             toolShortcuts
         }
@@ -415,19 +425,24 @@ struct EditorView: View {
     /// E doubles for the ellipse alongside C.
     private var toolShortcuts: some View {
         Group {
-            Button("", action: { model.tool = .select }).keyboardShortcut("s", modifiers: [])
-            Button("", action: { model.tool = .select }).keyboardShortcut("v", modifiers: [])
-            Button("", action: { model.selectLineTool(arrow: true) }).keyboardShortcut("a", modifiers: [])
-            Button("", action: { model.selectLineTool(arrow: false) }).keyboardShortcut("l", modifiers: [])
-            Button("", action: { model.selectShape(.roundedRect) }).keyboardShortcut("r", modifiers: [])
-            Button("", action: { model.selectShape(.ellipse) }).keyboardShortcut("c", modifiers: [])
-            Button("", action: { model.selectShape(.ellipse) }).keyboardShortcut("e", modifiers: [])
-            Button("", action: { model.selectShape(.diamond) }).keyboardShortcut("d", modifiers: [])
-            Button("", action: { model.tool = .text }).keyboardShortcut("t", modifiers: [])
-            Button("", action: { model.tool = .measure }).keyboardShortcut("m", modifiers: [])
-            Button("", action: { model.tool = .counter }).keyboardShortcut("n", modifiers: [])
-            Button("", action: { model.tool = .pixelate }).keyboardShortcut("p", modifiers: [])
+            toolKey("s", .select)
+            toolKey("v", .select)
+            toolKey("a", .line, arrow: true)
+            toolKey("l", .line, arrow: false)
+            toolKey("r", .roundedRect)
+            toolKey("c", .ellipse)
+            toolKey("e", .ellipse)
+            toolKey("d", .diamond)
+            toolKey("t", .text)
+            toolKey("m", .measure)
+            toolKey("n", .counter)
+            toolKey("p", .pixelate)
+            Button("", action: model.beginCrop).keyboardShortcut("k", modifiers: [])
         }
+    }
+
+    private func toolKey(_ key: KeyEquivalent, _ tool: EditTool, arrow: Bool? = nil) -> some View {
+        Button("", action: { model.pressToolKey(tool, arrow: arrow) }).keyboardShortcut(key, modifiers: [])
     }
 }
 
@@ -623,14 +638,15 @@ private struct LineToolControl: View {
                 // they read as the editable ends of one line — no labels.
                 SubToolbar(spacing: 4) {
                     capMenu(String(localized: "Start"), atStart: true,
-                            selection: Binding(get: { model.lineStartCap },
+                            selection: Binding(get: { model.paletteLineStartCap },
                                                set: { model.setLineStartCap($0) }))
                     Circle()
                         .fill(.secondary)
                         .frame(width: 5, height: 5)
                     capMenu(String(localized: "End"), atStart: false,
-                            selection: Binding(get: { model.lineEndCap },
+                            selection: Binding(get: { model.paletteLineEndCap },
                                                set: { model.setLineEndCap($0) }))
+                    StrokeStepper(model: model)
                 }
             }
         }
@@ -694,11 +710,12 @@ private struct ShapeToolControl: View {
             if isExpanded {
                 SubToolbar {
                     ForEach(EditTool.shapes) { shape in
-                        PaletteButton(help: shape.hint, isOn: model.tool == shape,
+                        PaletteButton(help: shape.hint, isOn: model.paletteShape == shape,
                                       segmented: true) {
-                            model.selectShape(shape)
+                            model.chooseShape(shape)
                         } icon: { shape.icon }
                     }
+                    StrokeStepper(model: model)
                 }
             }
         }
@@ -810,21 +827,35 @@ private struct MeasureToolControl: View {
     }
 }
 
+/// The line and shape tools' stroke width, in whole points.
+private struct StrokeStepper: View {
+    let model: EditorModel
+
+    var body: some View {
+        SizeStepper(points: model.inPoints(model.paletteLineWidth),
+                    smaller: String(localized: "Thinner"), larger: String(localized: "Thicker")) {
+            model.stepLineWidth(by: $0 > 1 ? 1 : -1)
+        }
+    }
+}
+
 /// A `−  size  +` stepper bound to a given size value and adjuster.
 private struct SizeStepper: View {
     let points: Int
+    var smaller = String(localized: "Smaller")
+    var larger = String(localized: "Larger")
     let adjust: (CGFloat) -> Void
 
     var body: some View {
         HStack(spacing: 6) {
-            PaletteButton(help: String(localized: "Smaller"), action: { adjust(1 / 1.15) }) {
+            PaletteButton(help: smaller, action: { adjust(1 / 1.15) }) {
                 Image(systemName: "minus").font(.system(size: 13, weight: .semibold))
             }
             Text("\(points)")
                 .font(.system(size: 12, weight: .medium))
                 .monospacedDigit()
                 .frame(minWidth: 30)
-            PaletteButton(help: String(localized: "Larger"), action: { adjust(1.15) }) {
+            PaletteButton(help: larger, action: { adjust(1.15) }) {
                 Image(systemName: "plus").font(.system(size: 13, weight: .semibold))
             }
         }

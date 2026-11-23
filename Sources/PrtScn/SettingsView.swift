@@ -713,6 +713,7 @@ private struct PreviewSettingsView: View {
 
             Section("Dismissal") {
                 Picker("Auto-dismiss after", selection: $settings.previewTimeout) {
+                    Text("Immediately (no preview)").tag(SettingsStore.noPreviewTimeout)
                     Text("3 seconds").tag(3.0)
                     Text("5 seconds").tag(5.0)
                     Text("10 seconds").tag(10.0)
@@ -844,6 +845,8 @@ private struct EditorSettingsView: View {
 
 private struct HotkeySettingsView: View {
     @Bindable var settings = SettingsStore.shared
+    /// A row whose last recorded combo was refused, and the mode that has it.
+    @State private var duplicateOwner: [CaptureMode: CaptureMode] = [:]
 
     var body: some View {
         Form {
@@ -861,7 +864,7 @@ private struct HotkeySettingsView: View {
                     Button("Use System Shortcuts") {
                         settings.shortcuts = SettingsStore.systemShortcuts
                     }
-                    .help("⇧⌘3 full screen, ⇧⌘4 area, ⇧⌘5 window, ⇧⌘6 fixed size, ⇧⌘7 scrolling")
+                    .help("⇧⌘3 full screen, ⇧⌘4 area, ⇧⌘5 window, ⇧⌘6 fixed size, ⇧⌘7 scrolling, ⇧⌘8 text, ⇧⌘9 previous area")
                 }
             } footer: {
                 VStack(alignment: .leading, spacing: 4) {
@@ -889,7 +892,23 @@ private struct HotkeySettingsView: View {
     }
 
     private func shortcutRow(_ mode: CaptureMode) -> some View {
-        LabeledContent(mode.title) {
+        LabeledContent {
+            shortcutControls(mode)
+        } label: {
+            Text(mode.title)
+            if let owner = duplicateOwner[mode] {
+                Label("Already used for \(owner.title)", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+            } else if let shortcut = settings.shortcuts[mode],
+               HotkeyManager.shared.isBlocked(mode, shortcut: shortcut) {
+                Label("In use by macOS or another app", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+            }
+        }
+    }
+
+    private func shortcutControls(_ mode: CaptureMode) -> some View {
+        Group {
             HStack(spacing: 8) {
                 ShortcutRecorder(shortcut: settings.shortcuts[mode]) { newValue in
                     setShortcut(newValue, for: mode)
@@ -918,8 +937,10 @@ private struct HotkeySettingsView: View {
         // Reject a combo already assigned to another capture mode — the old
         // value stays, and the beep mirrors the recorder's modifier-less
         // rejection. (Registering the same combo twice would silently fail.)
-        if let value, settings.shortcuts.contains(where: { $0.key != mode && $0.value == value }) {
+        duplicateOwner = [:]
+        if let value, let owner = settings.shortcuts.first(where: { $0.key != mode && $0.value == value })?.key {
             NSSound.beep()
+            duplicateOwner[mode] = owner
             return
         }
         var updated = settings.shortcuts

@@ -29,6 +29,18 @@ final class PreviewModel {
     /// The action under the pointer, for the hover hint pill (nil = none).
     var hoveredAction: PreviewAction?
 
+    /// A short message over the thumbnail: an action that had nothing to do,
+    /// or a scrolling capture that stopped early.
+    private(set) var notice: String?
+
+    func show(notice message: String) {
+        notice = message
+        Task {
+            try? await Task.sleep(for: .seconds(3))
+            if notice == message { notice = nil }
+        }
+    }
+
     /// Called when the card should be torn down (set by the controller).
     var onClose: (() -> Void)?
 
@@ -59,7 +71,7 @@ final class PreviewModel {
         while remaining > 0 {
             try? await Task.sleep(for: .seconds(step))
             if Task.isCancelled { return }
-            if isHovering { continue }      // paused
+            if isHovering || handled { continue }      // paused (an OCR pass may yet hand the card back)
             remaining = max(0, remaining - step)
         }
         dismiss()
@@ -77,14 +89,23 @@ final class PreviewModel {
         case .copy:
             Task {
                 await ScreenshotService.shared.copyToClipboard(imageURL, captureScale: captureScale)
+                MenuBarState.shared.flashCaptureFeedback()
                 close(cleanup: true)
             }
         case .ocr:
-            ScreenshotService.shared.copyText(in: image)
-            close(cleanup: true)
+            Task {
+                if await ScreenshotService.shared.copyText(in: image) {
+                    MenuBarState.shared.flashCaptureFeedback()
+                    close(cleanup: true)
+                } else {
+                    handled = false   // nothing was copied: the capture stays for another action
+                    show(notice: String(localized: "No text found"))
+                }
+            }
         case .save:
             Task {
                 let saved = await ScreenshotService.shared.save(imageURL, captureScale: captureScale)
+                if saved != nil { MenuBarState.shared.flashCaptureFeedback() }
                 // If the save failed, the temp file is the only copy — keep it.
                 close(cleanup: saved != nil)
             }
@@ -109,6 +130,7 @@ final class PreviewModel {
         guard !closed else { return }
         closed = true
         if cleanup {
+            LastCapture.shared.keep(imageAt: imageURL, captureScale: captureScale)
             ScreenshotService.shared.cleanup(imageURL)
         }
         onClose?()

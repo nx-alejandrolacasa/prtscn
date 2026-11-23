@@ -47,11 +47,13 @@ final class EditorController: NSObject, NSWindowDelegate {
     /// Opens the editor for a capture. Takes ownership of `imageURL` (the temp
     /// file): the editor reuses it as its working file and deletes it on close.
     /// A capture the open editor can't make way for is saved to the save
-    /// folder rather than lost, unless `saveIfRefused` is off.
+    /// folder rather than lost, unless `saveIfRefused` is off — which is how
+    /// files and blank canvases, not being captures, come in.
     func show(imageURL: URL, captureScale: CGFloat, saveIfRefused: Bool = true,
               fullScreen: Bool = true) {
         guard let image = NSImage(contentsOf: imageURL) else { return }
-        if !present(EditorModel(image: image, workingURL: imageURL, captureScale: captureScale),
+        if !present(EditorModel(image: image, workingURL: imageURL, captureScale: captureScale,
+                                isCapture: saveIfRefused),
                     fullScreen: fullScreen) {
             if saveIfRefused { _ = ScreenshotService.shared.save(imageURL, captureScale: captureScale) }
             ScreenshotService.shared.cleanup(imageURL)
@@ -116,11 +118,21 @@ final class EditorController: NSObject, NSWindowDelegate {
         model.restoreRecovered(document, originalDocumentURL: originalDocumentURL)
     }
 
+    /// Reopens the capture `LastCapture` kept, annotations still editable, as
+    /// the plain capture it was. Windowed: it's asked for from the menu-bar
+    /// dropdown, whose closing hands focus back to the previous app — which
+    /// an immersive editor takes as its cue to step aside.
+    func reopenCapture(at packageURL: URL) {
+        guard let (model, document) = loadProject(at: packageURL, isCapture: true) else { return }
+        guard present(model) else { return ScreenshotService.shared.cleanup(model.workingURL) }
+        model.restore(document)
+    }
+
     /// A model over the package's base image, which becomes a fresh temp
     /// working file (the editor owns and deletes it, like a capture's).
     /// Alerts and returns `nil` when the package can't be read.
-    private func loadProject(at url: URL, recovery: CanvasRecovery = CanvasRecovery())
-        -> (EditorModel, ProjectDocument)? {
+    private func loadProject(at url: URL, recovery: CanvasRecovery = CanvasRecovery(),
+                             isCapture: Bool = false) -> (EditorModel, ProjectDocument)? {
         let image: NSImage, document: ProjectDocument
         do {
             (image, document) = try ProjectDocument.read(from: url)
@@ -136,7 +148,8 @@ final class EditorController: NSObject, NSWindowDelegate {
         let workingURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("prtscn-project-\(UUID().uuidString).png")
         let model = EditorModel(image: image, workingURL: workingURL,
-                                captureScale: document.captureScale, recovery: recovery)
+                                captureScale: document.captureScale, recovery: recovery,
+                                isCapture: isCapture)
         return (model, document)
     }
 
@@ -262,19 +275,29 @@ final class EditorController: NSObject, NSWindowDelegate {
         // `assumeIsolated`), but NSEvent isn't Sendable, so its payload is
         // unpacked before crossing in.
         panMonitor = NSEvent.addLocalMonitorForEvents(
-            matching: [.rightMouseDown, .rightMouseDragged, .rightMouseUp, .scrollWheel, .keyDown]
+            matching: [.rightMouseDown, .rightMouseDragged, .rightMouseUp, .scrollWheel, .keyDown, .keyUp]
         ) { event in
             let windowID = event.window.map(ObjectIdentifier.init)
             let location = event.locationInWindow
             let consumed: Bool
-            if event.type == .keyDown {
+            // `keyCode` raises on anything but a key event.
+            let isKey = event.type == .keyDown || event.type == .keyUp
+            let isSpace = isKey && event.keyCode == Self.spaceKeyCode
+            if event.type == .keyUp {
+                consumed = isSpace && MainActor.assumeIsolated {
+                    Self.shared.handleSpace(down: false, windowID: windowID)
+                }
+            } else if event.type == .keyDown {
                 let key = event.specialKey?.rawValue
                 let escape = event.keyCode == 53
                 let shift = event.modifierFlags.contains(.shift)
                 let command = event.modifierFlags.contains(.command)
+                let isRepeat = event.isARepeat
                 consumed = MainActor.assumeIsolated {
                     Self.shared.handleEscape(escape, windowID: windowID)
-                        || Self.shared.handleReturnKey(key: key, windowID: windowID, command: command)
+                        || isSpace && Self.shared.handleSpace(down: true, windowID: windowID)
+                        || Self.shared.handleReturnKey(key: key, windowID: windowID, command: command,
+                                                       isRepeat: isRepeat)
                         || Self.shared.handleArrowKey(key: key, windowID: windowID, shift: shift)
                 }
             } else if event.type == .scrollWheel {
@@ -355,7 +378,10 @@ final class EditorController: NSObject, NSWindowDelegate {
     private func finishPresenting(_ window: NSWindow) -> Bool {
         DispatchQueue.main.async { [weak self] in
             guard let self, let window = self.window, let model = self.model else { return }
-            NSApp.activate()
+            // Cooperative `activate()` can be refused while another app is
+            // frontmost — the usual state when the editor is asked for from
+            // the menu-bar dropdown — leaving the window up but without focus.
+            NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
             self.installSizeReadout(in: window, model: model)
         }
@@ -559,14 +585,39 @@ final class EditorController: NSObject, NSWindowDelegate {
         return true
     }
 
+    private nonisolated static let spaceKeyCode: UInt16 = 49
+
+    /// Space held turns drags into pans. Left alone while a text field has
+    /// the keyboard, where it types a space.
+    private func handleSpace(down: Bool, windowID: ObjectIdentifier?) -> Bool {
+        guard let window, let model, windowID == ObjectIdentifier(window) else { return false }
+        guard down else {
+            let wasDown = model.isSpaceDown
+            model.isSpaceDown = false
+            return wasDown
+        }
+        guard !(window.firstResponder is NSText) else { return false }
+        if !model.isSpaceDown { model.isSpaceDown = true }
+        return true
+    }
+
+    /// A Space released while another window had the keyboard never arrives.
+    func windowDidResignKey(_ notification: Notification) {
+        model?.isSpaceDown = false
+    }
+
     /// Return inserts a line break while a text annotation is being typed
     /// into — only clicking away commits. The field editor treats a
     /// bare Return as "submit", so it's told to insert the newline directly.
-    private func handleReturnKey(key: Int?, windowID: ObjectIdentifier?, command: Bool) -> Bool {
-        guard let window, let model, windowID == ObjectIdentifier(window),
-              !command, model.editingTextID != nil, let key,
-              [.carriageReturn, .enter].contains(NSEvent.SpecialKey(rawValue: key)),
-              let editor = window.firstResponder as? NSTextView else { return false }
+    /// A repeating Return is swallowed otherwise: the ⏎ that opened the
+    /// editor from the preview, held a moment too long, would copy and close
+    /// it again.
+    private func handleReturnKey(key: Int?, windowID: ObjectIdentifier?, command: Bool,
+                                 isRepeat: Bool) -> Bool {
+        guard let window, let model, windowID == ObjectIdentifier(window), !command, let key,
+              [.carriageReturn, .enter].contains(NSEvent.SpecialKey(rawValue: key)) else { return false }
+        guard model.editingTextID != nil, let editor = window.firstResponder as? NSTextView
+        else { return isRepeat }
         editor.insertNewlineIgnoringFieldEditor(nil)
         return true
     }
@@ -594,7 +645,7 @@ final class EditorController: NSObject, NSWindowDelegate {
     /// Scrolling moves the capture (image tracks the gesture, like the
     /// right-click drag — `scrollingDelta` already honors the user's natural-
     /// scrolling preference, and momentum events keep flowing through for
-    /// free inertia); ⌘-scrolling zooms about the canvas center, the same
+    /// free inertia); ⌘-scrolling zooms toward the pointer, the same
     /// clamped path the pinch uses. Returns whether the event was consumed.
     private func handleScroll(windowID: ObjectIdentifier?, location: NSPoint,
                               dx: CGFloat, dy: CGFloat, precise: Bool,
@@ -607,7 +658,7 @@ final class EditorController: NSObject, NSWindowDelegate {
             // Trackpads report pixel deltas; a wheel notch reports whole
             // "lines" and needs amplifying to feel comparable.
             let step = precise ? dy : dy * 12
-            model.setZoom(model.zoom * pow(1.004, step))
+            model.setZoom(model.zoom * pow(1.004, step), aroundPointer: true)
             return true
         }
         guard model.canPan else { return false }   // fitted or smaller — nothing to pan
@@ -842,7 +893,7 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
         let spec: (symbol: String, label: String, tip: String, action: Selector)
         switch id {
         case Self.crop:
-            spec = ("crop", String(localized: "Crop"), String(localized: "Crop"), #selector(cropAction))
+            spec = ("crop", String(localized: "Crop"), String(localized: "Crop (K)"), #selector(cropAction))
         case Self.pixelate:
             spec = ("eye.slash", String(localized: "Pixelate"), String(localized: "Pixelate (P)"), #selector(pixelateAction))
         case Self.eyedropper:
@@ -916,7 +967,7 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
     @objc private func saveAction() { model.saveProject() }
     @objc private func saveAsAction() { model.saveProjectAs() }
     @objc private func openFileAction() { EditorController.shared.openFileWithPanel() }
-    @objc private func copyTextAction() { model.copyText() }
+    @objc private func copyTextAction() { model.togglePickingText() }
 
     // MARK: - Share
 

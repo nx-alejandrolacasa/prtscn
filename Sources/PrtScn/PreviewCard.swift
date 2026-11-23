@@ -115,6 +115,14 @@ struct PreviewThumbnail: View {
                 dragHint
                     .padding(.top, 8)
                     .transition(.scale(scale: 0.9).combined(with: .opacity))
+            } else if let notice = model.notice {
+                Text(notice)
+                    .font(.system(size: 11, weight: .semibold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .glassEffect(.regular, in: Capsule())
+                    .padding(.top, 8)
+                    .transition(.scale(scale: 0.9).combined(with: .opacity))
             } else if let action = model.hoveredAction {
                 hintPill(action)
                     .padding(.top, 8)
@@ -122,6 +130,7 @@ struct PreviewThumbnail: View {
             }
         }
         .animation(.easeOut(duration: 0.12), value: model.hoveredAction)
+        .animation(.easeOut(duration: 0.12), value: model.notice)
         .animation(.easeOut(duration: 0.12), value: isDragging)
     }
 

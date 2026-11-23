@@ -1,13 +1,9 @@
 /* PrtScn — Español. Las claves son las cadenas inglesas de origen (véase en.lproj). */
 
 /* Menu bar */
-"Capture Area" = "Capturar área";
-"Capture Window" = "Capturar ventana";
-"Capture Full Screen" = "Capturar pantalla completa";
-"Capture Fixed Size…" = "Capturar tamaño fijo…";
-"Capture Scrolling Area" = "Capturar con desplazamiento";
 "New Blank Canvas" = "Nuevo lienzo en blanco";
 "Open File…" = "Abrir archivo…";
+"Reopen Last Capture" = "Reabrir la última captura";
 "Close All Pins" = "Cerrar todos los pines";
 "Update to %@…" = "Actualizar a %@…";
 "Settings…" = "Ajustes…";
@@ -19,6 +15,8 @@
 "Full Screen" = "Pantalla completa";
 "Fixed Size" = "Tamaño fijo";
 "Scrolling Area" = "Área con desplazamiento";
+"Text (OCR)" = "Texto (OCR)";
+"Previous Area" = "Área anterior";
 
 /* Preview card actions */
 "Edit" = "Editar";
@@ -41,6 +39,7 @@
 "While Editing" = "Al editar";
 "Always" = "Siempre";
 "Never" = "Nunca";
+"Immediately (no preview)" = "Inmediatamente (sin vista previa)";
 "With margins" = "Con márgenes";
 "Solid color" = "Color sólido";
 "Desktop background" = "Fondo de escritorio";
@@ -140,7 +139,7 @@
 "Capture shortcuts" = "Atajos de captura";
 "Restore Defaults" = "Restaurar valores por omisión";
 "Use System Shortcuts" = "Usar los atajos del sistema";
-"⇧⌘3 full screen, ⇧⌘4 area, ⇧⌘5 window, ⇧⌘6 fixed size, ⇧⌘7 scrolling" = "⇧⌘3 pantalla completa, ⇧⌘4 área, ⇧⌘5 ventana, ⇧⌘6 tamaño fijo, ⇧⌘7 desplazamiento";
+"⇧⌘3 full screen, ⇧⌘4 area, ⇧⌘5 window, ⇧⌘6 fixed size, ⇧⌘7 scrolling, ⇧⌘8 text, ⇧⌘9 previous area" = "⇧⌘3 pantalla completa, ⇧⌘4 área, ⇧⌘5 ventana, ⇧⌘6 tamaño fijo, ⇧⌘7 desplazamiento, ⇧⌘8 texto, ⇧⌘9 área anterior";
 "“Use System Shortcuts” takes over macOS's own screenshot combos (⇧⌘3, ⇧⌘4, …). Disable the built-in ones first under System Settings → Keyboard → Keyboard Shortcuts → Screenshots, or the system keeps them." = "«Usar los atajos del sistema» se apropia de las combinaciones de captura de macOS (⇧⌘3, ⇧⌘4, …). Desactiva antes las del sistema en Ajustes del Sistema → Teclado → Funciones rápidas de teclado → Capturas de pantalla, o el sistema seguirá usándolas.";
 "Open Keyboard Settings…" = "Abrir los ajustes de teclado…";
 "Clear shortcut" = "Borrar atajo";
@@ -184,6 +183,10 @@
 "Scrolling Capture needs Accessibility access" = "La captura con desplazamiento necesita acceso de Accesibilidad";
 "PrtScn scrolls the page for you by sending scroll events, and macOS only allows that for apps with Accessibility permission.\n\nEnable PrtScn in System Settings → Privacy & Security → Accessibility, then try again." = "PrtScn desplaza la página por ti enviando eventos de desplazamiento, y macOS solo lo permite a las apps con permiso de Accesibilidad.\n\nActiva PrtScn en Ajustes del Sistema → Privacidad y seguridad → Accesibilidad y vuelve a intentarlo.";
 "Open System Settings" = "Abrir Ajustes del Sistema";
+"PrtScn needs Screen Recording access" = "PrtScn necesita acceso a Grabación de pantalla";
+"Without it, captures show only the desktop picture.\n\nEnable PrtScn in System Settings → Privacy & Security → Screen & System Audio Recording, then relaunch it." = "Sin él, las capturas solo muestran el fondo de escritorio.\n\nActiva PrtScn en Ajustes del Sistema → Privacidad y seguridad → Grabación de pantalla y audio del sistema, y vuelve a abrirlo.";
+"Capture Anyway" = "Capturar igualmente";
+"In use by macOS or another app" = "En uso por macOS u otra app";
 
 /* Editor — tools */
 "Select" = "Seleccionar";
@@ -212,10 +215,13 @@
 "Font: %@" = "Tipografía: %@";
 "Smaller" = "Más pequeño";
 "Larger" = "Más grande";
+"Thinner" = "Más fino";
+"Thicker" = "Más grueso";
 "Custom…" = "Personalizado…";
 "Undo (⌘Z)" = "Deshacer (⌘Z)";
 "Redo (⇧⌘Z)" = "Rehacer (⇧⌘Z)";
 "Crop" = "Recortar";
+"Crop (K)" = "Recortar (K)";
 "Crop (↩)" = "Recortar (↩)";
 "Top Left" = "Arriba a la izquierda";
 "Top" = "Arriba";
@@ -251,10 +257,21 @@
 "Copied" = "Copiado";
 "Exported" = "Exportado";
 "Text copied" = "Texto copiado";
+"Tool locked · press its key again to unlock" = "Herramienta fijada · pulsa su tecla otra vez para soltarla";
+"Tool unlocked" = "Herramienta sin fijar";
+"No text found" = "No se ha encontrado texto";
+"Drag over the text to copy · click for the whole image" = "Arrastra sobre el texto para copiarlo · haz clic para toda la imagen";
+"   ·   Shrunk to fit this screen" = "   ·   Reducido para caber en esta pantalla";
+"   ·   Too small to scroll, keep dragging" = "   ·   Demasiado pequeño para desplazar, sigue arrastrando";
+"Stopped at the maximum height" = "Detenido en la altura máxima";
+"Stopped early: couldn't follow the content" = "Detenido antes: no se pudo seguir el contenido";
+"Add ⌘ or ⌃" = "Añade ⌘ o ⌃";
+"Already used for %@" = "Ya se usa para %@";
+"Couldn't export the image" = "No se ha podido exportar la imagen";
 "Size copied" = "Tamaño copiado";
 "Project saved" = "Proyecto guardado";
 "Couldn't save project" = "No se pudo guardar el proyecto";
-"Scroll to move around · ⌘-scroll to zoom" = "Desplázate para moverte · ⌘-desplazamiento para hacer zoom";
+"Scroll or Space-drag to move around · ⌘-scroll to zoom" = "Desplázate o arrastra con Espacio para moverte · ⌘-desplazamiento para ampliar";
 "Zoom in to measure small distances" = "Amplía para medir distancias pequeñas";
 "Drag the middle dot to curve · double-click it for a 90° corner" = "Arrastra el punto central para curvar · doble clic para una esquina de 90°";
 "%@ project.prtscn" = "%@ proyecto.prtscn";

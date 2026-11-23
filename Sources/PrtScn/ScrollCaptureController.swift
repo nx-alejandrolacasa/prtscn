@@ -252,7 +252,7 @@ final class ScrollCaptureController {
             let frame = await captureSettledFrame(filter: filter, config: config)
             guard isRunLive else { return }
             guard let frame else {  // display gone / permission revoked → keep partial
-                finish(because: "frame capture failed")
+                finish(because: "frame capture failed", notice: Self.lostTrackNotice)
                 return
             }
             frames += 1
@@ -269,7 +269,7 @@ final class ScrollCaptureController {
                         + "glide ticks now \(glideTicks)")
                 }
                 if stitcher.stitchedHeightPx >= maxHeightPx {
-                    finish(because: "height cap (\(maxHeightPx) px)")
+                    finish(because: "height cap (\(maxHeightPx) px)", notice: Self.heightCapNotice)
                     return
                 }
             case .noChange:
@@ -279,13 +279,18 @@ final class ScrollCaptureController {
                     return
                 }
             case .lostTrack:                    // untrackable content → keep partial
-                finish(because: "lost track of the content (\(stitcher.lastMatchInfo))")
+                finish(because: "lost track of the content (\(stitcher.lastMatchInfo))",
+                       notice: Self.lostTrackNotice)
                 return
             }
         }
         guard isRunLive else { return }
-        finish(because: "frame budget (\(Self.maxFrames))")
+        finish(because: "frame budget (\(Self.maxFrames))", notice: Self.heightCapNotice)
     }
+
+    /// Shown on the preview when the capture ended before the content did.
+    private static var heightCapNotice: String { String(localized: "Stopped at the maximum height") }
+    private static var lostTrackNotice: String { String(localized: "Stopped early: couldn't follow the content") }
 
     /// Captures a frame only once the content has come to rest: takes two
     /// captures a beat apart and retakes while they differ. A frame grabbed
@@ -351,7 +356,7 @@ final class ScrollCaptureController {
     /// Breadcrumbs for diagnosing why a capture stopped where it did: the
     /// unified log (Console.app) plus a plain file at ~/Library/Logs/
     /// PrtScn.log, because `log show` is off-limits in sandboxed shells.
-    static func logDiagnostic(_ message: String) {
+    private static func logDiagnostic(_ message: String) {
         log.info("\(message, privacy: .public)")
         let line = "\(Date().formatted(.iso8601)) \(message)\n"
         guard let data = line.data(using: .utf8),
@@ -369,7 +374,7 @@ final class ScrollCaptureController {
         }
     }
 
-    private func finish(because reason: String = "user finished (click/Return)") {
+    private func finish(because reason: String = "user finished (click/Return)", notice: String? = nil) {
         guard phase == .capturing else { return }
         Self.logDiagnostic("scrolling capture finished — \(reason) at \(stitcher?.stitchedHeightPx ?? 0) px")
         endCapture()
@@ -389,7 +394,7 @@ final class ScrollCaptureController {
             else { return }
             await MainActor.run {
                 MenuBarState.shared.flashCaptureFeedback()
-                PreviewController.shared.show(imageURL: tmp, captureScale: scale)
+                PreviewController.shared.show(imageURL: tmp, captureScale: scale, notice: notice)
             }
         }
     }

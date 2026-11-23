@@ -12,9 +12,32 @@ final class PinnedPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
+    /// Scroll resizes; ⌥-scroll fades the pin, down to a legible ghost.
     override func scrollWheel(with event: NSEvent) {
         let step: CGFloat = event.hasPreciseScrollingDeltas ? 0.004 : 0.05
-        apply(scale: imageScale * (1 + event.scrollingDeltaY * step))
+        // The pin never becomes the active app's key window on its own, and
+        // an event sent to such a panel can arrive without its modifiers —
+        // so the keyboard's live state is asked too.
+        if event.modifierFlags.union(NSEvent.modifierFlags).contains(.option) {
+            alphaValue = min(max(alphaValue + event.scrollingDeltaY * step, 0.2), 1)
+        } else {
+            apply(scale: imageScale * (1 + event.scrollingDeltaY * step))
+        }
+    }
+
+    /// Arrow keys nudge the pin a point at a time, ten with Shift — once a
+    /// click has made it key.
+    override func keyDown(with event: NSEvent) {
+        let step: CGFloat = event.modifierFlags.contains(.shift) ? 10 : 1
+        var origin = frame.origin
+        switch event.specialKey {
+        case .leftArrow: origin.x -= step
+        case .rightArrow: origin.x += step
+        case .upArrow: origin.y += step
+        case .downArrow: origin.y -= step
+        default: return super.keyDown(with: event)
+        }
+        setFrameOrigin(origin)
     }
 
     override func magnify(with event: NSEvent) {
@@ -61,6 +84,7 @@ final class PinnedController {
     private struct Pin {
         let panel: PinnedPanel
         let url: URL
+        let captureScale: CGFloat
     }
 
     private var pins: [Pin] = []
@@ -107,8 +131,15 @@ final class PinnedController {
         let card = PinnedCard(
             image: image,
             windowCornerRadius: windowCornerRadius,
-            onCopy: { ScreenshotService.shared.copyToClipboard(imageURL, captureScale: captureScale) },
-            onSave: { ScreenshotService.shared.save(imageURL, captureScale: captureScale) },
+            onCopy: {
+                ScreenshotService.shared.copyToClipboard(imageURL, captureScale: captureScale)
+                MenuBarState.shared.flashCaptureFeedback()
+            },
+            onSave: {
+                if ScreenshotService.shared.save(imageURL, captureScale: captureScale) != nil {
+                    MenuBarState.shared.flashCaptureFeedback()
+                }
+            },
             onEdit: { [weak self, weak panel] in
                 EditorController.shared.show(imageURL: imageURL, captureScale: captureScale)
                 // The editor owns the temp file now — close without deleting it.
@@ -130,7 +161,7 @@ final class PinnedController {
         panel.setFrame(NSRect(origin: origin, size: size), display: false)
 
         panel.orderFront(nil)   // no makeKey — pinning shouldn't steal focus
-        pins.append(Pin(panel: panel, url: imageURL))
+        pins.append(Pin(panel: panel, url: imageURL, captureScale: captureScale))
     }
 
     func closeAll() {
@@ -141,7 +172,9 @@ final class PinnedController {
         guard let index = pins.firstIndex(where: { $0.panel === panel }) else { return }
         let pin = pins.remove(at: index)
         pin.panel.orderOut(nil)
-        if cleanup { ScreenshotService.shared.cleanup(pin.url) }
+        guard cleanup else { return }
+        LastCapture.shared.keep(imageAt: pin.url, captureScale: pin.captureScale)
+        ScreenshotService.shared.cleanup(pin.url)
     }
 
     /// A window shot's PNG is the window plus a transparent surround holding

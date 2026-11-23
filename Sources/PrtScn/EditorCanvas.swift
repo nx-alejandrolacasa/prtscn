@@ -26,18 +26,21 @@ struct CanvasFit {
         CGPoint(x: size.width / 2, y: size.height / 2)
     }
 
-    /// Pan clamped per axis: while the image fits in the window it stays fully
-    /// visible; once it overflows, no gap may open at an edge. Shared with
-    /// `EditorModel` so the stored pan never drifts off what can be shown.
-    static func clampedPan(drawn: CGSize, pan: CGSize, in size: CGSize) -> CGSize {
-        let anchor = anchor(in: size)
-        func clamp(_ pan: CGFloat, anchor: CGFloat, drawn: CGFloat, full: CGFloat) -> CGFloat {
-            let origin = anchor - drawn / 2 + pan
-            let clamped = min(max(origin, min(0, full - drawn)), max(0, full - drawn))
-            return pan + (clamped - origin)
-        }
-        return CGSize(width: clamp(pan.width, anchor: anchor.x, drawn: drawn.width, full: size.width),
-                      height: clamp(pan.height, anchor: anchor.y, drawn: drawn.height, full: size.height))
+    /// How far the image may sit off-center on one axis. Tidy: while it fits
+    /// in the canvas it stays fully visible, and once it overflows no gap may
+    /// open at an edge — what panning and the zoom buttons keep to. Loose: it
+    /// only has to keep covering the canvas center — what's drawn, so a zoom
+    /// toward the pointer can grow the image past one edge before the others.
+    static func panLimit(drawn: CGFloat, full: CGFloat, loose: Bool) -> CGFloat {
+        let tidy = abs(full - drawn) / 2
+        return loose ? max(tidy, drawn / 2) : tidy
+    }
+
+    static func clampedPan(drawn: CGSize, pan: CGSize, in size: CGSize, loose: Bool = false) -> CGSize {
+        let limitX = panLimit(drawn: drawn.width, full: size.width, loose: loose)
+        let limitY = panLimit(drawn: drawn.height, full: size.height, loose: loose)
+        return CGSize(width: min(max(pan.width, -limitX), limitX),
+                      height: min(max(pan.height, -limitY), limitY))
     }
 
     init(pixelSize: CGSize, captureScale: CGFloat, zoom: CGFloat, pan: CGSize,
@@ -46,7 +49,7 @@ struct CanvasFit {
                                    in: size) * zoom
         let drawn = CGSize(width: pixelSize.width * scale, height: pixelSize.height * scale)
         let anchor = Self.anchor(in: size)
-        let pan = Self.clampedPan(drawn: drawn, pan: pan, in: size)
+        let pan = Self.clampedPan(drawn: drawn, pan: pan, in: size, loose: true)
         self.scale = scale
         self.imageRect = CGRect(x: anchor.x - drawn.width / 2 + pan.width,
                                 y: anchor.y - drawn.height / 2 + pan.height,
@@ -77,9 +80,11 @@ private struct DragSession {
         case move(UUID)
         case resize(UUID, ResizeHandle)
         case pickColor
+        /// Rubber-banding the area OCR should read.
+        case pickText
     }
 
-    let kind: Kind
+    var kind: Kind
     let pressImage: CGPoint
     /// The shape side the line's start snapped to at press, if any.
     var startBinding: ShapeBinding?
@@ -151,6 +156,8 @@ struct EditorCanvas: View {
     /// Whether the cursor is over something the select tool could grab — it
     /// shows an open hand there, a plain arrow everywhere else.
     @State private var hoverMovable = false
+    /// The last location of a Space-drag pan in flight.
+    @State private var panLast: CGPoint?
     /// Whether this Shift hold has already stepped down a stack of figures.
     @State private var isCyclingStack = false
 
@@ -176,9 +183,11 @@ struct EditorCanvas: View {
                     .onContinuousHover(coordinateSpace: .local) { phase in
                         switch phase {
                         case .active(let location):
+                            model.pointerOffset = CGSize(width: location.x - geo.size.width / 2,
+                                                         height: location.y - geo.size.height / 2)
                             // Re-assert every move: SwiftUI resets the cursor on
                             // each mouse-moved, so a one-shot set wouldn't stick.
-                            crosshair?.set()
+                            toolCursor?.set()
                             if model.isPickingColor {
                                 model.updateHoverColor(at: fit.toImage(location, clampedTo: model.pixelSize))
                             } else if model.tool == .measure, !model.isCropping,
@@ -193,13 +202,14 @@ struct EditorCanvas: View {
                             updateBendDots(at: location, fit: fit)
                             updateHoverMovable(at: location, fit: fit)
                         case .ended:
+                            model.pointerOffset = nil
                             hoverPoint = nil
                             hoverMovable = false
                             if session == nil {
                                 snapAnchor = nil
                                 bendDotsLineID = nil
                             }
-                            if crosshair != nil { NSCursor.arrow.set() }
+                            if toolCursor != nil { NSCursor.arrow.set() }
                             if model.isPickingColor { model.updateHoverColor(at: nil) }
                         }
                     }
@@ -294,11 +304,20 @@ struct EditorCanvas: View {
         .pointerStyle(pointerStyle)
     }
 
-    private var crosshair: NSCursor? {
-        model.isPickingColor || (model.tool.isShape && !model.isCropping) ? .crosshair : nil
+    /// The cursor a tool aims with: a crosshair for everything dragged out,
+    /// an I-beam for text. `nil` leaves the arrow (or `pointerStyle`'s hand).
+    private var toolCursor: NSCursor? {
+        if model.isPickingColor || model.isPickingText { return .crosshair }
+        if model.isCropping || model.isSpaceDown { return nil }
+        switch model.tool {
+        case .select, .counter: return nil
+        case .text: return .iBeam
+        default: return .crosshair
+        }
     }
 
     private var pointerStyle: PointerStyle? {
+        if model.isSpaceDown || panLast != nil { return panLast != nil ? .grabActive : .grabIdle }
         if model.isCropping { return .rectSelection }
         guard model.tool == .select, !model.isPickingColor else { return nil }
         switch session?.kind {
@@ -399,7 +418,7 @@ struct EditorCanvas: View {
                          with: .color(annotation.color))
             let number = Text("\(annotation.number)")
                 .font(.system(size: annotation.fontSize * fit.scale, weight: .bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(Color(nsColor: NSColor(annotation.color).legibleLabelColor))
             context.draw(number, at: center, anchor: .center)
         case .text:
             let text = Text(annotation.text)
@@ -476,7 +495,7 @@ struct EditorCanvas: View {
                                             segmentLength: geometry.length)
         let text = Text(label)
             .font(.system(size: fontSize * fit.scale, weight: .semibold))
-            .foregroundStyle(.white)
+            .foregroundStyle(Color(nsColor: NSColor(color).legibleLabelColor))
         let resolved = context.resolve(text)
         let huge = CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         let size = resolved.measure(in: huge)
@@ -650,8 +669,14 @@ struct EditorCanvas: View {
                     gestureStart = value.startLocation
                     abandonStaleSessions()
                 }
+                if model.isSpaceDown && session == nil && cropSession == nil || panLast != nil {
+                    let last = panLast ?? value.startLocation
+                    model.panBy(dx: value.location.x - last.x, dy: value.location.y - last.y)
+                    panLast = value.location
+                    return
+                }
                 if model.isCropping { cropChanged(value, fit: fit); return }
-                crosshair?.set()
+                toolCursor?.set()
                 if session == nil {
                     session = makeSession(pressView: value.startLocation, fit: fit)
                     // Hover doesn't fire during a drag: only a bend-dot drag
@@ -675,8 +700,14 @@ struct EditorCanvas: View {
                     let isMeasure = model.tool == .measure
                     var start = current.pressImage
                     var end = image
-                    if shiftDown, axisLocks(model.tool) { end = axisLocked(end, relativeTo: start) }
-                    if squareSnaps(model.tool), !optionDown { end = diagonalMagnet(end, relativeTo: start) }
+                    if shiftDown, axisLocks(model.tool) { end = axisLocked(end, relativeTo: start, kind: model.tool) }
+                    if squareSnaps(model.tool) {
+                        if shiftDown {
+                            end = squared(end, relativeTo: start)
+                        } else if !optionDown {
+                            end = diagonalMagnet(end, relativeTo: start)
+                        }
+                    }
                     if isMeasure {
                         start = snapped(start)
                         end = snapped(end)
@@ -718,6 +749,17 @@ struct EditorCanvas: View {
                     model.draft = draft
                 case .move(let id):
                     guard moved else { return }
+                    if !current.didMutate, optionDown {
+                        // ⌥-drag leaves the originals behind and carries
+                        // copies; the next drag event moves them.
+                        let copies = model.duplicateSelected(offsetBy: 0)
+                        current.kind = .move(copies[id] ?? id)
+                        current.groupOriginals = Dictionary(uniqueKeysWithValues:
+                            current.groupOriginals.map { (copies[$0.key] ?? $0.key, $0.value) })
+                        current.didMutate = true
+                        session = current
+                        return
+                    }
                     let group = current.groupOriginals
                     if !current.didMutate {
                         model.snapshot()
@@ -758,7 +800,7 @@ struct EditorCanvas: View {
                     switch handle {
                     case .start:
                         var p = image
-                        if shiftDown, let kind, axisLocks(kind) { p = axisLocked(p, relativeTo: current.originalEnd) }
+                        if shiftDown, let kind, axisLocks(kind) { p = axisLocked(p, relativeTo: current.originalEnd, kind: kind) }
                         if isMeasure { p = snapped(p); loupePoint = p }
                         if kind == .line {
                             resizeLineEndpoint(id: id, handle: .start, to: p, fit: fit)
@@ -767,7 +809,7 @@ struct EditorCanvas: View {
                         }
                     case .end:
                         var p = image
-                        if shiftDown, let kind, axisLocks(kind) { p = axisLocked(p, relativeTo: current.originalStart) }
+                        if shiftDown, let kind, axisLocks(kind) { p = axisLocked(p, relativeTo: current.originalStart, kind: kind) }
                         if isMeasure { p = snapped(p); loupePoint = p }
                         if kind == .line {
                             resizeLineEndpoint(id: id, handle: .end, to: p, fit: fit)
@@ -799,9 +841,17 @@ struct EditorCanvas: View {
                         if let shape = model.annotation(id: id) {
                             p = cornerPoint(under: image, handle: handle, of: shape, fit: fit)
                         }
-                        if let kind, squareSnaps(kind), !optionDown { p = diagonalMagnet(p, relativeTo: anchor) }
+                        if let kind, squareSnaps(kind) {
+                            if shiftDown {
+                                p = squared(p, relativeTo: anchor)
+                            } else if !optionDown {
+                                p = diagonalMagnet(p, relativeTo: anchor)
+                            }
+                        }
                         model.setPoints(id: id, start: anchor, end: p)
                     }
+                case .pickText:
+                    marqueeRect = rect(from: current.pressImage, to: image)
                 case .idle, .placeText, .placeCounter, .finishingEdit, .pickColor:
                     break
                 }
@@ -814,6 +864,10 @@ struct EditorCanvas: View {
                 loupePoint = nil
                 snapAnchor = nil
                 gestureStart = nil
+                if panLast != nil {
+                    panLast = nil
+                    return
+                }
                 if model.isCropping {
                     // Discard a too-small drag so we stay in the "draw a region" phase.
                     if let r = model.cropRect, r.width < 8 || r.height < 8 { model.cropRect = nil }
@@ -834,6 +888,9 @@ struct EditorCanvas: View {
                     model.finishTextEditing()
                 case .pickColor:
                     model.commitPickedColor()
+                case .pickText:
+                    model.copyText(in: marqueeRect)
+                    marqueeRect = nil
                 case .marquee:
                     marqueeRect = nil
                 case .idle, .move, .resize:
@@ -850,6 +907,7 @@ struct EditorCanvas: View {
         model.draft = nil
         marqueeRect = nil
         loupePoint = nil
+        panLast = nil
     }
 
     /// Decides, on press, what this drag will do.
@@ -862,6 +920,9 @@ struct EditorCanvas: View {
         // or is cancelled — it doesn't select/move/draw annotations.
         if model.isPickingColor {
             return DragSession(kind: .pickColor, pressImage: pressImage)
+        }
+        if model.isPickingText {
+            return DragSession(kind: .pickText, pressImage: pressImage)
         }
 
         // A press while editing text just commits it.
@@ -878,8 +939,14 @@ struct EditorCanvas: View {
             return DragSession(kind: .placeCounter, pressImage: pressImage)
         }
 
+        // ⌥ on a figure means "drag a copy off it", wherever on it the press
+        // lands — so its handles and bend dots stand down.
+        let tolerance = bodyTolerance / fit.scale
+        let grabsHandles = !drawing && !(NSEvent.modifierFlags.contains(.option)
+            && model.annotations.contains { $0.bodyContains(pressImage, tolerance: tolerance) })
+
         // 1. A handle of the currently selected annotation.
-        if !drawing, let selected = model.selectedAnnotation {
+        if grabsHandles, let selected = model.selectedAnnotation {
             for handle in viewHandles(of: selected, fit: fit) where distance(pressView, handle.point) <= handleHitRadius {
                 return DragSession(kind: .resize(selected.id, handle.handle), pressImage: pressImage,
                                    originalStart: selected.start, originalEnd: selected.end,
@@ -904,8 +971,7 @@ struct EditorCanvas: View {
         // dots, so pressing what's visible always grabs it. Dragging reshapes
         // the line (a plain click just selects — the resize only mutates once
         // the drag moves).
-        let tolerance = bodyTolerance / fit.scale
-        if !drawing, let line = model.annotations.last(where: {
+        if grabsHandles, let line = model.annotations.last(where: {
             $0.kind == .line && $0.bodyContains(pressImage, tolerance: tolerance)
         }), let dot = line.bendDots.first(where: {
             distance(pressView, fit.toView($0.point)) <= handleHitRadius
@@ -979,7 +1045,7 @@ struct EditorCanvas: View {
         MagnifyGesture()
             .updating($pinchBaseZoom) { value, base, _ in
                 if base == nil { base = model.zoom }
-                model.setZoom((base ?? 1) * value.magnification)
+                model.setZoom((base ?? 1) * value.magnification, aroundPointer: true)
             }
     }
 
@@ -1091,12 +1157,26 @@ struct EditorCanvas: View {
         kind == .measure || kind == .line
     }
 
-    /// `p` projected onto a horizontal or vertical through `anchor`, whichever
-    /// is closer to the actual drag direction.
-    private func axisLocked(_ p: CGPoint, relativeTo anchor: CGPoint) -> CGPoint {
-        abs(p.x - anchor.x) >= abs(p.y - anchor.y)
-            ? CGPoint(x: p.x, y: anchor.y)
-            : CGPoint(x: anchor.x, y: p.y)
+    /// Shift's constraint. A measure line goes horizontal or vertical,
+    /// whichever is closer to the drag; a line also takes the 45° diagonals,
+    /// keeping its length.
+    private func axisLocked(_ p: CGPoint, relativeTo anchor: CGPoint, kind: EditTool) -> CGPoint {
+        let dx = p.x - anchor.x, dy = p.y - anchor.y
+        guard kind == .line else {
+            return abs(dx) >= abs(dy) ? CGPoint(x: p.x, y: anchor.y) : CGPoint(x: anchor.x, y: p.y)
+        }
+        let step = CGFloat.pi / 4
+        let angle = (atan2(dy, dx) / step).rounded() * step
+        let length = hypot(dx, dy)
+        return CGPoint(x: anchor.x + cos(angle) * length, y: anchor.y + sin(angle) * length)
+    }
+
+    /// Shift on a shape: the box corner pushed out to a square on its longer
+    /// side, so the shape comes out a square or a circle at any drag angle.
+    private func squared(_ p: CGPoint, relativeTo anchor: CGPoint) -> CGPoint {
+        let dx = p.x - anchor.x, dy = p.y - anchor.y
+        let side = max(abs(dx), abs(dy))
+        return CGPoint(x: anchor.x + (dx < 0 ? -side : side), y: anchor.y + (dy < 0 ? -side : side))
     }
 
     /// Magnetic pull for line endpoints: within a few degrees of horizontal or
@@ -1167,9 +1247,11 @@ struct EditorCanvas: View {
                           value.location.y - value.startLocation.y) > 2
         let current = fit.toImage(value.location, clampedTo: model.pixelSize)
 
+        let shiftDown = NSEvent.modifierFlags.contains(.shift)
         switch session.kind {
         case .new:
-            model.cropRect = rect(from: session.pressImage, to: current)
+            let corner = shiftDown ? proportional(current, from: session.pressImage, aspect: 1) : current
+            model.cropRect = rect(from: session.pressImage, to: corner)
         case .move:
             guard moved else { return }
             model.cropRect = movedRect(session.originalRect,
@@ -1177,8 +1259,24 @@ struct EditorCanvas: View {
                                        dy: current.y - session.pressImage.y)
         case .resize:
             guard moved, let anchor = session.anchor else { return }
-            model.cropRect = rect(from: anchor, to: current)
+            let original = session.originalRect
+            let corner = shiftDown && original.height > 0
+                ? proportional(current, from: anchor, aspect: original.width / original.height) : current
+            model.cropRect = rect(from: anchor, to: corner)
         }
+    }
+
+    /// Shift while cropping: the dragged corner pulled onto the box of the
+    /// given width ÷ height through `anchor` — a square for a new region, the
+    /// region's own proportions for a resize — shrunk to stay inside the image.
+    private func proportional(_ p: CGPoint, from anchor: CGPoint, aspect: CGFloat) -> CGPoint {
+        let dx = p.x - anchor.x, dy = p.y - anchor.y
+        let width = max(abs(dx), abs(dy) * aspect)
+        let roomX = dx < 0 ? anchor.x : model.pixelSize.width - anchor.x
+        let roomY = dy < 0 ? anchor.y : model.pixelSize.height - anchor.y
+        let fitted = min(width, roomX, roomY * aspect)
+        return CGPoint(x: anchor.x + (dx < 0 ? -fitted : fitted),
+                       y: anchor.y + (dy < 0 ? -fitted : fitted) / aspect)
     }
 
     private func makeCropSession(pressView: CGPoint, fit: CanvasFit) -> CropSession {

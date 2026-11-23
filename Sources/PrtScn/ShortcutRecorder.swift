@@ -128,6 +128,7 @@ final class RecorderView: NSView {
                 : modifiers & UInt32(cmdKey | controlKey) != 0
             guard hasRequiredModifier else {
                 NSSound.beep()
+                label.stringValue = String(localized: "Add ⌘ or ⌃")
                 return
             }
             onChange?(Shortcut(keyCode: keyCode, modifiers: modifiers))

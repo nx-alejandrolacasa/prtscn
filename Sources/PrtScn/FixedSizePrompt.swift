@@ -43,7 +43,12 @@ final class FixedSizePrompt: NSObject, NSWindowDelegate {
     private override init() {}
 
     func show() {
-        close()
+        // Already up (the hotkey pressed again): keep what's been typed.
+        if let panel {
+            NSApp.activate()
+            panel.makeKeyAndOrderFront(nil)
+            return
+        }
 
         let view = FixedSizePromptView(
             width: SettingsStore.shared.fixedSizeWidth,

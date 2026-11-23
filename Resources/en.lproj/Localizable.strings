@@ -5,13 +5,9 @@
    and every other .lproj. */
 
 /* Menu bar */
-"Capture Area" = "Capture Area";
-"Capture Window" = "Capture Window";
-"Capture Full Screen" = "Capture Full Screen";
-"Capture Fixed Size…" = "Capture Fixed Size…";
-"Capture Scrolling Area" = "Capture Scrolling Area";
 "New Blank Canvas" = "New Blank Canvas";
 "Open File…" = "Open File…";
+"Reopen Last Capture" = "Reopen Last Capture";
 "Close All Pins" = "Close All Pins";
 "Update to %@…" = "Update to %@…";
 "Settings…" = "Settings…";
@@ -23,6 +19,8 @@
 "Full Screen" = "Full Screen";
 "Fixed Size" = "Fixed Size";
 "Scrolling Area" = "Scrolling Area";
+"Text (OCR)" = "Text (OCR)";
+"Previous Area" = "Previous Area";
 
 /* Preview card actions */
 "Edit" = "Edit";
@@ -45,6 +43,7 @@
 "While Editing" = "While Editing";
 "Always" = "Always";
 "Never" = "Never";
+"Immediately (no preview)" = "Immediately (no preview)";
 "With margins" = "With margins";
 "Solid color" = "Solid color";
 "Desktop background" = "Desktop background";
@@ -144,7 +143,7 @@
 "Capture shortcuts" = "Capture shortcuts";
 "Restore Defaults" = "Restore Defaults";
 "Use System Shortcuts" = "Use System Shortcuts";
-"⇧⌘3 full screen, ⇧⌘4 area, ⇧⌘5 window, ⇧⌘6 fixed size, ⇧⌘7 scrolling" = "⇧⌘3 full screen, ⇧⌘4 area, ⇧⌘5 window, ⇧⌘6 fixed size, ⇧⌘7 scrolling";
+"⇧⌘3 full screen, ⇧⌘4 area, ⇧⌘5 window, ⇧⌘6 fixed size, ⇧⌘7 scrolling, ⇧⌘8 text, ⇧⌘9 previous area" = "⇧⌘3 full screen, ⇧⌘4 area, ⇧⌘5 window, ⇧⌘6 fixed size, ⇧⌘7 scrolling, ⇧⌘8 text, ⇧⌘9 previous area";
 "“Use System Shortcuts” takes over macOS's own screenshot combos (⇧⌘3, ⇧⌘4, …). Disable the built-in ones first under System Settings → Keyboard → Keyboard Shortcuts → Screenshots, or the system keeps them." = "“Use System Shortcuts” takes over macOS's own screenshot combos (⇧⌘3, ⇧⌘4, …). Disable the built-in ones first under System Settings → Keyboard → Keyboard Shortcuts → Screenshots, or the system keeps them.";
 "Open Keyboard Settings…" = "Open Keyboard Settings…";
 "Clear shortcut" = "Clear shortcut";
@@ -188,6 +187,10 @@
 "Scrolling Capture needs Accessibility access" = "Scrolling Capture needs Accessibility access";
 "PrtScn scrolls the page for you by sending scroll events, and macOS only allows that for apps with Accessibility permission.\n\nEnable PrtScn in System Settings → Privacy & Security → Accessibility, then try again." = "PrtScn scrolls the page for you by sending scroll events, and macOS only allows that for apps with Accessibility permission.\n\nEnable PrtScn in System Settings → Privacy & Security → Accessibility, then try again.";
 "Open System Settings" = "Open System Settings";
+"PrtScn needs Screen Recording access" = "PrtScn needs Screen Recording access";
+"Without it, captures show only the desktop picture.\n\nEnable PrtScn in System Settings → Privacy & Security → Screen & System Audio Recording, then relaunch it." = "Without it, captures show only the desktop picture.\n\nEnable PrtScn in System Settings → Privacy & Security → Screen & System Audio Recording, then relaunch it.";
+"Capture Anyway" = "Capture Anyway";
+"In use by macOS or another app" = "In use by macOS or another app";
 
 /* Editor — tools */
 "Select" = "Select";
@@ -216,10 +219,13 @@
 "Font: %@" = "Font: %@";
 "Smaller" = "Smaller";
 "Larger" = "Larger";
+"Thinner" = "Thinner";
+"Thicker" = "Thicker";
 "Custom…" = "Custom…";
 "Undo (⌘Z)" = "Undo (⌘Z)";
 "Redo (⇧⌘Z)" = "Redo (⇧⌘Z)";
 "Crop" = "Crop";
+"Crop (K)" = "Crop (K)";
 "Crop (↩)" = "Crop (↩)";
 "Top Left" = "Top Left";
 "Top" = "Top";
@@ -255,10 +261,21 @@
 "Copied" = "Copied";
 "Exported" = "Exported";
 "Text copied" = "Text copied";
+"Tool locked · press its key again to unlock" = "Tool locked · press its key again to unlock";
+"Tool unlocked" = "Tool unlocked";
+"No text found" = "No text found";
+"Drag over the text to copy · click for the whole image" = "Drag over the text to copy · click for the whole image";
+"   ·   Shrunk to fit this screen" = "   ·   Shrunk to fit this screen";
+"   ·   Too small to scroll, keep dragging" = "   ·   Too small to scroll, keep dragging";
+"Stopped at the maximum height" = "Stopped at the maximum height";
+"Stopped early: couldn't follow the content" = "Stopped early: couldn't follow the content";
+"Add ⌘ or ⌃" = "Add ⌘ or ⌃";
+"Already used for %@" = "Already used for %@";
+"Couldn't export the image" = "Couldn't export the image";
 "Size copied" = "Size copied";
 "Project saved" = "Project saved";
 "Couldn't save project" = "Couldn't save project";
-"Scroll to move around · ⌘-scroll to zoom" = "Scroll to move around · ⌘-scroll to zoom";
+"Scroll or Space-drag to move around · ⌘-scroll to zoom" = "Scroll or Space-drag to move around · ⌘-scroll to zoom";
 "Zoom in to measure small distances" = "Zoom in to measure small distances";
 "Drag the middle dot to curve · double-click it for a 90° corner" = "Drag the middle dot to curve · double-click it for a 90° corner";
 "%@ project.prtscn" = "%@ project.prtscn";

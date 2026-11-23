@@ -1,5 +1,6 @@
 import AppKit
 import Carbon
+import Observation
 import os
 
 private let log = Logger(subsystem: "com.alejandrolacasa.prtscn", category: "HotkeyManager")
@@ -10,6 +11,7 @@ private let log = Logger(subsystem: "com.alejandrolacasa.prtscn", category: "Hot
 /// focused and — unlike a `CGEventTap` — need **no** Accessibility permission.
 /// One shared keyboard event handler routes every hotkey press back to us by id.
 @MainActor
+@Observable
 final class HotkeyManager {
     static let shared = HotkeyManager()
 
@@ -21,6 +23,31 @@ final class HotkeyManager {
     private var nextID: UInt32 = 1
     private var handlerInstalled = false
     private var isSuspended = false
+    /// Modes whose shortcut the system refused to register — taken by
+    /// another app. Shown in Settings → Hotkeys.
+    private(set) var unregisteredModes: Set<CaptureMode> = []
+
+    /// Whether `mode`'s shortcut won't fire: registration failed, or macOS's
+    /// own screenshot shortcut on the same keys is still enabled (the system
+    /// then wins, although registering succeeds).
+    func isBlocked(_ mode: CaptureMode, shortcut: Shortcut) -> Bool {
+        unregisteredModes.contains(mode) || Self.isHeldBySystemScreenshots(shortcut)
+    }
+
+    private static func isHeldBySystemScreenshots(_ shortcut: Shortcut) -> Bool {
+        guard shortcut.modifiers == UInt32(cmdKey | shiftKey) else { return false }
+        let symbolicHotKey: Int
+        switch Int(shortcut.keyCode) {
+        case kVK_ANSI_3: symbolicHotKey = 28
+        case kVK_ANSI_4: symbolicHotKey = 30
+        case kVK_ANSI_5: symbolicHotKey = 184
+        default: return false
+        }
+        let table = UserDefaults(suiteName: "com.apple.symbolichotkeys")?
+            .dictionary(forKey: "AppleSymbolicHotKeys")
+        let entry = table?[String(symbolicHotKey)] as? [String: Any]
+        return entry?["enabled"] as? Bool ?? true
+    }
 
     private init() {}
 
@@ -76,6 +103,7 @@ final class HotkeyManager {
         } else {
             // Most common cause: the combo is already taken (by the system or
             // another app). We log rather than fail loudly.
+            unregisteredModes.insert(mode)
             log.error("could not register \(shortcut.displayString, privacy: .public) for \(mode.rawValue, privacy: .public) (status \(status))")
         }
     }
@@ -86,6 +114,7 @@ final class HotkeyManager {
         }
         registrations.removeAll()
         idToMode.removeAll()
+        unregisteredModes.removeAll()
     }
 
     private func installHandlerIfNeeded() {

@@ -66,6 +66,7 @@ Sources/PrtScn/
   EditorView.swift             editor body: floating top bar (image tools/zoom/export) + bottom palette
   EditorController.swift       editor window: full-screen Space for captures (blurred wallpaper), windowed for canvases/projects; opens .prtscn projects
   ProjectDocument.swift        .prtscn package (image.png + document.json) + Annotation Codable
+  LastCapture.swift            the last closed capture, kept for "Reopen Last Capture"
   CanvasRecovery.swift         crash snapshots (Application Support/<bundle id>/Recovery) + launch restore
   SettingsStore.swift          @Observable settings, persisted to UserDefaults
   SettingsWindow.swift         AppKit NSSplitViewController settings window (full-height sidebar)

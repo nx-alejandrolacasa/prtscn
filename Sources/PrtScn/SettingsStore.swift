@@ -45,10 +45,13 @@ final class SettingsStore {
         }
     }
 
-    /// Seconds before the preview auto-dismisses; `0` means "Never".
+    /// Seconds before the preview auto-dismisses; `0` means "Never", and
+    /// `noPreviewTimeout` skips the preview: the default action runs at once.
     var previewTimeout: Double {
         didSet { defaults.set(previewTimeout, forKey: Keys.previewTimeout) }
     }
+
+    static let noPreviewTimeout = -1.0
 
     /// Visual style of the floating preview: Archipelago (floating islands,
     /// the default) or Island (the classic one-slab card).
@@ -106,6 +109,24 @@ final class SettingsStore {
     /// Last-used annotation drawing color, remembered across editor sessions.
     var editorColor: Color {
         didSet { defaults.set(editorColor.hexString, forKey: Keys.editorColor) }
+    }
+
+    /// Last-used stroke width and text / step-counter / measure-label sizes,
+    /// in points — each editor scales them to its capture.
+    var editorLineWidth: Double {
+        didSet { defaults.set(editorLineWidth, forKey: Keys.editorLineWidth) }
+    }
+
+    var editorFontSize: Double {
+        didSet { defaults.set(editorFontSize, forKey: Keys.editorFontSize) }
+    }
+
+    var editorCounterSize: Double {
+        didSet { defaults.set(editorCounterSize, forKey: Keys.editorCounterSize) }
+    }
+
+    var editorMeasureSize: Double {
+        didSet { defaults.set(editorMeasureSize, forKey: Keys.editorMeasureSize) }
     }
 
     /// Last-used text font design.
@@ -296,6 +317,10 @@ final class SettingsStore {
         static let closeEditorAfterAction = "closeEditorAfterAction"
         static let editorColor = "editorColor"
         static let editorFontDesign = "editorFontDesign"
+        static let editorLineWidth = "editorLineWidth"
+        static let editorFontSize = "editorFontSize"
+        static let editorCounterSize = "editorCounterSize"
+        static let editorMeasureSize = "editorMeasureSize"
         static let editorLineStartCap = "editorLineStartCap"
         static let editorLineEndCap = "editorLineEndCap"
         static let measureUnit = "measureUnit"
@@ -316,6 +341,8 @@ final class SettingsStore {
         static let canvasHeight = "canvasHeight"
         static let scrollingShortcutMigrated = "scrollingShortcutMigrated"
         static let fixedSizeShortcutMigrated = "fixedSizeShortcutMigrated"
+        static let textShortcutMigrated = "textShortcutMigrated"
+        static let previousAreaShortcutMigrated = "previousAreaShortcutMigrated"
     }
 
     /// Default annotation color — system red.
@@ -339,6 +366,10 @@ final class SettingsStore {
         closeEditorAfterAction = defaults.object(forKey: Keys.closeEditorAfterAction) as? Bool ?? true
         editorColor = Color(hex: defaults.string(forKey: Keys.editorColor) ?? Self.defaultEditorColor)
         editorFontDesign = FontDesign(rawValue: defaults.string(forKey: Keys.editorFontDesign) ?? "") ?? .sans
+        editorLineWidth = defaults.object(forKey: Keys.editorLineWidth) as? Double ?? 3
+        editorFontSize = defaults.object(forKey: Keys.editorFontSize) as? Double ?? 18
+        editorCounterSize = defaults.object(forKey: Keys.editorCounterSize) as? Double ?? 21
+        editorMeasureSize = defaults.object(forKey: Keys.editorMeasureSize) as? Double ?? 18
         editorLineStartCap = LineCap(rawValue: defaults.string(forKey: Keys.editorLineStartCap) ?? "") ?? .none
         editorLineEndCap = LineCap(rawValue: defaults.string(forKey: Keys.editorLineEndCap) ?? "") ?? .arrow
         measureUnit = MeasureUnit(rawValue: defaults.string(forKey: Keys.measureUnit) ?? "") ?? .points
@@ -390,6 +421,8 @@ final class SettingsStore {
             .window: Shortcut(keyCode: UInt32(kVK_ANSI_5), modifiers: modifiers),
             .fixedSize: Shortcut(keyCode: UInt32(kVK_ANSI_6), modifiers: modifiers),
             .scrolling: Shortcut(keyCode: UInt32(kVK_ANSI_7), modifiers: modifiers),
+            .text: Shortcut(keyCode: UInt32(kVK_ANSI_8), modifiers: modifiers),
+            .previousArea: Shortcut(keyCode: UInt32(kVK_ANSI_9), modifiers: modifiers),
         ]
     }()
 
@@ -403,6 +436,8 @@ final class SettingsStore {
             .fullScreen: Shortcut(keyCode: UInt32(kVK_ANSI_3), modifiers: modifiers),
             .fixedSize: Shortcut(keyCode: UInt32(kVK_ANSI_4), modifiers: modifiers),
             .scrolling: Shortcut(keyCode: UInt32(kVK_ANSI_5), modifiers: modifiers),
+            .text: Shortcut(keyCode: UInt32(kVK_ANSI_6), modifiers: modifiers),
+            .previousArea: Shortcut(keyCode: UInt32(kVK_ANSI_7), modifiers: modifiers),
         ]
     }()
 
@@ -420,6 +455,8 @@ final class SettingsStore {
         let migrations: [(CaptureMode, String)] = [
             (.scrolling, Keys.scrollingShortcutMigrated),
             (.fixedSize, Keys.fixedSizeShortcutMigrated),
+            (.text, Keys.textShortcutMigrated),
+            (.previousArea, Keys.previousAreaShortcutMigrated),
         ]
         for (mode, migratedKey) in migrations where !defaults.bool(forKey: migratedKey) {
             defaults.set(true, forKey: migratedKey)

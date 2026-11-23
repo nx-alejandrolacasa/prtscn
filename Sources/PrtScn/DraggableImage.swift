@@ -73,7 +73,7 @@ final class DragSourceView: NSView, NSDraggingSource {
         guard hypot(current.x - start.x, current.y - start.y) > 3 else { return }
         pendingDown = nil
 
-        let item = NSDraggingItem(pasteboardWriter: fileURL as NSURL)
+        let item = NSDraggingItem(pasteboardWriter: Self.exportNamedLink(to: fileURL) as NSURL)
         let dragSize = draggingImageSize(for: image.size)
         let frame = NSRect(
             x: start.x - dragSize.width / 2,
@@ -84,6 +84,23 @@ final class DragSourceView: NSView, NSDraggingSource {
         item.setDraggingFrame(frame, contents: image)
 
         beginDraggingSession(with: [item], event: down, source: self)
+    }
+
+    /// Receivers name a dropped file after the dragged one, so they get a
+    /// hard link carrying the export name instead of the temp file's UUID.
+    // ponytail: the link stays in the temp folder until macOS purges it; a
+    // receiver may still be reading it after the drop, so it isn't removed here.
+    private static func exportNamedLink(to fileURL: URL) -> URL {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("prtscn-drag-\(UUID().uuidString)", isDirectory: true)
+        let link = folder.appendingPathComponent("\(ScreenshotService.exportName()).png")
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try FileManager.default.linkItem(at: fileURL, to: link)
+            return link
+        } catch {
+            return fileURL
+        }
     }
 
     override func mouseUp(with event: NSEvent) {

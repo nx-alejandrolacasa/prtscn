@@ -15,40 +15,33 @@ struct MenuContent: View {
         SettingsStore.shared.shortcuts[mode]?.keyboardShortcut
     }
 
+    /// `asksFirst` adds the ellipsis of an item that opens a dialog.
+    private func captureItem(_ mode: CaptureMode, _ symbol: String, asksFirst: Bool = false) -> some View {
+        Button {
+            ScreenshotService.shared.capture(mode)
+        } label: {
+            Label(mode.title + (asksFirst ? "…" : ""), systemImage: symbol)
+        }
+        .keyboardShortcut(hotkey(mode))
+    }
+
     var body: some View {
         // macOS menu items default to a title-only label style, which drops
         // the SF Symbol; opt every item into icon + title explicitly.
         Group {
-            Button {
-                ScreenshotService.shared.capture(.region)
-            } label: {
-                Label("Capture Area", systemImage: "rectangle.dashed")
+            // One "Capture" heading instead of the word on every item, and
+            // the everyday modes apart from the specialised ones.
+            Section("Capture") {
+                captureItem(.region, "rectangle.dashed")
+                captureItem(.previousArea, "repeat")
+                captureItem(.window, "macwindow")
+                captureItem(.fullScreen, "display")
             }
-            .keyboardShortcut(hotkey(.region))
-            Button {
-                ScreenshotService.shared.capture(.window)
-            } label: {
-                Label("Capture Window", systemImage: "macwindow")
+            Section {
+                captureItem(.fixedSize, "aspectratio", asksFirst: true)
+                captureItem(.scrolling, "rectangle.expand.vertical")
+                captureItem(.text, "text.viewfinder")
             }
-            .keyboardShortcut(hotkey(.window))
-            Button {
-                ScreenshotService.shared.capture(.fullScreen)
-            } label: {
-                Label("Capture Full Screen", systemImage: "display")
-            }
-            .keyboardShortcut(hotkey(.fullScreen))
-            Button {
-                ScreenshotService.shared.capture(.fixedSize)
-            } label: {
-                Label("Capture Fixed Size…", systemImage: "aspectratio")
-            }
-            .keyboardShortcut(hotkey(.fixedSize))
-            Button {
-                ScreenshotService.shared.capture(.scrolling)
-            } label: {
-                Label("Capture Scrolling Area", systemImage: "rectangle.expand.vertical")
-            }
-            .keyboardShortcut(hotkey(.scrolling))
 
             Divider()
 
@@ -62,6 +55,12 @@ struct MenuContent: View {
             } label: {
                 Label("Open File…", systemImage: "arrow.up.forward.square")
             }
+            Button {
+                LastCapture.shared.reopen()
+            } label: {
+                Label("Reopen Last Capture", systemImage: "arrow.uturn.backward")
+            }
+            .disabled(!LastCapture.shared.exists)
 
             Divider()
 

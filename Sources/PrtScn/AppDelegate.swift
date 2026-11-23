@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         EditorController.shared.close()
         CanvasRecovery.waitForPendingWrites()
+        LastCapture.shared.clear()
     }
 
     /// Finder double-click / Open With / drag-to-icon on a `.prtscn` project

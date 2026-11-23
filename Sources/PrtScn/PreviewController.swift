@@ -26,7 +26,7 @@ final class PreviewController {
 
     private init() {}
 
-    func show(imageURL: URL, captureScale: CGFloat, pristineImage: NSImage? = nil) {
+    func show(imageURL: URL, captureScale: CGFloat, pristineImage: NSImage? = nil, notice: String? = nil) {
         guard let image = NSImage(contentsOf: imageURL) else {
             ScreenshotService.shared.cleanup(imageURL)
             return
@@ -39,6 +39,8 @@ final class PreviewController {
                                  timeout: SettingsStore.shared.previewTimeout,
                                  captureScale: captureScale,
                                  pristineImage: pristineImage)
+        if let notice { model.show(notice: notice) }
+        guard model.timeout != SettingsStore.noPreviewTimeout else { return model.dismiss() }
         model.onClose = { [weak self, weak model] in
             guard let self, self.model === model else { return }
             close()

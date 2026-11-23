@@ -58,6 +58,9 @@ final class EditorModel {
     }
 
     @ObservationIgnored private let recovery: CanvasRecovery
+    /// A screen capture rather than a file or blank canvas: nothing else holds
+    /// its pixels, so closing it always leaves it reopenable.
+    @ObservationIgnored private let isCapture: Bool
     @ObservationIgnored private var pendingRecoverySnapshot: Task<Void, Never>?
 
     var documentName: String {
@@ -82,6 +85,7 @@ final class EditorModel {
     private(set) var canvasSize: CGSize = .zero
     /// Transient hint shown in the toast slot (e.g. how to pan while zoomed).
     private(set) var tipMessage: String?
+    private(set) var tipSymbol = "hand.draw"
 
     /// The −/+ buttons step 25 percentage points up to this boundary, 50 above.
     private static let fineZoomUpToPercent: CGFloat = 200
@@ -102,17 +106,26 @@ final class EditorModel {
 
     func zoomOut() { stepZoom(by: -1) }
 
-    func resetZoom() { setZoom(1) }
+    func resetZoom() { glideZoom(to: 1) }
+
+    func zoomToActualSize() { glideZoom(to: 100 / max(fittedPercent, 1)) }
 
     /// Double-clicking the percentage readout: jump to true size, or back to
     /// fitted when already there.
     func toggleActualSize() {
         if zoomPercent == 100 {
-            setZoom(1)
+            resetZoom()
         } else {
-            setZoom(100 / max(fittedPercent, 1))
+            zoomToActualSize()
         }
     }
+
+    /// Where the pointer is over the canvas, as an offset from its center —
+    /// what a pinch or ⌘-scroll zooms toward. Reported by `EditorCanvas`.
+    @ObservationIgnored var pointerOffset: CGSize?
+
+    /// Space held: a drag pans the canvas instead of drawing.
+    var isSpaceDown = false
 
     /// Steps the displayed percentage to the next stop in the given direction —
     /// multiples of 25 up to 200%, multiples of 50 above. From an in-between
@@ -122,7 +135,8 @@ final class EditorModel {
     private func stepZoom(by direction: CGFloat) {
         let unit = fittedPercent
         guard unit > 0 else { return }
-        let current = zoom * unit
+        // Mid-glide, a second click steps on from where the first is headed.
+        let current = (zoomGoal ?? zoom) * unit
         // The step matches the segment being moved through: leaving 200%
         // upward is a 50 step, arriving at 200% from above a 50 step too.
         let boundary = Self.fineZoomUpToPercent
@@ -135,21 +149,57 @@ final class EditorModel {
         } else {
             target = direction > 0 ? ceil(current / step) * step : floor(current / step) * step
         }
-        setZoom(target / unit)
+        glideZoom(to: target / unit)
+    }
+
+    @ObservationIgnored private var zoomGlide: Task<Void, Never>?
+    @ObservationIgnored private var zoomGoal: CGFloat?
+
+    /// The buttons' and shortcuts' zoom: the same jump `setZoom` makes, played
+    /// over a few frames — so when it also tidies a position a pointer zoom
+    /// left off to one side, the image is seen travelling there, not snapping.
+    private func glideZoom(to value: CGFloat) {
+        let start = (zoom: zoom, pan: pan)
+        setZoom(value)
+        let end = (zoom: zoom, pan: pan)
+        guard end.zoom != start.zoom || end.pan != start.pan else { return }
+        (zoom, pan) = start
+        zoomGoal = end.zoom
+        zoomGlide = Task {
+            let frames = 10
+            for frame in 1...frames {
+                try? await Task.sleep(for: .milliseconds(16))
+                if Task.isCancelled { return }
+                let linear = CGFloat(frame) / CGFloat(frames)
+                let eased = 1 - pow(1 - linear, 3)
+                zoom = start.zoom + (end.zoom - start.zoom) * eased
+                pan = CGSize(width: start.pan.width + (end.pan.width - start.pan.width) * eased,
+                             height: start.pan.height + (end.pan.height - start.pan.height) * eased)
+            }
+            zoomGoal = nil
+        }
     }
 
     /// Sets an absolute zoom (clamped) — the continuous path used by pinching;
-    /// the stepped buttons funnel through it too.
-    func setZoom(_ value: CGFloat) {
-        let new = min(max(value, minZoom), Self.maxZoom)
+    /// the stepped buttons funnel through it too. `aroundPointer` keeps the
+    /// spot under the pointer in place (pinch, ⌘-scroll); otherwise the
+    /// canvas center stays put (buttons, shortcuts).
+    func setZoom(_ value: CGFloat, aroundPointer: Bool = false) {
+        zoomGlide?.cancel()
+        zoomGoal = nil
+        // True size stays reachable even for a capture fitted below 1/8.
+        let new = min(max(value, minZoom), max(Self.maxZoom, 100 / max(fittedPercent, 1)))
         guard new != zoom else { return }
         finishTextEditingForRescale()
-        if zoom <= 1, new > 1 { showTip(String(localized: "Scroll to move around · ⌘-scroll to zoom")) }
-        // Scale the pan proportionally so the point at the anchor stays put
-        // while zooming.
-        pan = CGSize(width: pan.width * new / zoom, height: pan.height * new / zoom)
+        if zoom <= 1, new > 1 { showTip(String(localized: "Scroll or Space-drag to move around · ⌘-scroll to zoom")) }
+        let anchor = aroundPointer ? pointerOffset ?? .zero : .zero
+        let factor = new / zoom
+        pan = CGSize(width: anchor.width - (anchor.width - pan.width) * factor,
+                     height: anchor.height - (anchor.height - pan.height) * factor)
         zoom = new
-        if zoom <= 1 { pan = .zero } else { clampPan() }
+        // A zoom toward the pointer keeps the pan it aims for: tidying it
+        // would stop the image growing past the first edge it touches.
+        if zoom <= 1 { pan = .zero } else if !aroundPointer { clampPan() }
     }
 
     /// The percentage shown at zoom 1 — the fitted scale relative to the
@@ -175,12 +225,18 @@ final class EditorModel {
         min(1, 100 / max(fittedPercent * zoom, 1))
     }
 
-    /// Right-click-drag panning; deltas in view points.
+    /// Panning (scroll, Space-drag, right-drag); deltas in view points. Keeps
+    /// to the tidy limits, except that a position a pointer zoom left beyond
+    /// them isn't snapped back — the pan just can't take it any further out.
     func panBy(dx: CGFloat, dy: CGFloat) {
-        guard canPan else { return }
-        pan.width += dx
-        pan.height += dy
-        clampPan()
+        guard canPan, let drawn = drawnSize else { return }
+        let shown = CanvasFit.clampedPan(drawn: drawn, pan: pan, in: canvasSize, loose: true)
+        func moved(_ value: CGFloat, by delta: CGFloat, drawn: CGFloat, full: CGFloat) -> CGFloat {
+            let limit = max(CanvasFit.panLimit(drawn: drawn, full: full, loose: false), abs(value))
+            return min(max(value + delta, -limit), limit)
+        }
+        pan = CGSize(width: moved(shown.width, by: dx, drawn: drawn.width, full: canvasSize.width),
+                     height: moved(shown.height, by: dy, drawn: drawn.height, full: canvasSize.height))
     }
 
     func setCanvasSize(_ size: CGSize) {
@@ -189,15 +245,21 @@ final class EditorModel {
         clampPan()
     }
 
-    /// Keeps the stored pan within what `CanvasFit` can actually show, so it
-    /// doesn't accumulate off-screen distance that would make later zoom-outs
-    /// or window resizes land somewhere stale.
-    private func clampPan() {
+    /// The image's on-screen size at the current zoom, once the canvas has
+    /// reported its own.
+    private var drawnSize: CGSize? {
         guard canvasSize.width > 0, canvasSize.height > 0,
-              pixelSize.width > 0, pixelSize.height > 0 else { return }
+              pixelSize.width > 0, pixelSize.height > 0 else { return nil }
         let scale = CanvasFit.baseScale(pixelSize: pixelSize, captureScale: captureScale,
                                         in: canvasSize) * zoom
-        let drawn = CGSize(width: pixelSize.width * scale, height: pixelSize.height * scale)
+        return CGSize(width: pixelSize.width * scale, height: pixelSize.height * scale)
+    }
+
+    /// Brings the stored pan back within the tidy limits, so it doesn't
+    /// accumulate off-screen distance that would make later zoom-outs or
+    /// window resizes land somewhere stale.
+    private func clampPan() {
+        guard let drawn = drawnSize else { return }
         pan = CanvasFit.clampedPan(drawn: drawn, pan: pan, in: canvasSize)
     }
 
@@ -208,7 +270,10 @@ final class EditorModel {
         if editingTextID != nil { finishTextEditing() }
     }
 
-    private func showTip(_ message: String) {
+    /// `symbol` defaults to the gesture hint's hand; a tip that reports a
+    /// state rather than teaching a gesture brings its own.
+    private func showTip(_ message: String, symbol: String = "hand.draw") {
+        tipSymbol = symbol
         tipMessage = message
         Task {
             try? await Task.sleep(for: .seconds(3))
@@ -246,7 +311,10 @@ final class EditorModel {
     var tool: EditTool = SettingsStore.shared.rememberLastTool
         ? SettingsStore.shared.editorTool : .line {
         didSet {
-            SettingsStore.shared.editorTool = tool
+            // Every finished shape hands over to Select; remembering that
+            // would make "reopen with the last-used tool" always mean Select.
+            if tool != .select { SettingsStore.shared.editorTool = tool }
+            if tool != oldValue { isToolLocked = false }
             if tool == .measure, zoom <= 1 { showTip(String(localized: "Zoom in to measure small distances")) }
         }
     }
@@ -262,12 +330,38 @@ final class EditorModel {
     /// What the palette's merged shape button re-arms: the last shape used.
     private(set) var lastShapeTool: EditTool = .roundedRect
 
+    /// Whether a drawing tool stays armed after each shape instead of
+    /// handing over to Select. Any tool change unlocks.
+    private(set) var isToolLocked = false
+
+    /// A tool's key: arms it, and pressed again while it's already armed
+    /// toggles the lock, for drawing several of the same in a row. `arrow`
+    /// picks the line tool's flavor (A / L).
+    func pressToolKey(_ newTool: EditTool, arrow: Bool? = nil) {
+        let armedBefore = (tool, lineStartCap, lineEndCap)
+        if let arrow {
+            selectLineTool(arrow: arrow)
+        } else if newTool.isShape {
+            selectShape(newTool)
+        } else {
+            tool = newTool
+        }
+        // The counter never hands over to Select, so it has nothing to lock.
+        guard armedBefore == (tool, lineStartCap, lineEndCap), tool != .select, tool != .counter else { return }
+        isToolLocked.toggle()
+        showTip(isToolLocked
+            ? String(localized: "Tool locked · press its key again to unlock")
+            : String(localized: "Tool unlocked"),
+            symbol: isToolLocked ? "lock.fill" : "lock.open.fill")
+    }
+
     /// Arms the line tool as an arrow (A) or a plain line (L) — the two
-    /// keyboard flavors of the one merged tool. Only arms; a selected line's
-    /// caps are edited via the palette's cap menus.
+    /// keyboard flavors of the one merged tool. A pair customized in the
+    /// palette's cap menus (a bar, a head on the start) is left alone: the
+    /// key then only arms the tool.
     func selectLineTool(arrow: Bool) {
         tool = .line
-        lineStartCap = .none
+        guard lineStartCap == .none, lineEndCap != .bar else { return }
         lineEndCap = arrow ? .arrow : .none
     }
 
@@ -286,14 +380,22 @@ final class EditorModel {
         didSet { SettingsStore.shared.editorFontDesign = fontDesign }
     }
     /// Default stroke / font sizes, scaled to the capture so they read the same
-    /// regardless of resolution.
-    var lineWidth: CGFloat
+    /// regardless of resolution — remembered across sessions, in points.
+    var lineWidth: CGFloat {
+        didSet { SettingsStore.shared.editorLineWidth = lineWidth / captureScale }
+    }
     /// Text size and step-counter size are tracked independently.
-    var fontSize: CGFloat
-    var counterSize: CGFloat
+    var fontSize: CGFloat {
+        didSet { SettingsStore.shared.editorFontSize = fontSize / captureScale }
+    }
+    var counterSize: CGFloat {
+        didSet { SettingsStore.shared.editorCounterSize = counterSize / captureScale }
+    }
     /// The measure tool's pixel-count label size — independent of `fontSize`
     /// so resizing it doesn't also resize the text tool's default.
-    var measureSize: CGFloat
+    var measureSize: CGFloat {
+        didSet { SettingsStore.shared.editorMeasureSize = measureSize / captureScale }
+    }
     /// The next step-counter badge number to stamp.
     var nextCounter: Int = 1
 
@@ -355,17 +457,37 @@ final class EditorModel {
     private var undoStack: [UndoState] = []
     private var redoStack: [UndoState] = []
 
+    /// The base image rides along (by reference, so it costs nothing until
+    /// a crop replaces it) — that's what makes a crop undoable.
     private struct UndoState {
         var annotations: [Annotation]
         var nextCounter: Int
+        var baseImage: NSImage
+        var pixelSize: CGSize
     }
 
     private var undoState: UndoState {
-        get { UndoState(annotations: annotations, nextCounter: nextCounter) }
+        get {
+            UndoState(annotations: annotations, nextCounter: nextCounter,
+                      baseImage: baseImage, pixelSize: pixelSize)
+        }
         set {
             annotations = newValue.annotations
             nextCounter = newValue.nextCounter
+            if newValue.baseImage !== baseImage { replaceBaseImage(newValue.baseImage, pixelSize: newValue.pixelSize) }
         }
+    }
+
+    /// Swaps the capture under the annotations (a crop, or undoing one) and
+    /// drops everything derived from the old one.
+    private func replaceBaseImage(_ image: NSImage, pixelSize size: CGSize) {
+        baseImage = image
+        pixelSize = size
+        cropGeneration += 1
+        eyedropperRep = nil
+        mosaicCache.removeAll()
+        zoom = 1
+        pan = .zero
     }
 
     /// Set by the canvas while a drag gesture is live; undo/redo wait for it
@@ -388,10 +510,11 @@ final class EditorModel {
     private var closed = false
 
     init(image: NSImage, workingURL: URL, captureScale: CGFloat,
-         recovery: CanvasRecovery = CanvasRecovery()) {
+         recovery: CanvasRecovery = CanvasRecovery(), isCapture: Bool = false) {
         self.baseImage = image
         self.workingURL = workingURL
         self.recovery = recovery
+        self.isCapture = isCapture
         self.captureScale = max(captureScale, 1)
         self.color = SettingsStore.shared.editorColor
         self.fontDesign = SettingsStore.shared.editorFontDesign
@@ -403,10 +526,10 @@ final class EditorModel {
         // Sized off the capture's backing scale (retina vs. not), not its content
         // dimensions — a small window shot and a huge multi-monitor shot taken on
         // the same display should get the same default thickness.
-        self.lineWidth = 3 * self.captureScale
-        self.fontSize = 18 * self.captureScale
-        self.counterSize = 21 * self.captureScale
-        self.measureSize = 18 * self.captureScale
+        self.lineWidth = SettingsStore.shared.editorLineWidth * self.captureScale
+        self.fontSize = SettingsStore.shared.editorFontSize * self.captureScale
+        self.counterSize = SettingsStore.shared.editorCounterSize * self.captureScale
+        self.measureSize = SettingsStore.shared.editorMeasureSize * self.captureScale
         if tool.isShape { lastShapeTool = tool }
         colorPanelProxy.onChange = { [weak self] in self?.setColor($0) }
     }
@@ -439,7 +562,7 @@ final class EditorModel {
 
     /// Records the current state for undo. Call once, before a logical change.
     func snapshot() {
-        recoloringID = nil
+        recoloringIDs = nil
         undoStack.append(undoState)
         redoStack.removeAll()
         trimUndoHistory()
@@ -457,7 +580,7 @@ final class EditorModel {
         guard !isDragInProgress else { return }
         finishTextEditing()
         guard let previous = undoStack.popLast() else { return }
-        recoloringID = nil
+        recoloringIDs = nil
         redoStack.append(undoState)
         undoState = previous
         clearSelectionIfMissing()
@@ -467,7 +590,7 @@ final class EditorModel {
         guard !isDragInProgress else { return }
         finishTextEditing()
         guard let next = redoStack.popLast() else { return }
-        recoloringID = nil
+        recoloringIDs = nil
         undoStack.append(undoState)
         undoState = next
         clearSelectionIfMissing()
@@ -483,7 +606,7 @@ final class EditorModel {
         snapshot()
         annotations.append(annotation)
         selectedID = annotation.id
-        tool = .select
+        if !isToolLocked { tool = .select }
     }
 
     /// Updates an annotation's endpoints (live move/resize). The caller takes
@@ -615,12 +738,15 @@ final class EditorModel {
     /// step counter takes the next sequential number rather than repeating
     /// the badge. Lines bound within the duplicated set stay bound to the
     /// copies, so a connected cluster duplicates whole.
-    func duplicateSelected() {
+    /// `offsetBy` is in points (⌥-drag passes 0: the drag itself moves the
+    /// copies). Returns each original's copy.
+    @discardableResult
+    func duplicateSelected(offsetBy points: CGFloat = 16) -> [UUID: UUID] {
         finishTextEditing()
         let originals = annotations.filter { selectedIDs.contains($0.id) }
-        guard !originals.isEmpty else { return }
+        guard !originals.isEmpty else { return [:] }
         snapshot()
-        let offset = 16 * captureScale
+        let offset = points * captureScale
         var copies: [Annotation] = []
         var copyIDs: [UUID: UUID] = [:]
         for original in originals {
@@ -642,6 +768,16 @@ final class EditorModel {
         }
         annotations.append(contentsOf: copies)
         selectedIDs = Set(copies.map(\.id))
+        return copyIDs
+    }
+
+    /// ⌘A. While text is being typed it selects that text instead.
+    func selectAll() {
+        guard editingTextID == nil else {
+            NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
+            return
+        }
+        selectedIDs = Set(annotations.map(\.id))
     }
 
     /// The in-progress arrow-key burst: which annotations it moves, the undo
@@ -688,7 +824,14 @@ final class EditorModel {
         let ids = liveSelectedIDs
         guard !ids.isEmpty else { return }
         snapshot()
+        let removedSteps = annotations.filter { ids.contains($0.id) && $0.kind == .counter }.map(\.number)
         annotations.removeAll { ids.contains($0.id) }
+        // The remaining steps close ranks, so the sequence never shows a gap.
+        for index in annotations.indices where annotations[index].kind == .counter {
+            let number = annotations[index].number
+            annotations[index].number -= removedSteps.count { $0 < number }
+        }
+        nextCounter = max(nextCounter - removedSteps.count, 1)
         // Lines bound to a deleted shape stay where they are, just unbound.
         for index in annotations.indices {
             if let binding = annotations[index].startBinding, ids.contains(binding.shapeID) {
@@ -735,14 +878,15 @@ final class EditorModel {
         cropRect = CGRect(x: x.rounded(), y: y.rounded(), width: width, height: height)
     }
 
-    /// Crops the capture to `cropRect`: replaces the base image, shifts every
-    /// annotation into the new coordinate space, and asks the window to resize.
+    /// Crops the capture to `cropRect`: replaces the base image and shifts
+    /// every annotation into the new coordinate space. One undo step.
     func applyCrop() {
         guard let rect = cropRect?.integral, rect.width >= 1, rect.height >= 1,
               let base = baseImage.cgImage(forProposedRect: nil, context: nil, hints: nil),
               let cropped = base.cropping(to: rect) else { return }
         isCropping = false
         cropRect = nil
+        snapshot()
 
         annotations = annotations.map { annotation in
             var moved = annotation
@@ -750,19 +894,7 @@ final class EditorModel {
             moved.end = CGPoint(x: annotation.end.x - rect.minX, y: annotation.end.y - rect.minY)
             return moved
         }
-        // A crop is a structural change, so it isn't part of the annotation undo
-        // history; clear it to avoid restoring coordinates from the old space.
-        undoStack.removeAll()
-        redoStack.removeAll()
-        recoloringID = nil
-
-        baseImage = NSImage(cgImage: cropped, size: rect.size)
-        pixelSize = rect.size
-        cropGeneration += 1
-        eyedropperRep = nil
-        mosaicCache.removeAll()
-        zoom = 1
-        pan = .zero
+        replaceBaseImage(NSImage(cgImage: cropped, size: rect.size), pixelSize: rect.size)
         selectedID = nil
     }
 
@@ -785,27 +917,25 @@ final class EditorModel {
 
     // MARK: - Text style
 
-    /// Multiplies the current text size — the selected/edited text's own size
-    /// when one exists (so a small zoom-created label steps from where it is,
-    /// rather than snapping to the session default), the default otherwise.
+    /// Multiplies the text size: the remembered default, and the selected or
+    /// edited text's own size when there is one — stepped from where it is
+    /// (a small zoom-created label doesn't snap to the default), the way a
+    /// recolor changes both the selection and what's drawn next.
     func adjustFontSize(by factor: CGFloat) {
-        if !adjustSelectionSize(of: .text, by: factor) {
-            fontSize = clampSize(fontSize * factor)
-        }
+        adjustSelectionSize(of: .text, by: factor)
+        fontSize = clampSize(fontSize * factor)
     }
 
-    /// Multiplies the current step-counter size — likewise selection-first.
+    /// Multiplies the step-counter size — likewise.
     func adjustCounterSize(by factor: CGFloat) {
-        if !adjustSelectionSize(of: .counter, by: factor) {
-            counterSize = clampSize(counterSize * factor)
-        }
+        adjustSelectionSize(of: .counter, by: factor)
+        counterSize = clampSize(counterSize * factor)
     }
 
-    /// Multiplies the current measure-label size — likewise selection-first.
+    /// Multiplies the measure-label size — likewise.
     func adjustMeasureSize(by factor: CGFloat) {
-        if !adjustSelectionSize(of: .measure, by: factor) {
-            measureSize = clampSize(measureSize * factor)
-        }
+        adjustSelectionSize(of: .measure, by: factor)
+        measureSize = clampSize(measureSize * factor)
     }
 
     func setFontDesign(_ design: FontDesign) {
@@ -824,15 +954,67 @@ final class EditorModel {
         }
     }
 
-    /// Scales the selected annotation's own size. Returns false when nothing
-    /// of `kind` is selected. Clamped with a lower floor than the session
-    /// default, so delicate zoom-created annotations stay steppable.
-    private func adjustSelectionSize(of kind: EditTool, by factor: CGFloat) -> Bool {
-        guard selectedIndex(of: kind) != nil else { return false }
+    /// Scales the selected annotation's own size, if one of `kind` is
+    /// selected. Clamped with a lower floor than the default, so delicate
+    /// zoom-created annotations stay steppable.
+    private func adjustSelectionSize(of kind: EditTool, by factor: CGFloat) {
         applyStyle(to: kind) {
             $0.fontSize = min(max($0.fontSize * factor, 4), self.pixelSize.height * 0.5)
         }
-        return true
+    }
+
+    // MARK: - Stroke, caps and shape of the selection
+
+    private var selectedStrokedIndex: Int? {
+        guard let id = selectedID, let index = annotations.firstIndex(where: { $0.id == id }),
+              annotations[index].kind == .line || annotations[index].kind.isShape else { return nil }
+        return index
+    }
+
+    /// What the palette's stroke stepper shows, in pixels: the selected line
+    /// or shape's own width, the default otherwise.
+    var paletteLineWidth: CGFloat {
+        selectedStrokedIndex.map { annotations[$0].lineWidth } ?? lineWidth
+    }
+
+    /// Thickens or thins by whole points: the remembered default, and the
+    /// selected line or shape when there is one.
+    func stepLineWidth(by points: CGFloat) {
+        func stepped(_ width: CGFloat) -> CGFloat {
+            min(max((width / captureScale).rounded() + points, 1), 24) * captureScale
+        }
+        lineWidth = stepped(lineWidth)
+        guard let index = selectedStrokedIndex else { return }
+        snapshot()
+        annotations[index].lineWidth = stepped(annotations[index].lineWidth)
+    }
+
+    /// The caps the palette's menus show: the selected line's own, the
+    /// defaults otherwise.
+    var paletteLineStartCap: LineCap {
+        selectedIndex(of: .line).map { annotations[$0].startCap } ?? lineStartCap
+    }
+
+    var paletteLineEndCap: LineCap {
+        selectedIndex(of: .line).map { annotations[$0].endCap } ?? lineEndCap
+    }
+
+    /// The shape the palette highlights: the selected shape's with Select
+    /// armed, the armed shape tool otherwise.
+    var paletteShape: EditTool {
+        tool == .select ? selectedAnnotation?.kind ?? tool : tool
+    }
+
+    /// A shape button: with Select armed and a shape selected it turns that
+    /// shape into the chosen one; otherwise it arms the shape tool.
+    func chooseShape(_ shape: EditTool) {
+        guard tool == .select, let index = selectedStrokedIndex, annotations[index].kind.isShape else {
+            return selectShape(shape)
+        }
+        guard annotations[index].kind != shape else { return }
+        snapshot()
+        annotations[index].kind = shape
+        syncBoundLines(to: annotations[index])
     }
 
     /// Sets one of the line tool's end decorations and restyles a selected
@@ -847,23 +1029,23 @@ final class EditorModel {
         applyStyle(to: .line) { $0.endCap = cap }
     }
 
-    /// Sets the drawing color and recolors the selected annotation, so an
+    /// Sets the drawing color and recolors the selected annotations, so an
     /// already-drawn annotation's color can be changed after the fact.
     /// Continuous color-panel drags coalesce into a single undo step
-    /// (`recoloringID` survives until any other change snapshots).
+    /// (`recoloringIDs` survives until any other change snapshots).
     func setColor(_ newColor: Color) {
         color = newColor
-        guard let id = editingTextID ?? selectedID,
-              let index = annotations.firstIndex(where: { $0.id == id }),
-              annotations[index].kind != .pixelate else { return }
-        if recoloringID != id {
+        let ids = (editingTextID.map { [$0] } ?? liveSelectedIDs)
+            .filter { annotation(id: $0)?.kind != .pixelate }
+        guard !ids.isEmpty else { return }
+        if recoloringIDs != ids {
             snapshot()
-            recoloringID = id
+            recoloringIDs = ids
         }
-        annotations[index].color = newColor
+        for id in ids { mutateAnnotation(id: id) { $0.color = newColor } }
     }
 
-    private var recoloringID: UUID?
+    private var recoloringIDs: Set<UUID>?
 
     /// The color the palette swatch shows: the selected annotation's own color
     /// when one is selected, the session default otherwise.
@@ -935,7 +1117,7 @@ final class EditorModel {
         editingIsNew = false
         defer {
             trimUndoHistory()
-            if wasNew, tool == .text { tool = .select }
+            if wasNew, tool == .text, !isToolLocked { tool = .select }
         }
         let originalText = editingOriginalText
         let undoDepth = editingUndoDepth
@@ -963,11 +1145,15 @@ final class EditorModel {
 
     // MARK: - Actions (reuse ScreenshotService)
 
-    func copy() {
+    func copy(keepingEditorOpen: Bool = false) {
         finishTextEditing()
         guard prepareExport() else { return flashExportFailure() }
         ScreenshotService.shared.copyToClipboard(workingURL, captureScale: captureScale)
-        completed(String(localized: "Copied"))
+        if keepingEditorOpen {
+            flash(String(localized: "Copied"))
+        } else {
+            completed(String(localized: "Copied"))
+        }
     }
 
     /// Writes the flattened PNG to the save folder — the capture as it looks,
@@ -975,16 +1161,43 @@ final class EditorModel {
     func export() {
         finishTextEditing()
         guard prepareExport() else { return flashExportFailure() }
-        if ScreenshotService.shared.save(workingURL, captureScale: captureScale) != nil { completed(String(localized: "Exported")) }
+        guard ScreenshotService.shared.save(workingURL, captureScale: captureScale) != nil else {
+            return flash(String(localized: "Couldn't export the image"), failure: true)
+        }
+        completed(String(localized: "Exported"))
     }
 
     private func flashExportFailure() {
         flash(String(localized: "Couldn't render the image"), failure: true)
     }
 
-    func copyText() {
-        ScreenshotService.shared.copyText(in: baseImage)
-        completed(String(localized: "Text copied"))
+    /// True while OCR waits for its area: a drag over the capture reads just
+    /// that part, a click reads all of it.
+    private(set) var isPickingText = false
+
+    /// The OCR button and ⌘T; a second press backs out.
+    func togglePickingText() {
+        finishTextEditing()
+        isPickingText.toggle()
+        if isPickingText { showTip(String(localized: "Drag over the text to copy · click for the whole image"),
+                                   symbol: "text.viewfinder") }
+    }
+
+    /// `area` is in pixels; `nil` (or a drag too small to mean a region)
+    /// reads the whole capture.
+    func copyText(in area: CGRect?) {
+        isPickingText = false
+        var image = baseImage
+        if let area = area?.integral, area.width >= 8, area.height >= 8,
+           let part = baseImage.cgImage(forProposedRect: nil, context: nil, hints: nil)?.cropping(to: area) {
+            image = NSImage(cgImage: part, size: area.size)
+        }
+        Task {
+            guard await ScreenshotService.shared.copyText(in: image) else {
+                return flash(String(localized: "No text found"), failure: true)
+            }
+            completed(String(localized: "Text copied"))
+        }
     }
 
     // MARK: - Project documents
@@ -992,17 +1205,22 @@ final class EditorModel {
     /// Seeds the editor from a reopened `.prtscn` package. Undo history starts
     /// fresh — it isn't part of the document.
     func restore(_ document: ProjectDocument, from url: URL) {
+        restore(document)
+        markSaved(to: url)
+    }
+
+    /// Seeds the annotations only — a reopened last capture stays a plain,
+    /// freely closable capture.
+    func restore(_ document: ProjectDocument) {
         annotations = document.annotations
         nextCounter = max(document.nextCounter, (annotations.map(\.number).max() ?? 0) + 1)
-        markSaved(to: url)
     }
 
     /// Seeds the editor from a crash snapshot. It stays unsaved until saved:
     /// back to the project it came from when that still exists, otherwise
     /// wherever the user picks.
     func restoreRecovered(_ document: ProjectDocument, originalDocumentURL: URL?) {
-        annotations = document.annotations
-        nextCounter = max(document.nextCounter, (annotations.map(\.number).max() ?? 0) + 1)
+        restore(document)
         documentURL = originalDocumentURL.flatMap {
             FileManager.default.fileExists(atPath: $0.path) ? $0 : nil
         }
@@ -1265,8 +1483,7 @@ final class EditorModel {
         // A friendly-named copy so share targets get a sensible filename.
         removeSharedFile()
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent(
-                "\(SettingsStore.shared.sanitizedFilenamePrefix) \(Self.shareTimestamp()).png")
+            .appendingPathComponent("\(ScreenshotService.exportName()).png")
         try? FileManager.default.removeItem(at: url)
         let copied = (try? FileManager.default.copyItem(at: workingURL, to: url)) != nil
         if copied { sharedFileURL = url }
@@ -1284,13 +1501,6 @@ final class EditorModel {
         sharedFileURL = nil
     }
 
-    private static func shareTimestamp() -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
-        return formatter.string(from: Date())
-    }
-
     /// Finishes an action: closes the editor or shows a confirmation, per the
     /// user's "close editor after action" preference.
     private func completed(_ message: String) {
@@ -1304,6 +1514,8 @@ final class EditorModel {
 
     func close() {
         guard !closed else { return }
+        finishTextEditing()
+        keepAsLastCapture()
         closed = true
         pendingRecoverySnapshot?.cancel()
         recovery.discard()
@@ -1312,6 +1524,17 @@ final class EditorModel {
         // Deferred: close can run from inside a toolbar or button action,
         // whose target the teardown would release mid-call.
         DispatchQueue.main.async { [onClose] in onClose?() }
+    }
+
+    /// Whatever closing would otherwise throw away stays reopenable from the
+    /// menu bar. A project saved to disk needs no second copy.
+    private func keepAsLastCapture() {
+        guard isCapture || hasWorkToRecover,
+              let base = baseImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
+        let box = SendableImage(image: base)
+        LastCapture.shared.keep(projectDocument) {
+            box.image.flatMap { NSBitmapImageRep(cgImage: $0).representation(using: .png, properties: [:]) }
+        }
     }
 
     // MARK: - Export
@@ -1497,7 +1720,7 @@ final class EditorModel {
 
         let string = NSAttributedString(string: "\(annotation.number)", attributes: [
             .font: NSFont.systemFont(ofSize: annotation.fontSize, weight: .bold),
-            .foregroundColor: NSColor.white,
+            .foregroundColor: NSColor(annotation.color).legibleLabelColor,
         ])
         let size = string.size()
         guard let labelImage = Self.renderTextImage(lines: [string], lineHeight: size.height,
@@ -1519,7 +1742,7 @@ final class EditorModel {
                                             segmentLength: geometry.length)
         let string = NSAttributedString(string: labelText, attributes: [
             .font: NSFont.systemFont(ofSize: fontSize, weight: .semibold),
-            .foregroundColor: NSColor.white,
+            .foregroundColor: NSColor(color).legibleLabelColor,
         ])
         let size = string.size()
         guard size.width > 0, size.height > 0 else { return }

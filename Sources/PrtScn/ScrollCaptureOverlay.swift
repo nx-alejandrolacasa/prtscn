@@ -280,7 +280,9 @@ private final class ScrollSelectView: NSView {
         border.lineWidth = 1.5
         border.stroke()
 
-        drawLabel("\(Int(rect.width)) × \(Int(rect.height)) pt",
+        let tooSmall = rect.width < Self.minSelection || rect.height < Self.minSelectionHeight
+        drawLabel("\(Int(rect.width)) × \(Int(rect.height)) pt"
+                  + (tooSmall ? String(localized: "   ·   Too small to scroll, keep dragging") : ""),
                   suffix: String(localized: "   ·   ⌘ scrolling up ↑"), progress: indicatorProgress,
                   centeredAbove: CGPoint(x: rect.midX, y: rect.minY - 8))
     }

@@ -58,6 +58,14 @@ extension Color {
 }
 
 extension NSColor {
+    /// Black on light fills, white otherwise — for text drawn on a badge of
+    /// this color (white numerals vanish on a white or yellow badge).
+    var legibleLabelColor: NSColor {
+        let rgb = usingColorSpace(.sRGB) ?? .black
+        let luma = 0.299 * rgb.redComponent + 0.587 * rgb.greenComponent + 0.114 * rgb.blueComponent
+        return luma > 0.7 ? .black : .white
+    }
+
     var hexString: String {
         let rgb = usingColorSpace(.sRGB) ?? .black
         // Wide-gamut (P3) colors can convert to sRGB components outside 0…1;

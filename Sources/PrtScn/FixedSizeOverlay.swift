@@ -212,18 +212,28 @@ private final class FixedSizeOverlayView: NSView {
         NSColor.black.withAlphaComponent(0.008).setFill()
         rect.fill(using: .copy)
 
+        // A size larger than this screen is shrunk to fit. The rectangle can
+        // then span the whole screen, leaving no dimmed surround and no room
+        // for an outer border — so the border moves inside, heavier, and the
+        // label up to eye level.
+        let fits = rect.width >= pointSize.width && rect.height >= pointSize.height
         NSColor.white.withAlphaComponent(0.9).setStroke()
-        let border = NSBezierPath(rect: rect.insetBy(dx: -0.75, dy: -0.75))
-        border.lineWidth = 1.5
+        let border = NSBezierPath(rect: rect.insetBy(dx: fits ? -0.75 : 2, dy: fits ? -0.75 : 2))
+        border.lineWidth = fits ? 1.5 : 4
         border.stroke()
 
-        drawLabel(near: rect)
+        drawLabel(near: rect, fits: fits)
     }
 
     /// "1280 × 720 px · Click to capture, Esc to cancel" in a dark pill under
     /// the rectangle (or inside it when there's no room below).
-    private func drawLabel(near rect: CGRect) {
-        let text = "\(Int(targetSize.width)) × \(Int(targetSize.height)) \(unit.label)" +
+    private func drawLabel(near rect: CGRect, fits: Bool) {
+        // When shrunk, the label says so, with the size that will come out.
+        let unitsPerPoint = targetSize.width / max(pointSize.width, 1)
+        let shown = fits ? targetSize
+            : CGSize(width: rect.width * unitsPerPoint, height: rect.height * unitsPerPoint)
+        let text = "\(Int(shown.width.rounded())) × \(Int(shown.height.rounded())) \(unit.label)" +
+            (fits ? "" : String(localized: "   ·   Shrunk to fit this screen")) +
             String(localized: "   ·   Click to capture, Esc to cancel")
         let string = NSAttributedString(string: text, attributes: [
             .font: NSFont.systemFont(ofSize: 12, weight: .medium),
@@ -234,6 +244,8 @@ private final class FixedSizeOverlayView: NSView {
 
         var origin = CGPoint(x: rect.midX - pillSize.width / 2, y: rect.minY - pillSize.height - 8)
         if origin.y < 8 { origin.y = rect.minY + 8 }
+        // Eye level: three quarters of the way up (the view isn't flipped).
+        if !fits { origin.y = rect.minY + rect.height * 0.75 - pillSize.height / 2 }
         origin.x = min(max(origin.x, 8), bounds.width - pillSize.width - 8)
 
         let pill = CGRect(origin: origin, size: pillSize)

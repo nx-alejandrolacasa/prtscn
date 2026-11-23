@@ -31,6 +31,7 @@ final class ScreenshotService {
     /// in an async task so we never block the main thread while the user is
     /// dragging out an interactive selection.
     func capture(_ mode: CaptureMode) {
+        guard screenRecordingAllowsCapture() else { return }
         // Fixed size runs its own prompt → overlay flow; the overlay calls
         // back into `captureRect` with the clicked rectangle. Re-firing the
         // hotkey while the overlay is up cancels it (acts as a toggle).
@@ -52,12 +53,91 @@ final class ScreenshotService {
             }
             return
         }
+        // No area yet this session: there is nothing to repeat, so select one.
+        if mode == .previousArea {
+            if let lastArea { captureRect(lastArea) } else { capture(.region) }
+            return
+        }
         // Region/window/full-screen shell out to `screencapture` directly;
         // ignore presses while any capture is still running (see captureInFlight).
         guard !captureInFlight, !FixedSizeOverlay.shared.isActive,
               !ScrollCaptureController.shared.isActive else { return }
         captureInFlight = true
         Task { await performCapture(mode) }
+    }
+
+    private var didExplainScreenRecording = false
+
+    /// Without Screen Recording access a capture shows the wallpaper and
+    /// nothing else, with no hint why. The first time, macOS's own prompt
+    /// does the explaining; after that, ours does — once per launch, and
+    /// never blocking, since the pre-flight can lag behind a fresh grant.
+    private func screenRecordingAllowsCapture() -> Bool {
+        guard !CGPreflightScreenCaptureAccess(), !didExplainScreenRecording else { return true }
+        didExplainScreenRecording = true
+        let requestedKey = "screenRecordingRequested"
+        guard UserDefaults.standard.bool(forKey: requestedKey) else {
+            UserDefaults.standard.set(true, forKey: requestedKey)
+            CGRequestScreenCaptureAccess()
+            return true
+        }
+        NSApp.activate()
+        let alert = NSAlert()
+        alert.messageText = String(localized: "PrtScn needs Screen Recording access")
+        alert.informativeText = String(localized: """
+            Without it, captures show only the desktop picture.
+
+            Enable PrtScn in System Settings → Privacy & Security → \
+            Screen & System Audio Recording, then relaunch it.
+            """)
+        alert.addButton(withTitle: String(localized: "Open System Settings"))
+        alert.addButton(withTitle: String(localized: "Capture Anyway"))
+        guard alert.runModal() == .alertFirstButtonReturn,
+              let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+        else { return true }
+        NSWorkspace.shared.open(url)
+        return false
+    }
+
+    // MARK: - Previous area
+
+    /// The last captured rectangle (Cocoa screen coordinates), for Capture
+    /// Previous Area. Forgotten at quit.
+    private var lastArea: CGRect?
+    private var selectionDown: NSPoint?
+    private var selectionUp: NSPoint?
+
+    /// `screencapture -i` never says which rectangle was selected, and its
+    /// selection UI keeps the mouse events to itself — so the button and
+    /// pointer are polled while it runs: where the last press began and where
+    /// the pointer was when it let go, combined with the capture's size
+    /// afterwards.
+    private func watchSelection() -> Timer {
+        selectionDown = nil
+        selectionUp = nil
+        var wasPressed = false
+        let timer = Timer(timeInterval: 1.0 / 120, repeats: true) { _ in
+            MainActor.assumeIsolated {
+                let pressed = NSEvent.pressedMouseButtons & 1 != 0
+                if pressed, !wasPressed { Self.shared.selectionDown = NSEvent.mouseLocation }
+                if pressed { Self.shared.selectionUp = NSEvent.mouseLocation }
+                wasPressed = pressed
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        return timer
+    }
+
+    /// The selected rectangle, from where the drag started and ended and the
+    /// size (in points) of what came out. The release point is always a
+    /// corner — the press isn't once Space moved the selection — so the
+    /// rectangle hangs off the release, toward the press. `nil` for a click
+    /// (a Space-switched window pick), which selects no rectangle.
+    nonisolated static func selectionRect(down: NSPoint, up: NSPoint, size: CGSize) -> CGRect? {
+        guard abs(up.x - down.x) > 2 || abs(up.y - down.y) > 2, size.width > 0, size.height > 0 else { return nil }
+        return CGRect(x: up.x >= down.x ? up.x - size.width : up.x,
+                      y: up.y >= down.y ? up.y - size.height : up.y,
+                      width: size.width, height: size.height)
     }
 
     /// Captures an exact screen rectangle, as reported by the fixed-size
@@ -70,6 +150,7 @@ final class ScreenshotService {
                              width: rect.width, height: rect.height)
         guard !captureInFlight else { return }
         captureInFlight = true
+        lastArea = rect
         Task { await performCapture(.fixedSize, rect: flipped) }
     }
 
@@ -108,8 +189,14 @@ final class ScreenshotService {
         // ignore the flag anyway, and a fixed-size shot would always have the
         // arrow dead center (it sits where the user just clicked).
         if SettingsStore.shared.includePointer, mode == .fullScreen { arguments.append("-C") }
+        // With one output file `screencapture` grabs the main display only.
+        if mode == .fullScreen, let display = Self.screencaptureDisplayUnderMouse() {
+            arguments += ["-D", String(display)]
+        }
 
+        let selectionWatch = mode == .region ? watchSelection() : nil
         let succeeded = await Self.runScreencapture(arguments: arguments + [tmp.path])
+        selectionWatch?.invalidate()
         captureInFlight = false
         let exists = FileManager.default.fileExists(atPath: tmp.path)
         log.info("capture \(mode.rawValue, privacy: .public) — succeeded=\(succeeded), fileExists=\(exists)")
@@ -118,6 +205,19 @@ final class ScreenshotService {
         // check the file actually exists before showing a preview.
         guard succeeded, exists else {
             cleanup(tmp)
+            return
+        }
+
+        if mode == .region {
+            let size = NSImage(contentsOf: tmp)?.size ?? .zero
+            if let selectionDown, let selectionUp,
+               let area = Self.selectionRect(down: selectionDown, up: selectionUp, size: size) {
+                lastArea = area
+            }
+        }
+
+        if mode == .text {
+            await copyRecognizedText(at: tmp, captureScale: Self.captureScale(of: tmp))
             return
         }
 
@@ -150,6 +250,33 @@ final class ScreenshotService {
 
         PreviewController.shared.show(imageURL: tmp, captureScale: captureScale,
                                       pristineImage: pristine)
+    }
+
+    /// Capture Text: the region's text lands on the clipboard, confirmed by
+    /// the menu-bar icon, and no preview shows. With nothing readable the
+    /// preview does show, saying so like the other OCR paths — and leaving
+    /// the capture at hand.
+    private func copyRecognizedText(at url: URL, captureScale: CGFloat) async {
+        guard let image = NSImage(contentsOf: url), await copyText(in: image) else {
+            NSSound.beep()
+            return PreviewController.shared.show(imageURL: url, captureScale: captureScale,
+                                                 notice: String(localized: "No text found"))
+        }
+        MenuBarState.shared.flashCaptureFeedback()
+        LastCapture.shared.keep(imageAt: url, captureScale: captureScale)
+        cleanup(url)
+    }
+
+    /// The display under the pointer as `screencapture -D` numbers them: from
+    /// 1, in Core Graphics' active-display order (main first). `nil` with a
+    /// single display, where the flag is pointless.
+    private static func screencaptureDisplayUnderMouse() -> Int? {
+        guard NSScreen.screens.count > 1, let id = NSScreen.underMouse?.displayID else { return nil }
+        var count: UInt32 = 0
+        CGGetActiveDisplayList(0, nil, &count)
+        var displays = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        CGGetActiveDisplayList(count, &displays, &count)
+        return displays.firstIndex(of: id).map { $0 + 1 }
     }
 
     /// The backing scale the capture was taken at: pixel width ÷ logical (point)
@@ -404,7 +531,7 @@ final class ScreenshotService {
         if !(valid && isDirectory.boolValue) {
             folder = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask)[0]
         }
-        let baseName = "\(SettingsStore.shared.sanitizedFilenamePrefix) \(Self.timestamp())"
+        let baseName = Self.exportName()
 
         // Same-second saves collide on the timestamped name; suffix with
         // " (2)", " (3)"… until the name — and, for Both, its native `@Nx`
@@ -496,21 +623,18 @@ final class ScreenshotService {
     /// puts the recognized text on the clipboard. No network, no dependencies —
     /// this is the same engine that powers Live Text. Operates on the in-memory
     /// image so it's unaffected by the temp file being cleaned up afterwards.
-    /// Fire-and-forget: the recognition itself runs off the main actor.
-    func copyText(in image: NSImage) {
-        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
-            log.error("OCR: could not rasterize image")
-            return
+    /// Returns whether any text was found; the clipboard is left alone when
+    /// none was. The recognition itself runs off the main actor.
+    func copyText(in image: NSImage) async -> Bool {
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
+              let text = await Self.recognizeText(in: cgImage) else {
+            log.info("OCR: no text recognized")
+            return false
         }
-        Task {
-            guard let text = await Self.recognizeText(in: cgImage) else {
-                log.info("OCR: no text recognized")
-                return
-            }
-            let pasteboard = NSPasteboard.general
-            pasteboard.clearContents()
-            pasteboard.setString(text, forType: .string)
-        }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        return true
     }
 
     /// Recognizes text in `image`, returning the lines joined with newlines, or
@@ -534,6 +658,12 @@ final class ScreenshotService {
     /// Removes a temp capture once we're done with it.
     func cleanup(_ url: URL) {
         try? FileManager.default.removeItem(at: url)
+    }
+
+    /// "PrtScn 2026-01-01 at 10.00.00" — what an exported, shared or
+    /// dragged-out capture is called, minus the extension.
+    static func exportName() -> String {
+        "\(SettingsStore.shared.sanitizedFilenamePrefix) \(timestamp())"
     }
 
     private static func timestamp() -> String {

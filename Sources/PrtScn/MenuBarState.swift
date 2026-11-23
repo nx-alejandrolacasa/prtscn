@@ -19,8 +19,9 @@ final class MenuBarState {
 
     private init() {}
 
-    /// Flash the icon for a moment. Rapid captures restart the timer instead
-    /// of stacking flashes.
+    /// Flash the icon for a moment — on a capture, and again when one is
+    /// copied or saved with no window left to say so. Rapid flashes restart
+    /// the timer instead of stacking.
     func flashCaptureFeedback() {
         flashTask?.cancel()
         flashingCapture = true
