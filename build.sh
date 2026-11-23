@@ -73,27 +73,52 @@ done
 # dropped in that case so nothing points at an Assets.car that isn't there.
 #
 # Both icons come from tools/IconGenerator.swift; see CLAUDE.md → "App icon".
-LAYERED_ICON=0
-if command -v actool >/dev/null 2>&1 && [[ -d "Resources/AppIcon.icon" ]]; then
-  ICON_TMP="$(mktemp -d)"
-  # Treat a failure here as "no layered icon", not as a fatal error. actool
-  # drives Xcode's XPC helpers (ibtoold, CoreSimulatorService) and dies when
-  # they're unavailable — inside a sandboxed shell, for instance. Under `set -e`
-  # that aborted the script mid-assembly, leaving an app whose Info.plist was
-  # still the unstamped template: CFBundleExecutable said "PrtScn" while the
-  # binary was "PrtScn Dev", which macOS rejects on launch as "damaged or
-  # incomplete". Assets.car has to exist for the compile to count as a success —
-  # actool has been seen exiting 0 without writing anything.
-  if actool "Resources/AppIcon.icon" \
-      --compile "$APP/Contents/Resources" \
+ICON_SOURCE="Resources/AppIcon.icon"
+ICON_CACHE=".build/icon-cache"
+
+# actool is the slow step of an otherwise quick bundle assembly, so its
+# Assets.car is kept in .build and only recompiled when something inside the
+# icon document is newer. `rm -rf .build/icon-cache` forces a recompile.
+layered_icon_is_stale() {
+  [[ ! -f "$ICON_CACHE/Assets.car" ]] \
+    || [[ -n "$(find "$ICON_SOURCE" -newer "$ICON_CACHE/Assets.car" -print -quit)" ]]
+}
+
+# Treat a failure here as "no layered icon", not as a fatal error. actool
+# drives Xcode's XPC helpers (ibtoold, CoreSimulatorService) and dies when
+# they're unavailable — inside a sandboxed shell, for instance. Under `set -e`
+# that aborted the script mid-assembly, leaving an app whose Info.plist was
+# still the unstamped template: CFBundleExecutable said "PrtScn" while the
+# binary was "PrtScn Dev", which macOS rejects on launch as "damaged or
+# incomplete". Assets.car has to exist for the compile to count as a success —
+# actool has been seen exiting 0 without writing anything.
+compile_layered_icon() {
+  rm -rf "$ICON_CACHE"
+  mkdir -p "$ICON_CACHE"
+  actool "$ICON_SOURCE" \
+      --compile "$ICON_CACHE" \
       --platform macosx \
       --minimum-deployment-target 26.0 \
       --app-icon AppIcon \
-      --output-partial-info-plist "$ICON_TMP/icon.plist" >/dev/null \
-     && [[ -f "$APP/Contents/Resources/Assets.car" ]]; then
+      --output-partial-info-plist "$ICON_CACHE/icon.plist" >/dev/null \
+    && [[ -f "$ICON_CACHE/Assets.car" ]]
+}
+
+LAYERED_ICON=0
+ICON_STATUS="actool missing or failed"
+if [[ -d "$ICON_SOURCE" ]]; then
+  if ! layered_icon_is_stale; then
     LAYERED_ICON=1
+    ICON_STATUS="Reused cached layered icon ($ICON_SOURCE unchanged)."
+  elif command -v actool >/dev/null 2>&1 && compile_layered_icon; then
+    LAYERED_ICON=1
+    ICON_STATUS="Compiled $ICON_SOURCE (layered macOS 26 icon)."
+  else
+    rm -rf "$ICON_CACHE"
   fi
-  rm -rf "$ICON_TMP"
+fi
+if (( LAYERED_ICON )); then
+  cp "$ICON_CACHE/Assets.car" "$APP/Contents/Resources/Assets.car"
 fi
 
 # actool derives its own AppIcon.icns from the layered document, but only up to
@@ -103,7 +128,7 @@ fi
 cp "Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 
 if (( LAYERED_ICON )); then
-  echo "Compiled Resources/AppIcon.icon (layered macOS 26 icon)."
+  echo "$ICON_STATUS"
 else
   # Nothing must point at an Assets.car that isn't there.
   /usr/libexec/PlistBuddy -c "Delete :CFBundleIconName" \
