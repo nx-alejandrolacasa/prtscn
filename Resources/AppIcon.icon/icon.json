@@ -1,40 +1,21 @@
 {
   "fill" : {
-    "linear-gradient" : [
-      "extended-srgb:0.53300,0.66700,0.71000,1.00000",
-      "extended-srgb:0.44700,0.56500,0.65500,1.00000"
-    ]
+    "solid" : "extended-srgb:0.73414,0.66136,0.54850,1.00000"
   },
   "groups" : [
     {
       "layers" : [
         {
-          "glass" : true,
-          "image-name" : "front-window.svg",
-          "name" : "Front Window"
+          "glass" : false,
+          "image-name" : "keycap.png",
+          "name" : "Keycap"
         }
       ],
       "shadow" : {
-        "kind" : "neutral",
+        "kind" : "none",
         "opacity" : 0.5
       },
-      "translucency" : {
-        "enabled" : false,
-        "value" : 0.5
-      }
-    },
-    {
-      "layers" : [
-        {
-          "glass" : true,
-          "image-name" : "back-window.svg",
-          "name" : "Back Window"
-        }
-      ],
-      "shadow" : {
-        "kind" : "neutral",
-        "opacity" : 0.5
-      },
+      "specular" : false,
       "translucency" : {
         "enabled" : false,
         "value" : 0.5
