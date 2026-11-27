@@ -18,7 +18,7 @@ enum PreviewAction: String, CaseIterable, Identifiable {
         case .edit: String(localized: "Edit")
         case .copy: String(localized: "Copy")
         case .ocr: String(localized: "OCR")
-        case .save: String(localized: "Export")
+        case .save: String(localized: "Save")
         case .pin: String(localized: "Pin")
         case .discard: String(localized: "Discard")
         }
@@ -30,7 +30,7 @@ enum PreviewAction: String, CaseIterable, Identifiable {
         case .edit: "pencil.tip.crop.circle"
         case .copy: "document.on.document"
         case .ocr: "text.viewfinder"
-        case .save: "arrow.up.document"
+        case .save: "arrow.down.document"
         case .pin: "pin"
         case .discard: "trash"
         }
@@ -56,21 +56,21 @@ enum PreviewAction: String, CaseIterable, Identifiable {
         case .edit: "⏎"
         case .copy: "⌘C"
         case .ocr: "⌘T"
-        case .save: "⌘E"
+        case .save: "⌘S"
         case .pin: "⌘P"
         case .discard: "⌫"
         }
     }
 
     /// The SwiftUI keyboard shortcut that triggers this action while the
-    /// preview is focused: Enter → Edit, ⌘C → Copy, ⌘T → OCR, ⌘E → Export,
+    /// preview is focused: Enter → Edit, ⌘C → Copy, ⌘T → OCR, ⌘S → Save,
     /// ⌘P → Pin, Delete → Discard.
     var keyboardShortcut: KeyboardShortcut {
         switch self {
         case .edit: KeyboardShortcut(.return, modifiers: [])
         case .copy: KeyboardShortcut("c", modifiers: .command)
         case .ocr: KeyboardShortcut("t", modifiers: .command)
-        case .save: KeyboardShortcut("e", modifiers: .command)
+        case .save: KeyboardShortcut("s", modifiers: .command)
         case .pin: KeyboardShortcut("p", modifiers: .command)
         case .discard: KeyboardShortcut(.delete, modifiers: [])
         }

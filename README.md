@@ -42,7 +42,7 @@ eating your battery — just system frameworks, doing exactly what you asked.
   Text** sends a region's text straight to the clipboard.
 - ↩️ **Reopen Last Capture** — a discarded shot or an editor closed with Esc
   comes back from the menu bar, annotations still editable.
-- 🪄 **Cursor-anchored preview** with Copy / Export / Edit / Copy Text (OCR),
+- 🪄 **Cursor-anchored preview** with Copy / Save / Edit / Copy Text (OCR),
   a hover-to-pause auto-dismiss countdown, and drag-to-export straight from
   the thumbnail.
 - ✏️ **In-app annotation editor** — lines/arrows with a configurable

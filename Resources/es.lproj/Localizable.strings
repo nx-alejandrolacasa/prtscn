@@ -28,7 +28,7 @@
 "Drop into any app" = "Suelta en cualquier app";
 
 /* Default action on dismiss */
-"Export to disk" = "Exportar al disco";
+"Save to disk" = "Guardar en el disco";
 "Copy to clipboard" = "Copiar al portapapeles";
 "Open in Editor" = "Abrir en el editor";
 
@@ -67,6 +67,7 @@
 "Capture" = "Captura";
 "Preview" = "Previsualización";
 "Editor" = "Editor";
+"Advanced" = "Avanzado";
 "Hotkeys" = "Atajos";
 "About" = "Acerca de";
 

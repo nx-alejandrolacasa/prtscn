@@ -32,7 +32,7 @@
 "Drop into any app" = "Drop into any app";
 
 /* Default action on dismiss */
-"Export to disk" = "Export to disk";
+"Save to disk" = "Save to disk";
 "Copy to clipboard" = "Copy to clipboard";
 "Open in Editor" = "Open in Editor";
 
@@ -71,6 +71,7 @@
 "Capture" = "Capture";
 "Preview" = "Preview";
 "Editor" = "Editor";
+"Advanced" = "Advanced";
 "Hotkeys" = "Hotkeys";
 "About" = "About";
 

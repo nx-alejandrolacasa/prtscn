@@ -37,30 +37,30 @@ struct MenuContent: View {
                 captureItem(.window, "macwindow")
                 captureItem(.fullScreen, "display")
             }
-            Section {
+            Section("Advanced") {
                 captureItem(.fixedSize, "aspectratio", asksFirst: true)
                 captureItem(.scrolling, "rectangle.expand.vertical")
                 captureItem(.text, "text.viewfinder")
             }
 
-            Divider()
-
-            Button {
-                BlankCanvas.open()
-            } label: {
-                Label("New Blank Canvas", systemImage: "plus.rectangle")
+            Section("Editor") {
+                Button {
+                    BlankCanvas.open()
+                } label: {
+                    Label("New Blank Canvas", systemImage: "plus.rectangle")
+                }
+                Button {
+                    EditorController.shared.openFileWithPanel()
+                } label: {
+                    Label("Open File…", systemImage: "arrow.up.forward.square")
+                }
+                Button {
+                    LastCapture.shared.reopen()
+                } label: {
+                    Label("Reopen Last Capture", systemImage: "arrow.uturn.backward")
+                }
+                .disabled(!LastCapture.shared.exists)
             }
-            Button {
-                EditorController.shared.openFileWithPanel()
-            } label: {
-                Label("Open File…", systemImage: "arrow.up.forward.square")
-            }
-            Button {
-                LastCapture.shared.reopen()
-            } label: {
-                Label("Reopen Last Capture", systemImage: "arrow.uturn.backward")
-            }
-            .disabled(!LastCapture.shared.exists)
 
             Divider()
 

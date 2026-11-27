@@ -142,7 +142,7 @@ struct EditorView: View {
                     Image(systemName: "document.on.document").font(.system(size: 15, weight: .medium))
                 }
                 PaletteButton(help: String(localized: "Export as PNG (⌘E)"), action: model.export) {
-                    Image(systemName: "arrow.up.document").font(.system(size: 15, weight: .medium))
+                    Image(systemName: "arrow.down.document").font(.system(size: 15, weight: .medium))
                 }
 
                 Divider().frame(height: 20)

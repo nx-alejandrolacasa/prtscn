@@ -119,7 +119,7 @@ final class PreviewModel {
     }
 
     /// Auto-dismiss (timeout). An untouched capture gets the user's configured
-    /// default action (Export by default) so it isn't silently lost. (Esc is
+    /// default action (Save by default) so it isn't silently lost. (Esc is
     /// different: it explicitly discards — see PreviewCard's escape handler.)
     /// A no-op once an action is running: that action closes the card itself.
     func dismiss() {

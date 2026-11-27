@@ -901,7 +901,7 @@ final class EditorToolbarDelegate: NSObject, NSToolbarDelegate, NSSharingService
         case Self.copy:
             spec = ("document.on.document", String(localized: "Copy"), String(localized: "Copy (⌘C)"), #selector(copyAction))
         case Self.export:
-            spec = ("arrow.up.document", String(localized: "Export"), String(localized: "Export as PNG (⌘E)"), #selector(exportAction))
+            spec = ("arrow.down.document", String(localized: "Export"), String(localized: "Export as PNG (⌘E)"), #selector(exportAction))
         case Self.copyText:
             spec = ("text.viewfinder", String(localized: "OCR"), String(localized: "Copy text with OCR (⌘T)"), #selector(copyTextAction))
         default:
